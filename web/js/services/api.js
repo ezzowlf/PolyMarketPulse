@@ -4,7 +4,7 @@
 const Api = {
   async _get(path) {
     const res = await fetch(path);
-    if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
+    if (!res.ok) throw await Api._error(path, res);
     return res.json();
   },
   async _send(path, method, body) {
@@ -13,8 +13,20 @@ const Api = {
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
-    if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
+    if (!res.ok) throw await Api._error(path, res);
     return res.json();
+  },
+  async _error(path, res) {
+    let detail = "";
+    try {
+      detail = (await res.json()).detail || "";
+    } catch {
+      /* body wasn't JSON */
+    }
+    const err = new Error(`${path} -> HTTP ${res.status}${detail ? `: ${detail}` : ""}`);
+    err.status = res.status;
+    err.detail = detail;
+    return err;
   },
   health: () => Api._get("/health"),
   providers: () => Api._get("/providers"),
@@ -62,4 +74,10 @@ const Api = {
   compare: () => Api._get("/compare"),
   historyFull: (marketId) => Api._get(`/history/full/${encodeURIComponent(marketId)}`),
   explain: (marketId, mode) => Api._get(`/explain/${encodeURIComponent(marketId)}?mode=${mode}`),
+  aiStatus: () => Api._get("/ai/status"),
+  aiExplainMarket: (marketId) => Api._send(`/ai/explain-market/${encodeURIComponent(marketId)}`, "POST"),
+  aiExplainSignal: (signalId) => Api._send(`/ai/explain-signal/${signalId}`, "POST"),
+  aiAnalyzeNews: (marketId) => Api._send(`/ai/analyze-news/${encodeURIComponent(marketId)}`, "POST"),
+  aiCompare: (marketIds) => Api._send("/ai/compare", "POST", { market_ids: marketIds }),
+  aiAsk: (question, marketId) => Api._send("/ai/ask", "POST", { question, market_id: marketId || null }),
 };

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
 from contextlib import asynccontextmanager
@@ -11,6 +12,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .ai import service as ai_service
+from .ai.client import (
+    AIContextError,
+    AIDisabledError,
+    AINetworkError,
+    AIRateLimitError,
+    AIResponseError,
+    AITimeoutError,
+)
+from .ai.schemas import AIAnalysisResponse, AIStatusResponse, AskRequest, CompareRequest
 from .config import Settings
 from .providers.registry import create_provider, list_provider_names
 from .stats import compute_signal_stats
@@ -749,6 +760,83 @@ def explain(market_id: str, mode: str = "movement", storage: Storage = Depends(g
     }
     handler = handlers.get(mode, explain_market_movement)
     return handler(storage.connection, market_id).as_dict()
+
+
+def _handle_ai_errors(func):
+    """Maps our internal AI exception types onto stable HTTP status codes.
+    Error messages here are already redacted by the ai.client layer — never
+    pass through a raw upstream exception string."""
+
+    @functools.wraps(func)
+    def _wrapped(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except AIDisabledError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except AIContextError as exc:
+            raise HTTPException(status_code=424, detail=str(exc)) from exc
+        except AIRateLimitError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except AITimeoutError as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        except AINetworkError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except AIResponseError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return _wrapped
+
+
+@app.get("/ai/status")
+def ai_status() -> AIStatusResponse:
+    settings = Settings.load()
+    reason = None
+    if not settings.ai_enabled:
+        reason = "POLYMARKETPULSE_AI_ENABLED is false"
+    elif not settings.openai_api_key:
+        reason = "OPENAI_API_KEY is not configured"
+    return AIStatusResponse(
+        enabled=settings.ai_enabled,
+        ready=settings.ai_ready,
+        model=settings.openai_model,
+        cache_ttl_seconds=settings.ai_cache_ttl_seconds,
+        reason=reason,
+    )
+
+
+@app.post("/ai/explain-market/{market_id}")
+@_handle_ai_errors
+def ai_explain_market(market_id: str, storage: Storage = Depends(get_storage)) -> AIAnalysisResponse:
+    settings = Settings.load()
+    return ai_service.explain_market(storage, settings, market_id)
+
+
+@app.post("/ai/explain-signal/{signal_id}")
+@_handle_ai_errors
+def ai_explain_signal(signal_id: int, storage: Storage = Depends(get_storage)) -> AIAnalysisResponse:
+    settings = Settings.load()
+    return ai_service.explain_signal(storage, settings, signal_id)
+
+
+@app.post("/ai/analyze-news/{market_id}")
+@_handle_ai_errors
+def ai_analyze_news(market_id: str, storage: Storage = Depends(get_storage)) -> AIAnalysisResponse:
+    settings = Settings.load()
+    return ai_service.analyze_news_for_market(storage, settings, market_id)
+
+
+@app.post("/ai/compare")
+@_handle_ai_errors
+def ai_compare(payload: CompareRequest, storage: Storage = Depends(get_storage)) -> AIAnalysisResponse:
+    settings = Settings.load()
+    return ai_service.compare_markets(storage, settings, payload.market_ids)
+
+
+@app.post("/ai/ask")
+@_handle_ai_errors
+def ai_ask(payload: AskRequest, storage: Storage = Depends(get_storage)) -> AIAnalysisResponse:
+    settings = Settings.load()
+    return ai_service.ask_research_question(storage, settings, payload.question, payload.market_id)
 
 
 @app.exception_handler(Exception)

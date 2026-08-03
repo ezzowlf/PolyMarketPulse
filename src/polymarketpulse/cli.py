@@ -659,6 +659,145 @@ def cmd_explain(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_ai_error(exc: Exception) -> int:
+    from .ai.client import (
+        AIContextError,
+        AIDisabledError,
+        AINetworkError,
+        AIRateLimitError,
+        AIResponseError,
+        AITimeoutError,
+    )
+
+    if isinstance(exc, AIDisabledError):
+        print(f"AI nicht verfügbar: {exc}", file=sys.stderr)
+        return 3
+    if isinstance(exc, AIContextError):
+        print(f"Zu wenig Kontext: {exc}", file=sys.stderr)
+        return 4
+    if isinstance(exc, (AITimeoutError, AIRateLimitError, AINetworkError, AIResponseError)):
+        print(f"AI-Fehler: {exc}", file=sys.stderr)
+        return 5
+    raise exc
+
+
+def cmd_ai_status(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    payload = {
+        "enabled": settings.ai_enabled,
+        "ready": settings.ai_ready,
+        "model": settings.openai_model,
+        "cache_ttl_seconds": settings.ai_cache_ttl_seconds,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"AI aktiviert: {settings.ai_enabled}")
+        print(f"AI einsatzbereit (Key vorhanden): {settings.ai_ready}")
+        print(f"Modell: {settings.openai_model}")
+        print(f"Cache-TTL: {settings.ai_cache_ttl_seconds}s")
+    return 0
+
+
+def _print_ai_result(response, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(response.model_dump(), indent=2, ensure_ascii=False))
+        return
+    result = response.result
+    print(f"Zusammenfassung: {result.summary}")
+    print(f"Erklärung: {result.market_move_explanation}")
+    if result.supporting_factors:
+        print("Pro-Faktoren:")
+        for f in result.supporting_factors:
+            print(f"  + [{f.strength}] {f.factor} — {f.evidence}")
+    if result.opposing_factors:
+        print("Contra-Faktoren:")
+        for f in result.opposing_factors:
+            print(f"  - [{f.strength}] {f.factor} — {f.evidence}")
+    if result.data_gaps:
+        print("Datenlücken:", ", ".join(result.data_gaps))
+    if result.uncertainties:
+        print("Unsicherheiten:", ", ".join(result.uncertainties))
+    print(f"Confidence (Kontextabdeckung): {result.confidence_in_analysis}")
+    print(f"{result.disclaimer}")
+    print(f"[Modell: {response.meta.model} | Cache: {response.meta.cached} | Analyse-ID: {response.meta.analysis_id}]")
+
+
+def cmd_ai_explain_market(args: argparse.Namespace) -> int:
+    from .ai import service as ai_service
+    from .ai.client import AIError
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        response = ai_service.explain_market(storage, settings, args.market_id)
+    except AIError as exc:
+        return _print_ai_error(exc)
+    finally:
+        storage.close()
+    _print_ai_result(response, args.json)
+    return 0
+
+
+def cmd_ai_explain_signal(args: argparse.Namespace) -> int:
+    from .ai import service as ai_service
+    from .ai.client import AIError
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        response = ai_service.explain_signal(storage, settings, args.signal_id)
+    except AIError as exc:
+        return _print_ai_error(exc)
+    finally:
+        storage.close()
+    _print_ai_result(response, args.json)
+    return 0
+
+
+def cmd_ai_ask(args: argparse.Namespace) -> int:
+    from .ai import service as ai_service
+    from .ai.client import AIError
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        response = ai_service.ask_research_question(storage, settings, args.question, args.market_id)
+    except AIError as exc:
+        return _print_ai_error(exc)
+    finally:
+        storage.close()
+    _print_ai_result(response, args.json)
+    return 0
+
+
+def cmd_ai_smoke_test(args: argparse.Namespace) -> int:
+    """Manual-only, real OpenAI call. Refuses to run unless AI is explicitly
+    enabled AND an API key is configured — never runs as part of the normal
+    test suite or any automated flow."""
+    from .ai import service as ai_service
+    from .ai.client import AIError
+
+    settings = Settings.load()
+    if not settings.ai_ready:
+        print(
+            "Smoke-Test abgebrochen: POLYMARKETPULSE_AI_ENABLED=true und OPENAI_API_KEY "
+            "müssen gesetzt sein, um einen echten OpenAI-Aufruf durchzuführen.",
+            file=sys.stderr,
+        )
+        return 1
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        print(f"Führe echten OpenAI-Aufruf für Markt '{args.market_id}' aus (Modell: {settings.openai_model})…", file=sys.stderr)
+        response = ai_service.explain_market(storage, settings, args.market_id)
+    except AIError as exc:
+        return _print_ai_error(exc)
+    finally:
+        storage.close()
+    _print_ai_result(response, args.json)
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Launch the REST API + dashboard (read-only) via uvicorn. The CLI
     remains fully independent of this — `serve` is purely additive."""
@@ -797,6 +936,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     explain_parser.add_argument("--json", action="store_true")
     explain_parser.set_defaults(func=cmd_explain)
+
+    ai_status_parser = subparsers.add_parser("ai-status", help="AI-Konfigurationsstatus anzeigen")
+    ai_status_parser.add_argument("--json", action="store_true")
+    ai_status_parser.set_defaults(func=cmd_ai_status)
+
+    ai_explain_market_parser = subparsers.add_parser(
+        "ai-explain-market", help="KI-Analyse eines Marktes (nur wenn AI aktiviert)"
+    )
+    ai_explain_market_parser.add_argument("market_id")
+    ai_explain_market_parser.add_argument("--json", action="store_true")
+    ai_explain_market_parser.set_defaults(func=cmd_ai_explain_market)
+
+    ai_explain_signal_parser = subparsers.add_parser(
+        "ai-explain-signal", help="KI-Analyse eines Research-Signals (nur wenn AI aktiviert)"
+    )
+    ai_explain_signal_parser.add_argument("signal_id", type=int)
+    ai_explain_signal_parser.add_argument("--json", action="store_true")
+    ai_explain_signal_parser.set_defaults(func=cmd_ai_explain_signal)
+
+    ai_ask_parser = subparsers.add_parser("ai-ask", help="Research-Frage an die KI stellen (nur wenn AI aktiviert)")
+    ai_ask_parser.add_argument("question")
+    ai_ask_parser.add_argument("--market-id", dest="market_id", default=None)
+    ai_ask_parser.add_argument("--json", action="store_true")
+    ai_ask_parser.set_defaults(func=cmd_ai_ask)
+
+    ai_smoke_parser = subparsers.add_parser(
+        "ai-smoke-test",
+        help="Echter, manueller OpenAI-Aufruf (nur mit POLYMARKETPULSE_AI_ENABLED=true + Key)",
+    )
+    ai_smoke_parser.add_argument("--market-id", dest="market_id", required=True)
+    ai_smoke_parser.add_argument("--json", action="store_true")
+    ai_smoke_parser.set_defaults(func=cmd_ai_smoke_test)
 
     serve_parser = subparsers.add_parser("serve", help="REST API + Dashboard starten (nur lesend)")
     serve_parser.add_argument("--host", default="127.0.0.1")

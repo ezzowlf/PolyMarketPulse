@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .migrations import current_schema_version, run_migrations
@@ -31,6 +31,7 @@ STATUS_TABLES = (
     "watchlist_items",
     "data_quality_reports",
     "news_market_reactions",
+    "ai_analysis_runs",
 )
 
 
@@ -787,6 +788,89 @@ class Storage:
             "signals": [dict(zip(("id", "signal_type", "provider", "provider_market_id"), r, strict=True)) for r in signals],
             "resolutions": [dict(zip(("provider", "provider_market_id", "status", "winning_outcome"), r, strict=True)) for r in resolutions],
         }
+
+    # --- AI analysis runs (also the cache store) ---------------------------
+
+    def find_cached_ai_run(
+        self, analysis_type: str, model: str, prompt_version: str, context_hash: str, ttl_seconds: int
+    ) -> dict | None:
+        cutoff = (datetime.now(UTC) - timedelta(seconds=ttl_seconds)).isoformat()
+        row = self.connection.execute(
+            """
+            SELECT id, response_json, input_tokens, output_tokens, created_at
+            FROM ai_analysis_runs
+            WHERE analysis_type = ? AND model = ? AND prompt_version = ? AND context_hash = ?
+              AND status = 'completed' AND created_at >= ?
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (analysis_type, model, prompt_version, context_hash, cutoff),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0],
+            "response_json": row[1],
+            "input_tokens": row[2],
+            "output_tokens": row[3],
+            "created_at": row[4],
+        }
+
+    def record_ai_run(
+        self,
+        analysis_type: str,
+        market_id: str | None,
+        model: str,
+        prompt_version: str,
+        context_hash: str,
+        status: str,
+        duration_ms: int | None,
+        input_tokens: int | None,
+        output_tokens: int | None,
+        cached: bool,
+        error_code: str | None,
+        response_json: str | None,
+    ) -> int:
+        now = datetime.now(UTC).isoformat()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO ai_analysis_runs (
+                analysis_type, market_id, model, prompt_version, context_hash, status,
+                created_at, duration_ms, input_tokens, output_tokens, cached, error_code, response_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                analysis_type,
+                market_id,
+                model,
+                prompt_version,
+                context_hash,
+                status,
+                now,
+                duration_ms,
+                input_tokens,
+                output_tokens,
+                int(cached),
+                error_code,
+                response_json,
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def list_ai_runs(self, limit: int = 20) -> list[dict]:
+        rows = self.connection.execute(
+            """
+            SELECT id, analysis_type, market_id, model, status, created_at, duration_ms,
+                   input_tokens, output_tokens, cached, error_code
+            FROM ai_analysis_runs ORDER BY created_at DESC LIMIT ?
+            """,
+            (max(1, min(limit, 200)),),
+        ).fetchall()
+        cols = (
+            "id", "analysis_type", "market_id", "model", "status", "created_at", "duration_ms",
+            "input_tokens", "output_tokens", "cached", "error_code",
+        )
+        return [dict(zip(cols, r, strict=True)) for r in rows]
 
     def close(self) -> None:
         self.connection.close()

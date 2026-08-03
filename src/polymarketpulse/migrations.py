@@ -365,11 +365,43 @@ def _migration_004_intelligence_platform(conn: sqlite3.Connection) -> None:
     _add_column(conn, "watchlist_items", "virtual_position_json", "TEXT")
 
 
+def _migration_005_ai_analysis(conn: sqlite3.Connection) -> None:
+    """Phase 5: AI analysis run log, doubling as the cache store (lookup by
+    analysis_type + market_id + model + prompt_version + context_hash within
+    a TTL, see ai/cache.py). Deliberately excludes API keys and raw prompt
+    text — only the structured JSON response and bookkeeping metadata."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS ai_analysis_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            analysis_type TEXT NOT NULL,
+            market_id TEXT,
+            model TEXT NOT NULL,
+            prompt_version TEXT NOT NULL,
+            context_hash TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            duration_ms INTEGER,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
+            cached INTEGER NOT NULL DEFAULT 0,
+            error_code TEXT,
+            response_json TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_runs_cache_lookup
+        ON ai_analysis_runs(analysis_type, model, prompt_version, context_hash, created_at);
+        CREATE INDEX IF NOT EXISTS idx_ai_runs_market
+        ON ai_analysis_runs(market_id, created_at);
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
     (3, "watchlist", _migration_003_watchlist),
     (4, "intelligence_platform", _migration_004_intelligence_platform),
+    (5, "ai_analysis", _migration_005_ai_analysis),
 ]
 
 
