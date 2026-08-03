@@ -9,8 +9,9 @@ from polymarketpulse.ai.client import (
     AIResponseError,
     AITimeoutError,
     OpenAIStructuredClient,
+    _strictify_schema,
 )
-from polymarketpulse.ai.schemas import AnalysisResult
+from polymarketpulse.ai.schemas import AnalysisResult, MarketContext, SupportingFactor
 
 
 def _valid_payload() -> dict:
@@ -127,3 +128,50 @@ def test_wrapper_does_not_store_api_key_as_plain_attribute() -> None:
     client._model = "gpt-4.1-mini"
     for attr in ("api_key", "_api_key", "key", "_key"):
         assert not hasattr(client, attr)
+
+
+def _walk_object_schemas(node):
+    if isinstance(node, dict):
+        if node.get("type") == "object" and "properties" in node:
+            yield node
+        for value in node.values():
+            yield from _walk_object_schemas(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _walk_object_schemas(item)
+
+
+def test_strictify_schema_sets_additional_properties_false_everywhere() -> None:
+    schema = _strictify_schema(AnalysisResult.model_json_schema())
+    object_schemas = list(_walk_object_schemas(schema))
+    assert object_schemas, "expected at least one object schema (top-level + nested)"
+    for obj in object_schemas:
+        assert obj["additionalProperties"] is False
+
+
+def test_strictify_schema_marks_every_property_required() -> None:
+    schema = _strictify_schema(AnalysisResult.model_json_schema())
+    for obj in _walk_object_schemas(schema):
+        assert set(obj["properties"].keys()) == set(obj["required"])
+
+
+def test_strictify_schema_covers_nested_supporting_factor() -> None:
+    """This is the exact regression this fixed: SupportingFactor is a nested
+    model referenced via $defs, and without recursing into $defs its object
+    schema was missing additionalProperties:false, which OpenAI's strict
+    Structured Outputs mode rejects with a 400."""
+    schema = _strictify_schema(AnalysisResult.model_json_schema())
+    nested = schema["$defs"]["SupportingFactor"]
+    assert nested["additionalProperties"] is False
+    assert set(nested["properties"].keys()) == set(nested["required"])
+
+
+def test_strictify_schema_works_for_market_context_too() -> None:
+    schema = _strictify_schema(MarketContext.model_json_schema())
+    for obj in _walk_object_schemas(schema):
+        assert obj["additionalProperties"] is False
+
+
+def test_supporting_factor_forbids_extra_fields_on_the_python_side() -> None:
+    with pytest.raises(Exception):  # noqa: B017 - pydantic ValidationError
+        SupportingFactor(factor="x", evidence="y", strength="low", unexpected="z")

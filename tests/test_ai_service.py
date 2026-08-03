@@ -106,6 +106,32 @@ def test_explain_market_returns_structured_result(storage: Storage, ai_settings:
     assert client.calls == 1
 
 
+def test_disclaimer_is_always_overwritten_with_canonical_text(storage: Storage, ai_settings: Settings) -> None:
+    """Strict-mode Structured Outputs forces the model to generate every
+    field itself, including `disclaimer` — regression test for the live
+    smoke test finding that the model wrote its own wording instead of the
+    compliance-reviewed default."""
+    from polymarketpulse.ai.schemas import DISCLAIMER
+
+    market_id = _seed(storage, _market())
+    client = FakeClient(
+        payload={
+            "summary": "x",
+            "supporting_factors": [],
+            "opposing_factors": [],
+            "relevant_news": [],
+            "data_gaps": [],
+            "uncertainties": [],
+            "market_move_explanation": "x",
+            "confidence_in_analysis": 0.5,
+            "source_ids": [],
+            "disclaimer": "Ich bin ein vom Modell frei erfundener Disclaimer-Text.",
+        }
+    )
+    response = ai_service.explain_market(storage, ai_settings, market_id, client=client)
+    assert response.result.disclaimer == DISCLAIMER
+
+
 def test_explain_market_second_call_hits_cache(storage: Storage, ai_settings: Settings) -> None:
     market_id = _seed(storage, _market())
     client = FakeClient()
@@ -113,6 +139,30 @@ def test_explain_market_second_call_hits_cache(storage: Storage, ai_settings: Se
     response2 = ai_service.explain_market(storage, ai_settings, market_id, client=client)
     assert response2.meta.cached is True
     assert client.calls == 1  # second call never hit the (fake) network
+
+
+def test_cached_response_also_gets_canonical_disclaimer(storage: Storage, ai_settings: Settings) -> None:
+    from polymarketpulse.ai.schemas import DISCLAIMER
+
+    market_id = _seed(storage, _market())
+    client = FakeClient(
+        payload={
+            "summary": "x",
+            "supporting_factors": [],
+            "opposing_factors": [],
+            "relevant_news": [],
+            "data_gaps": [],
+            "uncertainties": [],
+            "market_move_explanation": "x",
+            "confidence_in_analysis": 0.5,
+            "source_ids": [],
+            "disclaimer": "some other wording",
+        }
+    )
+    ai_service.explain_market(storage, ai_settings, market_id, client=client)
+    cached_response = ai_service.explain_market(storage, ai_settings, market_id, client=client)
+    assert cached_response.meta.cached is True
+    assert cached_response.result.disclaimer == DISCLAIMER
 
 
 def test_cache_ttl_zero_disables_cache(storage: Storage, ai_settings: Settings) -> None:

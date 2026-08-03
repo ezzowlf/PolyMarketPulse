@@ -9,7 +9,7 @@ from polymarketpulse import cli
 def _isolated_env(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("POLYMARKETPULSE_DATABASE_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("POLYMARKETPULSE_AI_ENABLED", "false")
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "")
 
 
 def test_ai_status_reports_disabled(capsys) -> None:

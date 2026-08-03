@@ -14,7 +14,7 @@ def seeded_market_id(tmp_path: Path, monkeypatch) -> tuple[TestClient, str]:
     monkeypatch.setenv("POLYMARKETPULSE_DATABASE_PATH", str(tmp_path / "api_ai_test.db"))
     monkeypatch.setenv("POLYMARKETPULSE_TELEGRAM_ENABLED", "false")
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "")
     monkeypatch.setenv("POLYMARKETPULSE_AI_ENABLED", "false")
 
     from polymarketpulse.api import app

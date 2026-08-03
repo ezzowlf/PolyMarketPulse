@@ -16,7 +16,7 @@ from .prompts import (
     build_explain_signal_prompt,
     build_news_analysis_prompt,
 )
-from .schemas import PROMPT_VERSION, AIAnalysisResponse, AIRunMeta, AnalysisResult
+from .schemas import DISCLAIMER, PROMPT_VERSION, AIAnalysisResponse, AIRunMeta, AnalysisResult
 
 
 def _require_ready(settings: Settings) -> None:
@@ -49,6 +49,7 @@ def _execute(
     )
     if cached is not None:
         result = AnalysisResult.model_validate_json(cached["response_json"])
+        result = result.model_copy(update={"disclaimer": DISCLAIMER})
         return AIAnalysisResponse(
             result=result,
             meta=AIRunMeta(
@@ -69,6 +70,11 @@ def _execute(
             SYSTEM_PROMPT, user_prompt, AnalysisResult, "market_analysis"
         )
         result = AnalysisResult.model_validate(parsed)
+        # Strict-mode Structured Outputs requires every field (including
+        # `disclaimer`) to be model-generated rather than defaulted, so the
+        # model sometimes writes its own wording here. Overwrite with the
+        # canonical, compliance-reviewed text so it's never left to chance.
+        result = result.model_copy(update={"disclaimer": DISCLAIMER})
     except AIResponseError:
         duration_ms = int((time.monotonic() - started) * 1000)
         storage.record_ai_run(

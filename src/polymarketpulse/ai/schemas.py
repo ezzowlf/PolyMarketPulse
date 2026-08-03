@@ -14,6 +14,8 @@ class SupportingFactor(BaseModel):
     evidence: str
     strength: Literal["low", "medium", "high"]
 
+    model_config = {"extra": "forbid"}
+
 
 class AnalysisResult(BaseModel):
     """Structured AI output. Every field is grounded in the bounded context

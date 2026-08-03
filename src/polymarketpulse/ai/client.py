@@ -41,6 +41,25 @@ def _redact(text: str, limit: int = 200) -> str:
     return text[:limit].replace("\n", " ")
 
 
+def _strictify_schema(node: Any) -> Any:
+    """Recursively enforce OpenAI Structured Outputs' strict-mode
+    requirements: every object needs `additionalProperties: false` and
+    every one of its properties listed in `required` (fields stay
+    "optional" in spirit via nullable types, not via omission from
+    `required` — Pydantic's own validation still enforces our real
+    defaults on the Python side after parsing)."""
+    if isinstance(node, dict):
+        if node.get("type") == "object" and "properties" in node:
+            node["additionalProperties"] = False
+            node["required"] = list(node["properties"].keys())
+        for value in node.values():
+            _strictify_schema(value)
+    elif isinstance(node, list):
+        for item in node:
+            _strictify_schema(item)
+    return node
+
+
 class OpenAIStructuredClient:
     """Thin wrapper around the OpenAI Responses API for one purpose:
     produce a JSON object that validates against a given Pydantic schema.
@@ -62,10 +81,7 @@ class OpenAIStructuredClient:
         self, system_prompt: str, user_prompt: str, schema_model: type[BaseModel], schema_name: str
     ) -> tuple[dict[str, Any], int | None, int | None]:
         """Returns (parsed_json, input_tokens, output_tokens)."""
-        schema = schema_model.model_json_schema()
-        # Structured Outputs requires additionalProperties: false at every
-        # object level; Pydantic's default schema already sets this via
-        # model_config={"extra": "forbid"} on our schema classes.
+        schema = _strictify_schema(schema_model.model_json_schema())
         try:
             response = self._client.responses.create(
                 model=self._model,
