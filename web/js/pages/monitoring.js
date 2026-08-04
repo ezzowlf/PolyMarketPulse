@@ -11,7 +11,7 @@ async function renderMonitoringPage(container) {
     <div class="panel">
       <h3>Provider-Status im Detail</h3>
       <table>
-        <thead><tr><th>Provider</th><th>Letzter Status</th><th>Ø Laufzeit</th><th>Fehlgeschlagene Läufe</th><th>Letzter Fehler</th></tr></thead>
+        <thead><tr><th>Datenquelle</th><th>Letzter Status</th><th>Ø Laufzeit</th><th>Fehlgeschlagene Läufe</th><th>Letzter Fehler</th></tr></thead>
         <tbody>
           ${providerStatus
             .map(

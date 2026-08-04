@@ -13,6 +13,7 @@ from .data_quality import assess_market
 from .performance import compute_performance
 from .providers.base import Page, ProviderError
 from .providers.registry import create_provider, list_provider_names
+from .shadow import evaluate_shadow_setup
 from .signals import PreviousSnapshot, generate_signals
 from .stats import compute_signal_stats
 from .storage import Storage
@@ -47,8 +48,8 @@ def _provider_names(args: argparse.Namespace, settings: Settings) -> list[str]:
 
 def _scan_one_provider(
     provider_name: str, settings: Settings, storage: Storage, limit: int
-) -> tuple[int, int, int, list]:
-    """Returns (markets_read, snapshots_saved, markets_failed, top_signals)."""
+) -> tuple[int, int, int, list, int]:
+    """Returns (markets_read, snapshots_saved, markets_failed, top_signals, new_shadow_setups)."""
     started = time.monotonic()
     provider = create_provider(provider_name, timeout=settings.request_timeout)
     storage.register_provider(provider_name, provider_name.title(), provider.capabilities)
@@ -60,8 +61,11 @@ def _scan_one_provider(
         batch = []
         all_signals = []
         quality_reports = []
+        new_shadow_setups = 0
+        shadow_since = (datetime.now(UTC) - timedelta(hours=12)).isoformat()
         for market in markets:
-            quality_reports.append((provider_name, assess_market(market)))
+            dq_report = assess_market(market)
+            quality_reports.append((provider_name, dq_report))
             previous = storage.get_previous_snapshot(market.provider, market.provider_market_id)
             prev_snapshot = (
                 PreviousSnapshot(
@@ -82,6 +86,34 @@ def _scan_one_provider(
                 batch.append((market, market_signals))
                 all_signals.extend(market_signals)
 
+            news_count = storage.connection.execute(
+                "SELECT COUNT(*), MAX(confidence) FROM news_market_links "
+                "WHERE provider = ? AND provider_market_id = ?",
+                (market.provider, market.provider_market_id),
+            ).fetchone()
+            comparable_count = storage.connection.execute(
+                "SELECT COUNT(*) FROM market_matches WHERE status = 'confirmed' AND "
+                "((provider_a = ? AND provider_market_id_a = ?) OR (provider_b = ? AND provider_market_id_b = ?))",
+                (market.provider, market.provider_market_id, market.provider, market.provider_market_id),
+            ).fetchone()[0]
+
+            setup = evaluate_shadow_setup(
+                market,
+                previous=prev_snapshot,
+                data_quality_score=dq_report.score,
+                news_count=news_count[0] or 0,
+                news_max_confidence=news_count[1],
+                comparable_market_count=comparable_count,
+            )
+            if setup.qualifies and not storage.has_recent_shadow_setup(
+                market.provider, market.provider_market_id, shadow_since
+            ):
+                storage.save_shadow_setup(run_id, setup)
+                new_shadow_setups += 1
+
+            if market.resolution_status.value in ("resolved", "cancelled", "invalid", "disputed"):
+                storage.resolve_shadow_setups_for_market(market)
+
         snapshots_saved = storage.save(run_id, batch)
         storage.save_quality_reports(run_id, quality_reports)
         duration_ms = int((time.monotonic() - started) * 1000)
@@ -94,7 +126,7 @@ def _scan_one_provider(
             duration_ms=duration_ms,
         )
         all_signals.sort(key=lambda s: s.score, reverse=True)
-        return len(markets), snapshots_saved, 0, all_signals
+        return len(markets), snapshots_saved, 0, all_signals, new_shadow_setups
     except ProviderError as exc:
         duration_ms = int((time.monotonic() - started) * 1000)
         storage.finish_run(
@@ -120,13 +152,14 @@ def cmd_scan(args: argparse.Namespace) -> int:
     try:
         for provider_name in _provider_names(args, settings):
             try:
-                read, saved, _failed, top_signals = _scan_one_provider(
+                read, saved, _failed, top_signals, new_shadow = _scan_one_provider(
                     provider_name, settings, storage, limit
                 )
                 all_top_signals.extend(top_signals[:10])
                 if not args.json:
                     print(
-                        f"[{provider_name}] {read} Märkte gelesen, {saved} Snapshots gespeichert.",
+                        f"[{provider_name}] {read} Märkte gelesen, {saved} Snapshots gespeichert, "
+                        f"{new_shadow} neue Shadow-Setup(s).",
                         file=sys.stderr,
                     )
             except ProviderError as exc:

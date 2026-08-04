@@ -1,14 +1,14 @@
 async function renderWatchlistPage(container) {
-  container.innerHTML = `<div class="empty-state">Lade Watchlist…</div>`;
+  container.innerHTML = `<div class="empty-state">Lade Beobachtungsliste…</div>`;
   const items = await Api.watchlist();
   if (items.length === 0) {
-    container.innerHTML = `<div class="empty-state">Watchlist ist leer. Füge Märkte über die Marktdetailseite hinzu.</div>`;
+    container.innerHTML = `<div class="empty-state">Beobachtungsliste ist leer. Füge Märkte über die Marktdetailseite hinzu.</div>`;
     return;
   }
   container.innerHTML = `
     <div class="panel">
       <table>
-        <thead><tr><th>Markt</th><th>Provider</th><th>Notiz</th><th>Hinzugefügt</th><th></th></tr></thead>
+        <thead><tr><th>Markt</th><th>Datenquelle</th><th>Notiz</th><th>Hinzugefügt</th><th></th></tr></thead>
         <tbody>
           ${items
             .map(

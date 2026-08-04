@@ -396,12 +396,48 @@ def _migration_005_ai_analysis(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_006_shadow_setups(conn: sqlite3.Connection) -> None:
+    """Phase 6: permanent Shadow-Setup history. A Shadow-Setup is created
+    only when several independent factors align (see shadow.py); it is
+    never deleted, so it becomes a growing knowledge base of what actually
+    turned out to be useful research."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS shadow_setups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER REFERENCES scanner_runs(id),
+            provider TEXT NOT NULL,
+            provider_market_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            score REAL NOT NULL,
+            breakdown_json TEXT NOT NULL,
+            warum_interessant_json TEXT NOT NULL,
+            warum_nicht_json TEXT NOT NULL,
+            was_fehlt_json TEXT NOT NULL,
+            confirming_factor_count INTEGER NOT NULL,
+            origin_yes_price REAL,
+            status TEXT NOT NULL DEFAULT 'aktiv',
+            resolved_at TEXT,
+            final_outcome TEXT,
+            final_yes_price REAL,
+            duration_hours REAL,
+            useful_factors_json TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_shadow_setups_market
+        ON shadow_setups(provider, provider_market_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_shadow_setups_status
+        ON shadow_setups(status, created_at);
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
     (3, "watchlist", _migration_003_watchlist),
     (4, "intelligence_platform", _migration_004_intelligence_platform),
     (5, "ai_analysis", _migration_005_ai_analysis),
+    (6, "shadow_setups", _migration_006_shadow_setups),
 ]
 
 

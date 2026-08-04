@@ -45,7 +45,7 @@ async function renderMarketsPage(container, query) {
     } else {
       tableEl.innerHTML = `
         <table>
-          <thead><tr><th>Frage</th><th>Provider</th><th>YES</th><th>Liquidität</th><th>Score</th><th>Ende</th></tr></thead>
+          <thead><tr><th>Frage</th><th>Datenquelle</th><th>YES</th><th>Liquidität</th><th>Score</th><th>Ende</th></tr></thead>
           <tbody>
             ${data.items
               .map(

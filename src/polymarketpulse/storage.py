@@ -32,6 +32,7 @@ STATUS_TABLES = (
     "data_quality_reports",
     "news_market_reactions",
     "ai_analysis_runs",
+    "shadow_setups",
 )
 
 
@@ -871,6 +872,148 @@ class Storage:
             "input_tokens", "output_tokens", "cached", "error_code",
         )
         return [dict(zip(cols, r, strict=True)) for r in rows]
+
+    # --- Shadow-Setups (permanente Research-Historie) ---------------------
+
+    def save_shadow_setup(self, run_id: int | None, setup) -> int:
+        now = datetime.now(UTC).isoformat()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO shadow_setups (
+                run_id, provider, provider_market_id, created_at, score, breakdown_json,
+                warum_interessant_json, warum_nicht_json, was_fehlt_json, confirming_factor_count,
+                origin_yes_price, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'aktiv')
+            """,
+            (
+                run_id,
+                setup.market.provider,
+                setup.market.provider_market_id,
+                now,
+                setup.score,
+                json.dumps(setup.breakdown.as_dict()),
+                json.dumps(list(setup.warum_interessant)),
+                json.dumps(list(setup.warum_nicht)),
+                json.dumps(list(setup.was_fehlt)),
+                setup.confirming_factor_count,
+                setup.market.yes_price,
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def has_recent_shadow_setup(self, provider: str, provider_market_id: str, since_iso: str) -> bool:
+        row = self.connection.execute(
+            "SELECT 1 FROM shadow_setups WHERE provider = ? AND provider_market_id = ? "
+            "AND created_at >= ? LIMIT 1",
+            (provider, provider_market_id, since_iso),
+        ).fetchone()
+        return row is not None
+
+    def list_shadow_setups(self, status: str | None = None, limit: int = 20) -> list[dict]:
+        conditions = []
+        params: list = []
+        if status:
+            conditions.append("s.status = ?")
+            params.append(status)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(max(1, min(limit, 200)))
+        rows = self.connection.execute(
+            f"""
+            SELECT s.id, s.provider, s.provider_market_id, s.created_at, s.score, s.breakdown_json,
+                   s.warum_interessant_json, s.warum_nicht_json, s.was_fehlt_json,
+                   s.confirming_factor_count, s.status, s.origin_yes_price, s.resolved_at,
+                   s.final_outcome, s.final_yes_price, s.duration_hours, m.question, m.url,
+                   m.market_id, m.end_date
+            FROM shadow_setups s
+            LEFT JOIN markets m ON m.provider = s.provider AND m.provider_market_id = s.provider_market_id
+            {where}
+            ORDER BY s.created_at DESC LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        cols = (
+            "id", "provider", "provider_market_id", "created_at", "score", "breakdown",
+            "warum_interessant", "warum_nicht", "was_fehlt", "confirming_factor_count", "status",
+            "origin_yes_price", "resolved_at", "final_outcome", "final_yes_price", "duration_hours",
+            "question", "url", "market_id", "end_date",
+        )
+        results = []
+        for r in rows:
+            item = dict(zip(cols, r, strict=True))
+            item["breakdown"] = json.loads(item["breakdown"])
+            item["warum_interessant"] = json.loads(item["warum_interessant"])
+            item["warum_nicht"] = json.loads(item["warum_nicht"])
+            item["was_fehlt"] = json.loads(item["was_fehlt"])
+            results.append(item)
+        return results
+
+    def get_shadow_setup(self, setup_id: int) -> dict | None:
+        matches = [s for s in self.list_shadow_setups(limit=200) if s["id"] == setup_id]
+        if matches:
+            return matches[0]
+        row = self.connection.execute(
+            """
+            SELECT s.id, s.provider, s.provider_market_id, s.created_at, s.score, s.breakdown_json,
+                   s.warum_interessant_json, s.warum_nicht_json, s.was_fehlt_json,
+                   s.confirming_factor_count, s.status, s.origin_yes_price, s.resolved_at,
+                   s.final_outcome, s.final_yes_price, s.duration_hours, m.question, m.url,
+                   m.market_id, m.end_date
+            FROM shadow_setups s
+            LEFT JOIN markets m ON m.provider = s.provider AND m.provider_market_id = s.provider_market_id
+            WHERE s.id = ?
+            """,
+            (setup_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        cols = (
+            "id", "provider", "provider_market_id", "created_at", "score", "breakdown",
+            "warum_interessant", "warum_nicht", "was_fehlt", "confirming_factor_count", "status",
+            "origin_yes_price", "resolved_at", "final_outcome", "final_yes_price", "duration_hours",
+            "question", "url", "market_id", "end_date",
+        )
+        item = dict(zip(cols, row, strict=True))
+        item["breakdown"] = json.loads(item["breakdown"])
+        item["warum_interessant"] = json.loads(item["warum_interessant"])
+        item["warum_nicht"] = json.loads(item["warum_nicht"])
+        item["was_fehlt"] = json.loads(item["was_fehlt"])
+        return item
+
+    def resolve_shadow_setups_for_market(self, market: Market) -> int:
+        """Closes out any still-active Shadow-Setups for a market that just
+        resolved, recording how it actually ended. Idempotent: markets with
+        no active setups are a no-op."""
+        if market.resolution_status.value not in ("resolved", "cancelled", "invalid", "disputed"):
+            return 0
+        now = datetime.now(UTC).isoformat()
+        rows = self.connection.execute(
+            "SELECT id, created_at FROM shadow_setups WHERE provider = ? AND provider_market_id = ? "
+            "AND status = 'aktiv'",
+            (market.provider, market.provider_market_id),
+        ).fetchall()
+        updated = 0
+        for setup_id, created_at in rows:
+            duration_hours = None
+            try:
+                started = datetime.fromisoformat(created_at)
+                resolved = market.resolved_at or datetime.now(UTC)
+                duration_hours = round((resolved - started).total_seconds() / 3600, 1)
+            except (ValueError, TypeError):
+                pass
+            self.connection.execute(
+                """
+                UPDATE shadow_setups SET
+                    status = 'aufgelöst', resolved_at = ?, final_outcome = ?, final_yes_price = ?,
+                    duration_hours = ?
+                WHERE id = ?
+                """,
+                (now, market.winning_outcome, market.yes_price, duration_hours, setup_id),
+            )
+            updated += 1
+        if updated:
+            self.connection.commit()
+        return updated
 
     def close(self) -> None:
         self.connection.close()

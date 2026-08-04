@@ -12,14 +12,14 @@ async function renderMarketDetailPage(container, marketId) {
         <h2 style="margin-top:0">${market.question}</h2>
         <p style="color:var(--text-dim)">${market.description || ""}</p>
         <div class="widget-grid">
-          ${widgetCard({ title: "Provider", value: market.provider })}
+          ${widgetCard({ title: "Datenquelle", value: market.provider })}
           ${widgetCard({ title: "YES-Preis", value: fmtPct(latest.yes_price) })}
           ${widgetCard({ title: "Liquidität", value: "$" + fmtNum(latest.liquidity) })}
           ${widgetCard({ title: "24h-Volumen", value: "$" + fmtNum(latest.volume_24h) })}
           ${widgetCard({ title: "Spread", value: fmtPct(latest.spread) })}
           ${widgetCard({ title: "Research-Score", value: fmtNum(latest.opportunity_score, 1) })}
           ${widgetCard({ title: "Auflösung", value: fmtDate(market.end_date) })}
-          ${widgetCard({ title: "Status", value: market.resolution_status })}
+          ${widgetCard({ title: "Marktstatus", value: fmtStatus(market.resolution_status) })}
         </div>
         <p><a href="${market.url}" target="_blank" rel="noopener">Zur Originalplattform →</a></p>
       </div>
@@ -61,15 +61,15 @@ async function renderMarketDetailPage(container, marketId) {
       </div>
 
       <div class="panel">
-        <h3>News</h3>
+        <h3>Nachrichten</h3>
         ${
           market.news.length
-            ? `<ul>${market.news.map((n) => `<li>${n.title} — <span class="badge">${(n.confidence * 100).toFixed(0)}% Confidence</span></li>`).join("")}</ul>`
-            : `<div class="empty-state">Keine verknüpften News.</div>`
+            ? `<ul>${market.news.map((n) => `<li>${n.title} — <span class="badge">${(n.confidence * 100).toFixed(0)}% Relevanz</span></li>`).join("")}</ul>`
+            : `<div class="empty-state">Keine verknüpften Nachrichten.</div>`
         }
       </div>
 
-      <button class="btn" id="add-watchlist">Zur Watchlist hinzufügen</button>
+      <button class="btn" id="add-watchlist">Zur Beobachtungsliste hinzufügen</button>
     `;
 
     renderLineChart(
@@ -85,7 +85,7 @@ async function renderMarketDetailPage(container, marketId) {
 
     document.getElementById("add-watchlist").onclick = async () => {
       await Api.addWatchlist({ provider: market.provider, provider_market_id: market.provider_market_id });
-      alert("Zur Watchlist hinzugefügt.");
+      alert("Zur Beobachtungsliste hinzugefügt.");
     };
   } catch (err) {
     container.innerHTML = `<div class="empty-state">Fehler: ${err.message}</div>`;

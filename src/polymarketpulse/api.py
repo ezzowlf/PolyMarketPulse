@@ -4,6 +4,7 @@ import functools
 import json
 import sqlite3
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -480,6 +481,119 @@ def heatmap(storage: Storage = Depends(get_storage)) -> list[dict]:
     ).fetchall()
     cols = ("market_id", "question", "category", "liquidity", "opportunity_score", "one_day_change", "volume_24h")
     return [dict(zip(cols, r, strict=True)) for r in rows]
+
+
+@app.get("/home")
+def home(storage: Storage = Depends(get_storage)) -> dict:
+    """Die neue Startseite: keine Datenbankübersicht, sondern eine kurze,
+    verständliche Tageszusammenfassung plus maximal fünf hervorgehobene
+    Märkte. Absichtlich knapp gehalten — der Rest der Plattform bleibt für
+    alle, die tiefer graben wollen."""
+    now = datetime.now(UTC)
+    since_yesterday = (now - timedelta(hours=24)).isoformat()
+
+    active_shadow_count = storage.connection.execute(
+        "SELECT COUNT(*) FROM shadow_setups WHERE status = 'aktiv'"
+    ).fetchone()[0]
+    new_shadow_count = storage.connection.execute(
+        "SELECT COUNT(*) FROM shadow_setups WHERE created_at >= ?", (since_yesterday,)
+    ).fetchone()[0]
+    news_count = storage.connection.execute(
+        "SELECT COUNT(*) FROM news_events WHERE fetched_at >= ?", (since_yesterday,)
+    ).fetchone()[0]
+    soon_count = storage.connection.execute(
+        "SELECT COUNT(*) FROM markets WHERE end_date IS NOT NULL AND resolution_status = 'unresolved' "
+        "AND end_date <= ?",
+        ((now + timedelta(hours=48)).isoformat(),),
+    ).fetchone()[0]
+
+    top_setups = storage.list_shadow_setups(status="aktiv", limit=5)
+    highlights = []
+    for setup in top_setups[:5]:
+        latest = storage.connection.execute(
+            "SELECT yes_price, opportunity_score FROM market_snapshots WHERE market_id = ? "
+            "ORDER BY captured_at DESC LIMIT 1",
+            (setup["market_id"],),
+        ).fetchone()
+        yes_price, research_score = latest if latest else (None, None)
+        price_change = None
+        if setup["origin_yes_price"] is not None and yes_price is not None:
+            price_change = round(yes_price - setup["origin_yes_price"], 4)
+        latest_news = storage.connection.execute(
+            "SELECT n.title, n.published_at FROM news_market_links l "
+            "JOIN news_events n ON n.id = l.news_event_id "
+            "WHERE l.provider = ? AND l.provider_market_id = ? ORDER BY n.published_at DESC LIMIT 1",
+            (setup["provider"], setup["provider_market_id"]),
+        ).fetchone()
+        days_left = None
+        if setup["end_date"]:
+            try:
+                days_left = round((datetime.fromisoformat(setup["end_date"]) - now).total_seconds() / 86400, 1)
+            except ValueError:
+                pass
+
+        highlights.append(
+            {
+                "shadow_setup_id": setup["id"],
+                "market_id": setup["market_id"],
+                "frage": setup["question"],
+                "url": setup["url"],
+                "aktueller_preis": yes_price,
+                "veraenderung_seit_erkennung": price_change,
+                "research_score": research_score,
+                "shadow_score": setup["score"],
+                "wichtigste_gruende": setup["warum_interessant"][:3],
+                "wichtigste_risiken": setup["warum_nicht"][:3] or setup["was_fehlt"][:2],
+                "letzte_nachricht": (
+                    {"titel": latest_news[0], "veroeffentlicht_am": latest_news[1]} if latest_news else None
+                ),
+                "tage_bis_resolution": days_left,
+            }
+        )
+
+    return {
+        "heute": {
+            "maerkte_mit_hoher_aufmerksamkeit": active_shadow_count,
+            "neue_shadow_setups": new_shadow_count,
+            "wichtige_nachrichten": news_count,
+            "maerkte_vor_entscheidung": soon_count,
+        },
+        "besonders_interessant": highlights,
+        "generiert_am": now.isoformat(),
+    }
+
+
+@app.get("/shadow-setups")
+def shadow_setups(status: str | None = None, limit: int = 20, storage: Storage = Depends(get_storage)) -> list[dict]:
+    return storage.list_shadow_setups(status=status, limit=limit)
+
+
+@app.get("/shadow-setup/{setup_id}")
+def shadow_setup_detail(setup_id: int, storage: Storage = Depends(get_storage)) -> dict:
+    setup = storage.get_shadow_setup(setup_id)
+    if setup is None:
+        raise HTTPException(status_code=404, detail="Shadow-Setup nicht gefunden")
+
+    price_history = storage.connection.execute(
+        "SELECT captured_at, yes_price FROM price_history WHERE market_id = ? ORDER BY captured_at ASC",
+        (setup["market_id"],),
+    ).fetchall()
+    news = storage.connection.execute(
+        "SELECT n.title, n.source, n.published_at, l.confidence FROM news_market_links l "
+        "JOIN news_events n ON n.id = l.news_event_id "
+        "WHERE l.provider = ? AND l.provider_market_id = ? ORDER BY n.published_at DESC",
+        (setup["provider"], setup["provider_market_id"]),
+    ).fetchall()
+
+    setup["preisverlauf_seit_erkennung"] = [
+        {"zeitpunkt": r[0], "yes_preis": r[1]} for r in price_history if r[0] >= setup["created_at"]
+    ]
+    setup["nachrichten_seitdem"] = [
+        {"titel": r[0], "quelle": r[1], "veroeffentlicht_am": r[2], "relevanz": r[3]}
+        for r in news
+        if r[2] is None or r[2] >= setup["created_at"]
+    ]
+    return setup
 
 
 @app.get("/analytics")

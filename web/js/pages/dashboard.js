@@ -1,86 +1,80 @@
-async function renderDashboardPage(container) {
-  container.innerHTML = `<div class="empty-state">Lade Dashboard…</div>`;
-  try {
-    const [providers, markets, signals, stats, news, analytics, health] = await Promise.all([
-      Api.providers(),
-      Api.markets({ limit: 100 }),
-      Api.signals({ limit: 10 }),
-      Api.stats(),
-      Api.news({ limit: 5 }),
-      Api.analytics(),
-      Api.health(),
-    ]);
+function _isFirstOpenToday() {
+  const today = new Date().toISOString().slice(0, 10);
+  const last = localStorage.getItem("pmp_last_open_date");
+  if (last === today) return false;
+  localStorage.setItem("pmp_last_open_date", today);
+  return true;
+}
 
-    const activeProviders = providers.filter((p) => p.market_lists).length;
-    const upcoming = markets.items
-      .filter((m) => m.end_date)
-      .sort((a, b) => new Date(a.end_date) - new Date(b.end_date))
-      .slice(0, 5);
-    const movers = [...markets.items]
-      .filter((m) => m.opportunity_score !== null)
-      .sort((a, b) => (b.opportunity_score || 0) - (a.opportunity_score || 0))
-      .slice(0, 5);
-    const newMarkets = [...markets.items].slice(0, 5);
+function _renderHighlightCard(h) {
+  const preisText = h.aktueller_preis !== null && h.aktueller_preis !== undefined ? fmtPct(h.aktueller_preis) : "–";
+  const veraenderungText =
+    h.veraenderung_seit_erkennung !== null && h.veraenderung_seit_erkennung !== undefined
+      ? `${h.veraenderung_seit_erkennung >= 0 ? "+" : ""}${(h.veraenderung_seit_erkennung * 100).toFixed(1)} Punkte seit Erkennung`
+      : "noch keine Vergleichsbasis";
+  const resolutionText =
+    h.tage_bis_resolution !== null && h.tage_bis_resolution !== undefined
+      ? h.tage_bis_resolution < 1
+        ? "Entscheidung sehr bald"
+        : `noch ca. ${Math.round(h.tage_bis_resolution)} Tag(e) bis zur Entscheidung`
+      : "Entscheidungszeitpunkt unbekannt";
+
+  return `
+    <div class="panel" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <h3 style="margin:0 0 6px"><a href="#/market/${encodeURIComponent(h.market_id)}">${h.frage}</a></h3>
+        <span class="badge green">Shadow-Score ${h.shadow_score.toFixed(0)}</span>
+      </div>
+      <div class="sub">Aktueller Preis: ${preisText} · ${veraenderungText} · ${resolutionText}${h.research_score !== null ? ` · Research-Score ${h.research_score.toFixed(0)}` : ""}</div>
+      <div style="margin-top:8px">
+        <strong>Warum interessant:</strong>
+        <ul>${h.wichtigste_gruende.map((g) => `<li>${g}</li>`).join("") || "<li>–</li>"}</ul>
+      </div>
+      <div>
+        <strong>Zu beachten:</strong>
+        <ul>${h.wichtigste_risiken.map((r) => `<li>${r}</li>`).join("") || "<li>–</li>"}</ul>
+      </div>
+      ${h.letzte_nachricht ? `<div class="sub">Letzte Nachricht: ${h.letzte_nachricht.titel}</div>` : ""}
+      <a href="#/research?market=${encodeURIComponent(h.market_id)}">🧠 KI-Analyse zu diesem Markt ansehen →</a>
+    </div>
+  `;
+}
+
+async function renderDashboardPage(container) {
+  container.innerHTML = `<div class="empty-state">Lade Startseite…</div>`;
+  try {
+    const home = await Api.home();
+    const t = home.heute;
+    const firstToday = _isFirstOpenToday();
+
+    const morgenbericht = firstToday
+      ? `
+      <div class="panel" style="border-color:var(--accent)">
+        <h3 style="margin-top:0">👋 Guten Morgen</h3>
+        <p>Heute solltest du besonders diese Märkte beobachten${home.besonders_interessant.length ? "" : " – aktuell gibt es aber nichts Auffälliges."}</p>
+      </div>
+    `
+      : "";
 
     container.innerHTML = `
-      <div class="disclaimer">Research-Hinweis – keine Wettaufforderung. Alle Werte stammen ausschließlich aus lokal gespeicherten Daten, keine Live-Provider-Abfrage bei jedem Seitenaufruf.</div>
+      <div class="disclaimer">Research-Hinweis – keine Wettaufforderung. Diese Seite zeigt bewusst nur wenige, sorgfältig ausgewählte Märkte statt einer vollständigen Übersicht.</div>
+      ${morgenbericht}
       <div class="widget-grid">
-        ${widgetCard({
-          title: "Research-Signale",
-          value: fmtNum(stats.signal_count),
-          sub: `${fmtNum(stats.evaluated_count)} ausgewertet`,
-        })}
-        ${widgetCard({
-          title: "Aktive Märkte (gespeichert)",
-          value: fmtNum(analytics.markets),
-        })}
-        ${widgetCard({
-          title: "Provider-Status",
-          listItems: providers.map(
-            (p) => `${p.name} — <span class="badge ${p.market_lists ? "green" : "yellow"}">${p.market_lists ? "aktiv" : "nicht verfügbar"}</span>`
-          ),
-        })}
-        ${widgetCard({
-          title: "Neue Signale",
-          listItems: signals.slice(0, 5).map((s) => `${s.signal_type} — ${s.question || s.provider_market_id}`),
-        })}
-        ${widgetCard({
-          title: "Größte Bewegungen (Score)",
-          listItems: movers.map((m) => `${fmtNum(m.opportunity_score, 1)} — ${m.question}`),
-        })}
-        ${widgetCard({
-          title: "Neue Märkte",
-          listItems: newMarkets.map((m) => m.question),
-        })}
-        ${widgetCard({
-          title: "Bevorstehende Resolutionen",
-          listItems: upcoming.map((m) => `${fmtDate(m.end_date)} — ${m.question}`),
-        })}
-        ${widgetCard({
-          title: "News",
-          listItems: news.map((n) => `${n.source}: ${n.title}`),
-        })}
-        ${widgetCard({
-          title: "Datenbankstatus",
-          sub: `Schema v${analytics.schema_version}`,
-          listItems: [
-            `Snapshots: ${fmtNum(analytics.market_snapshots)}`,
-            `Signale: ${fmtNum(analytics.research_signals)}`,
-            `Resolutionen: ${fmtNum(analytics.market_resolutions)}`,
-          ],
-        })}
-        ${widgetCard({
-          title: "Letzter Scan",
-          value: analytics.last_run_status || "–",
-          sub: `${analytics.last_run_provider || "–"} · ${fmtDate(analytics.last_run_finished_at)}`,
-        })}
-        ${widgetCard({
-          title: "API-Status",
-          value: health.status === "ok" ? "OK" : "Fehler",
-        })}
+        ${widgetCard({ title: "Märkte mit hoher Aufmerksamkeit", value: t.maerkte_mit_hoher_aufmerksamkeit })}
+        ${widgetCard({ title: "Neue Shadow-Setups (24h)", value: t.neue_shadow_setups })}
+        ${widgetCard({ title: "Wichtige Nachrichten (24h)", value: t.wichtige_nachrichten })}
+        ${widgetCard({ title: "Märkte kurz vor Entscheidung", value: t.maerkte_vor_entscheidung })}
       </div>
+
+      <h2>Heute besonders interessant</h2>
+      ${
+        home.besonders_interessant.length
+          ? home.besonders_interessant.map(_renderHighlightCard).join("")
+          : `<div class="empty-state">Aktuell gibt es keine Märkte, die mehrere unabhängige Auffälligkeiten gleichzeitig zeigen. Das ist normal — die meisten Märkte sind an den meisten Tagen unauffällig.</div>`
+      }
+      <p class="sub">Vollständige Liste aller Shadow-Setups: <a href="#/signals">Shadow-Setups ansehen →</a></p>
     `;
   } catch (err) {
-    container.innerHTML = `<div class="empty-state">Fehler beim Laden: ${err.message}</div>`;
+    container.innerHTML = `<div class="empty-state">Fehler beim Laden der Startseite: ${err.message}</div>`;
   }
 }

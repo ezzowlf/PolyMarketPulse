@@ -80,4 +80,7 @@ const Api = {
   aiAnalyzeNews: (marketId) => Api._send(`/ai/analyze-news/${encodeURIComponent(marketId)}`, "POST"),
   aiCompare: (marketIds) => Api._send("/ai/compare", "POST", { market_ids: marketIds }),
   aiAsk: (question, marketId) => Api._send("/ai/ask", "POST", { question, market_id: marketId || null }),
+  home: () => Api._get("/home"),
+  shadowSetups: (status) => Api._get(`/shadow-setups${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  shadowSetup: (id) => Api._get(`/shadow-setup/${id}`),
 };

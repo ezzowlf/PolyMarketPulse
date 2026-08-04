@@ -47,3 +47,17 @@ function fmtDate(iso) {
     return iso;
   }
 }
+
+const RESOLUTION_STATUS_DE = {
+  unresolved: "offen",
+  proposed: "Auflösung vorgeschlagen",
+  resolved: "entschieden",
+  cancelled: "storniert",
+  invalid: "ungültig",
+  disputed: "umstritten",
+  unknown: "unbekannt",
+};
+
+function fmtStatus(status) {
+  return RESOLUTION_STATUS_DE[status] || status || "–";
+}

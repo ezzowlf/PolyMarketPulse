@@ -11,7 +11,7 @@ async function renderResolutionsPage(container) {
   container.innerHTML = `
     <div class="panel">
       <table>
-        <thead><tr><th>Markt</th><th>Provider</th><th>Status</th><th>Gewinner</th><th>Aufgelöst</th><th>Quelle</th></tr></thead>
+        <thead><tr><th>Markt</th><th>Datenquelle</th><th>Status</th><th>Gewinner</th><th>Aufgelöst</th><th>Quelle</th></tr></thead>
         <tbody>
           ${rows
             .map(
@@ -19,7 +19,7 @@ async function renderResolutionsPage(container) {
             <tr class="clickable" data-provider="${r.provider}" data-id="${r.provider_market_id}">
               <td>${r.question || r.provider_market_id}</td>
               <td><span class="badge">${r.provider}</span></td>
-              <td><span class="badge ${statusBadge(r.status)}">${r.status}</span></td>
+              <td><span class="badge ${statusBadge(r.status)}">${fmtStatus(r.status)}</span></td>
               <td>${r.winning_outcome || "–"}</td>
               <td>${fmtDate(r.resolved_at)}</td>
               <td>${r.resolution_source || "–"}</td>
