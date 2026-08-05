@@ -804,6 +804,197 @@ def cmd_ai_ask(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_predict(args: argparse.Namespace) -> int:
+    """Prints only the binding statistical prediction — no AI call, no
+    cost. This is what GPT-5 nano is only ever allowed to explain."""
+    from .ai import service as ai_service
+    from .ai.client import AIError
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        prediction = ai_service.get_prediction(storage, args.market_id)
+    except AIError as exc:
+        return _print_ai_error(exc)
+    finally:
+        storage.close()
+    data = prediction.as_dict()
+    if args.json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+    else:
+        print(f"Markt YES: {_fmt_pct(data['market_yes_probability'])}  |  NO: {_fmt_pct(data['market_no_probability'])}")
+        print(f"Eigene Prognose YES: {_fmt_pct(data['estimated_yes_probability'])}  |  NO: {_fmt_pct(data['estimated_no_probability'])}")
+        print(f"Brutto-Edge: {_fmt_pct(data['gross_yes_edge'], signed=True)}  |  Netto-Edge: {_fmt_pct(data['net_yes_edge'], signed=True)}")
+        print(f"Empfehlung: {data['recommendation']}")
+        print(f"Modellvertrauen: {data['confidence_score']:.1f}/100  |  Datenqualität: {data['data_quality_score']:.1f}/100")
+        if data["uncertainty_lower"] is not None:
+            print(f"Unsicherheitsbereich (YES): {_fmt_pct(data['uncertainty_lower'])} – {_fmt_pct(data['uncertainty_upper'])}")
+        print(f"Historische Vergleichsfälle: {data['comparable_sample_size']}")
+        print(f"Deadline-Phase: {data.get('deadline_phase', 'unbekannt')}")
+        if data.get("submodel_estimates"):
+            print("Ensemble-Teilmodelle:")
+            for s in data["submodel_estimates"]:
+                est = _fmt_pct(s["estimated_yes_probability"]) if s["estimated_yes_probability"] is not None else "n/a"
+                print(f"  - {s['name']}: verfügbar={s['available']}, Schätzung={est}, Gewicht={s['weight']:.2f} — {s['detail']}")
+        if data.get("scenarios"):
+            sc = data["scenarios"]
+            print(f"Basisszenario: {sc['base_case']}")
+            for b in sc.get("bull_case", []):
+                print(f"  Bull: {b}")
+            for b in sc.get("bear_case", []):
+                print(f"  Bear: {b}")
+        for note in data["reasoning_notes"]:
+            print(f"  - {note}")
+    return 0
+
+
+def _fmt_pct(value: float | None, signed: bool = False) -> str:
+    if value is None:
+        return "n/a"
+    pct = value * 100
+    return f"{pct:+.1f}%" if signed else f"{pct:.1f}%"
+
+
+def cmd_explain_recommendation(args: argparse.Namespace) -> int:
+    from .ai import service as ai_service
+    from .ai.client import AIError
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        response = ai_service.explain_recommendation(
+            storage, settings, args.market_id, force_recompute=args.no_cache
+        )
+    except AIError as exc:
+        return _print_ai_error(exc)
+    finally:
+        storage.close()
+    if args.json:
+        print(json.dumps(response.model_dump(), indent=2, ensure_ascii=False))
+        return 0
+
+    pred = response.prediction
+    exp = response.explanation
+    meta = response.meta
+    print(f"Markt YES: {_fmt_pct(pred['market_yes_probability'])}  |  Eigene Prognose YES: {_fmt_pct(pred['estimated_yes_probability'])} / NO: {_fmt_pct(pred['estimated_no_probability'])}")
+    print(f"Netto-Edge: {_fmt_pct(pred['net_yes_edge'], signed=True)}  |  Richtung: {exp.direction}  |  Empfehlung: {exp.recommendation}")
+    print(f"Modellvertrauen: {pred['confidence_score']:.1f}/100  |  Datenqualität: {pred['data_quality_score']:.1f}/100")
+    print(f"Deadline-Phase: {pred.get('deadline_phase', 'unbekannt')}")
+    if pred.get("submodel_estimates"):
+        print("Ensemble-Teilmodelle:")
+        for s in pred["submodel_estimates"]:
+            est = _fmt_pct(s["estimated_yes_probability"]) if s["estimated_yes_probability"] is not None else "n/a"
+            print(f"  - {s['name']}: verfügbar={s['available']}, Schätzung={est}, Gewicht={s['weight']:.2f}")
+    if pred.get("scenarios"):
+        sc = pred["scenarios"]
+        print(f"Basisszenario: {sc['base_case']}")
+        for b in sc.get("bull_case", []):
+            print(f"  Bull: {b}")
+        for b in sc.get("bear_case", []):
+            print(f"  Bear: {b}")
+    print(f"Erklärung: {exp.headline}")
+    print(f"  {exp.summary}")
+    print(f"  {exp.recommendation_explanation}")
+    if exp.supports_yes:
+        print("Spricht für YES:")
+        for f in exp.supports_yes:
+            print(f"  + [{f.impact}] {f.factor}")
+    if exp.supports_no:
+        print("Spricht für NO:")
+        for f in exp.supports_no:
+            print(f"  - [{f.impact}] {f.factor}")
+    if exp.uncertainties:
+        print("Unsicherheiten:", "; ".join(exp.uncertainties))
+    if exp.data_gaps:
+        print("Datenlücken:", "; ".join(exp.data_gaps))
+    print(f"Historischer Kontext: {exp.historical_context}")
+    print(f"{exp.warning}")
+    cost = meta.actual_cost_usd if meta.actual_cost_usd is not None else meta.estimated_cost_usd
+    print(
+        f"[Modell: {meta.model} | Fallback: {meta.used_fallback}"
+        + (f" ({meta.fallback_reason})" if meta.fallback_reason else "")
+        + f" | Cache: {meta.cached} | Kosten: {cost if cost is not None else 0.0:.5f} USD | Analyse-ID: {meta.analysis_id}]"
+    )
+    return 0
+
+
+def cmd_cost_report(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        report = storage.cost_report(days=args.days)
+    finally:
+        storage.close()
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(f"Zeitraum: letzte {report['period_days']} Tage")
+        print(f"Heute ausgegeben: {report['spent_today_usd']:.5f} USD")
+        print(f"Regelbasierte Fallback-Analysen (kein AI-Call): {report['rule_based_fallback_runs']}")
+        for row in report["by_model"]:
+            print(
+                f"  {row['model']}: {row['runs']} Analysen ({row['live_runs']} live, {row['cache_hits']} aus Cache), "
+                f"Gesamtkosten {row['total_actual_cost_usd']:.5f} USD, Ø {row['avg_actual_cost_usd']:.6f} USD/Analyse, "
+                f"Tokens in={row['total_input_tokens']} out={row['total_output_tokens']}"
+            )
+    return 0
+
+
+def cmd_backtest(args: argparse.Namespace) -> int:
+    from .backtest import run_backtest
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        report = run_backtest(storage.connection, category=args.category, min_train_size=args.min_train_size)
+    finally:
+        storage.close()
+    if args.json:
+        print(json.dumps(report.as_dict(), indent=2, ensure_ascii=False))
+    else:
+        d = report.as_dict()
+        print(f"Ausgewertete Fälle (Out-of-Sample): {d['n_evaluated']}")
+        print(f"Übersprungen (zu wenig Trainingsdaten / kein Look-ahead möglich): {d['n_skipped']}")
+        print(f"Brier Score: {d['brier_score']}")
+        print(f"Log Loss: {d['log_loss']}")
+        print(f"Kalibrierung (Bucket -> beobachtete Quote): {d['calibration']}")
+        print(f"Simulierte kumulierte Rendite: {d['cumulative_return']}")
+        print(f"Max. Drawdown: {d['max_drawdown']}")
+        print(f"Performance YES-Empfehlungen: {d['performance_yes']}")
+        print(f"Performance NO-Empfehlungen: {d['performance_no']}")
+        print("Performance nach Kategorie:")
+        for cat, stats in d["performance_by_category"].items():
+            print(f"  {cat}: {stats}")
+    return 0
+
+
+def cmd_evaluation(args: argparse.Namespace) -> int:
+    from .evaluation import evaluate_predictions
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        report = evaluate_predictions(storage.connection)
+    finally:
+        storage.close()
+    if args.json:
+        print(json.dumps(report.as_dict(), indent=2, ensure_ascii=False))
+    else:
+        d = report.as_dict()
+        print(f"Gespeicherte Prognosen insgesamt: {d['n_snapshots_total']}")
+        print(f"Davon bereits aufgelöst (auswertbar): {d['n_evaluable']}")
+        print(f"Davon mit YES/NO-Empfehlung: {d['n_directional']}")
+        print(f"Accuracy: {d['accuracy']}")
+        print(f"Precision: {d['precision']}")
+        print(f"Recall: {d['recall']}")
+        print(f"Brier Score: {d['brier_score']}")
+        print(f"Log Loss: {d['log_loss']}")
+        print(f"Ø Netto-Edge: {d['average_net_edge']}")
+        print(f"Simulierter ROI: {d['simulated_roi']}")
+        print(f"Kalibrierung: {d['calibration']}")
+    return 0
+
+
 def cmd_ai_smoke_test(args: argparse.Namespace) -> int:
     """Manual-only, real OpenAI call. Refuses to run unless AI is explicitly
     enabled AND an API key is configured — never runs as part of the normal
@@ -993,6 +1184,43 @@ def build_parser() -> argparse.ArgumentParser:
     ai_ask_parser.add_argument("--market-id", dest="market_id", default=None)
     ai_ask_parser.add_argument("--json", action="store_true")
     ai_ask_parser.set_defaults(func=cmd_ai_ask)
+
+    predict_parser = subparsers.add_parser(
+        "predict", help="Eigene statistische Prognose für einen Markt (kein AI-Aufruf, keine Kosten)"
+    )
+    predict_parser.add_argument("market_id")
+    predict_parser.add_argument("--json", action="store_true")
+    predict_parser.set_defaults(func=cmd_predict)
+
+    explain_reco_parser = subparsers.add_parser(
+        "explain-recommendation",
+        help="Vollständige Prognose + KI-Erklärung (GPT-5 nano, mit Fallback) für einen Markt",
+    )
+    explain_reco_parser.add_argument("market_id")
+    explain_reco_parser.add_argument(
+        "--no-cache", action="store_true", help="Cache umgehen und Analyse neu berechnen"
+    )
+    explain_reco_parser.add_argument("--json", action="store_true")
+    explain_reco_parser.set_defaults(func=cmd_explain_recommendation)
+
+    cost_report_parser = subparsers.add_parser("cost-report", help="KI-Kostenbericht (Modell, Läufe, USD)")
+    cost_report_parser.add_argument("--days", type=int, default=7)
+    cost_report_parser.add_argument("--json", action="store_true")
+    cost_report_parser.set_defaults(func=cmd_cost_report)
+
+    backtest_parser = subparsers.add_parser(
+        "backtest", help="Historischer Backtest der Prognose-Engine (zeitbasierte Splits, kein Look-ahead)"
+    )
+    backtest_parser.add_argument("--category", default=None)
+    backtest_parser.add_argument("--min-train-size", dest="min_train_size", type=int, default=5)
+    backtest_parser.add_argument("--json", action="store_true")
+    backtest_parser.set_defaults(func=cmd_backtest)
+
+    evaluation_parser = subparsers.add_parser(
+        "evaluation", help="Reale Prognose-Historie auswerten (Accuracy/Precision/Recall/Brier/LogLoss/ROI)"
+    )
+    evaluation_parser.add_argument("--json", action="store_true")
+    evaluation_parser.set_defaults(func=cmd_evaluation)
 
     ai_smoke_parser = subparsers.add_parser(
         "ai-smoke-test",

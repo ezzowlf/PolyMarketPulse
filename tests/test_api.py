@@ -15,6 +15,12 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
     monkeypatch.setenv("POLYMARKETPULSE_TELEGRAM_ENABLED", "false")
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    # Never let automated tests make a real OpenAI call — a real key may be
+    # present in the local .env from a previous manual live-smoke-test.
+    # Settings.load() reads .env directly, so an unset env var isn't enough
+    # on its own; force both flags explicitly.
+    monkeypatch.setenv("POLYMARKETPULSE_AI_ENABLED", "false")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
 
     from polymarketpulse.api import app
     from polymarketpulse.config import Settings
@@ -287,3 +293,50 @@ def test_watchlist_supports_tags_rating_group(client: TestClient) -> None:
     assert item["tags"] == ["macro", "fed"]
     assert item["rating"] == 5
     assert item["group"] == "watch-closely"
+
+
+def _seeded_market_id(client: TestClient) -> str:
+    return client.get("/markets").json()["items"][0]["market_id"]
+
+
+def test_prediction_endpoint_returns_binding_values(client: TestClient) -> None:
+    market_id = _seeded_market_id(client)
+    resp = client.get(f"/prediction/{market_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["market_id"] == market_id
+    assert data["recommendation"] in (
+        "STRONG_YES", "YES", "WATCH_YES", "NO_BET", "WATCH_NO", "NO", "STRONG_NO", "INSUFFICIENT_DATA",
+    )
+
+
+def test_prediction_endpoint_unknown_market_returns_424(client: TestClient) -> None:
+    resp = client.get("/prediction/does-not-exist")
+    assert resp.status_code == 424
+
+
+def test_ai_explain_recommendation_falls_back_without_api_key(client: TestClient) -> None:
+    market_id = _seeded_market_id(client)
+    resp = client.get(f"/ai/explain-recommendation/{market_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["meta"]["used_fallback"] is True
+    assert data["explanation"]["summary"]
+    assert data["explanation"]["recommendation"] == data["prediction"]["recommendation"]
+
+
+def test_ai_explain_recommendation_recompute_endpoint(client: TestClient) -> None:
+    market_id = _seeded_market_id(client)
+    resp = client.post(f"/ai/explain-recommendation/{market_id}/recompute")
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["used_fallback"] is True
+
+
+def test_ai_cost_report_endpoint(client: TestClient) -> None:
+    market_id = _seeded_market_id(client)
+    client.get(f"/ai/explain-recommendation/{market_id}")
+    resp = client.get("/ai/cost-report")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "spent_today_usd" in data
+    assert "by_model" in data

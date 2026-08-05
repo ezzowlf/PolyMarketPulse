@@ -18,6 +18,7 @@ const ROUTES = {
   research: { title: "KI-Analyse", render: renderResearchPage },
   search: { title: "Suche", render: renderSearchPage },
   analytics: { title: "Statistiken (erweitert)", render: renderAnalyticsPage },
+  backtest: { title: "Backtest & KI-Kosten", render: renderBacktestPage },
 };
 
 async function router() {

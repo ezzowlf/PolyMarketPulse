@@ -798,7 +798,8 @@ class Storage:
         cutoff = (datetime.now(UTC) - timedelta(seconds=ttl_seconds)).isoformat()
         row = self.connection.execute(
             """
-            SELECT id, response_json, input_tokens, output_tokens, created_at
+            SELECT id, response_json, input_tokens, output_tokens, created_at,
+                   estimated_cost_usd, actual_cost_usd
             FROM ai_analysis_runs
             WHERE analysis_type = ? AND model = ? AND prompt_version = ? AND context_hash = ?
               AND status = 'completed' AND created_at >= ?
@@ -814,6 +815,8 @@ class Storage:
             "input_tokens": row[2],
             "output_tokens": row[3],
             "created_at": row[4],
+            "estimated_cost_usd": row[5],
+            "actual_cost_usd": row[6],
         }
 
     def record_ai_run(
@@ -830,14 +833,18 @@ class Storage:
         cached: bool,
         error_code: str | None,
         response_json: str | None,
+        cached_input_tokens: int | None = None,
+        estimated_cost_usd: float | None = None,
+        actual_cost_usd: float | None = None,
     ) -> int:
         now = datetime.now(UTC).isoformat()
         cursor = self.connection.execute(
             """
             INSERT INTO ai_analysis_runs (
                 analysis_type, market_id, model, prompt_version, context_hash, status,
-                created_at, duration_ms, input_tokens, output_tokens, cached, error_code, response_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, duration_ms, input_tokens, output_tokens, cached, error_code, response_json,
+                cached_input_tokens, estimated_cost_usd, actual_cost_usd
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 analysis_type,
@@ -853,6 +860,9 @@ class Storage:
                 int(cached),
                 error_code,
                 response_json,
+                cached_input_tokens,
+                estimated_cost_usd,
+                actual_cost_usd,
             ),
         )
         self.connection.commit()
@@ -872,6 +882,73 @@ class Storage:
             "input_tokens", "output_tokens", "cached", "error_code",
         )
         return [dict(zip(cols, r, strict=True)) for r in rows]
+
+    def save_prediction_snapshot(
+        self, market_id: str, provider: str, provider_market_id: str, category: str | None,
+        prediction_version: str, market_yes_probability: float | None, estimated_yes_probability: float | None,
+        net_yes_edge: float | None, confidence_score: float, recommendation: str, comparable_sample_size: int,
+    ) -> int:
+        now = datetime.now(UTC).isoformat()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO prediction_snapshots (
+                market_id, provider, provider_market_id, category, prediction_version, created_at,
+                market_yes_probability, estimated_yes_probability, net_yes_edge, confidence_score,
+                recommendation, comparable_sample_size
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                market_id, provider, provider_market_id, category, prediction_version, now,
+                market_yes_probability, estimated_yes_probability, net_yes_edge, confidence_score,
+                recommendation, comparable_sample_size,
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def cost_report(self, days: int = 7) -> dict:
+        """Aggregate KI-cost figures for the CLI/API cost report. Groups by
+        model so nano vs. mini usage — and their very different unit costs —
+        stay visible instead of being averaged away."""
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        by_model = self.connection.execute(
+            """
+            SELECT model,
+                   COUNT(*) AS runs,
+                   SUM(CASE WHEN cached = 0 THEN 1 ELSE 0 END) AS live_runs,
+                   SUM(CASE WHEN cached = 1 THEN 1 ELSE 0 END) AS cache_hits,
+                   COALESCE(SUM(actual_cost_usd), 0) AS total_actual_cost_usd,
+                   COALESCE(AVG(actual_cost_usd), 0) AS avg_actual_cost_usd,
+                   COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
+                   COALESCE(SUM(output_tokens), 0) AS total_output_tokens
+            FROM ai_analysis_runs
+            WHERE analysis_type = 'explain_recommendation' AND created_at >= ?
+            GROUP BY model
+            """,
+            (cutoff,),
+        ).fetchall()
+        spent_today = self.connection.execute(
+            "SELECT COALESCE(SUM(actual_cost_usd), 0) FROM ai_analysis_runs "
+            "WHERE analysis_type = 'explain_recommendation' AND created_at >= ?",
+            (today_start,),
+        ).fetchone()[0]
+        fallback_count = self.connection.execute(
+            "SELECT COUNT(*) FROM ai_analysis_runs "
+            "WHERE analysis_type = 'explain_recommendation' AND created_at >= ? "
+            "AND (actual_cost_usd IS NULL OR actual_cost_usd = 0) AND input_tokens IS NULL",
+            (cutoff,),
+        ).fetchone()[0]
+        cols = (
+            "model", "runs", "live_runs", "cache_hits", "total_actual_cost_usd",
+            "avg_actual_cost_usd", "total_input_tokens", "total_output_tokens",
+        )
+        return {
+            "period_days": days,
+            "spent_today_usd": round(spent_today, 6),
+            "by_model": [dict(zip(cols, r, strict=True)) for r in by_model],
+            "rule_based_fallback_runs": fallback_count,
+        }
 
     # --- Shadow-Setups (permanente Research-Historie) ---------------------
 

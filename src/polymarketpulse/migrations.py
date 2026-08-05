@@ -431,6 +431,46 @@ def _migration_006_shadow_setups(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_007_ai_cost_tracking(conn: sqlite3.Connection) -> None:
+    """Phase 7: adds token-cost bookkeeping to ai_analysis_runs (cached
+    input tokens, estimated vs. actual USD cost) and a market_id-agnostic
+    daily spend view is computed on the fly from these columns — no
+    hardcoded prices are stored, only computed costs per run."""
+    _add_column(conn, "ai_analysis_runs", "cached_input_tokens", "INTEGER")
+    _add_column(conn, "ai_analysis_runs", "estimated_cost_usd", "REAL")
+    _add_column(conn, "ai_analysis_runs", "actual_cost_usd", "REAL")
+
+
+def _migration_008_prediction_snapshots(conn: sqlite3.Connection) -> None:
+    """Prediction Engine V2: every computed prediction is persisted here
+    (not just AI-explained ones — get_prediction() alone triggers a save
+    too), so later resolution can be joined back for accuracy/precision/
+    recall/Brier/log-loss/calibration/edge/ROI evaluation
+    (`evaluation.py::evaluate_predictions`) without needing to have called
+    the AI layer at all."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS prediction_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            provider_market_id TEXT NOT NULL,
+            category TEXT,
+            prediction_version TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            market_yes_probability REAL,
+            estimated_yes_probability REAL,
+            net_yes_edge REAL,
+            confidence_score REAL,
+            recommendation TEXT NOT NULL,
+            comparable_sample_size INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_prediction_snapshots_market
+        ON prediction_snapshots(provider, provider_market_id, created_at);
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -438,6 +478,8 @@ MIGRATIONS: list[Migration] = [
     (4, "intelligence_platform", _migration_004_intelligence_platform),
     (5, "ai_analysis", _migration_005_ai_analysis),
     (6, "shadow_setups", _migration_006_shadow_setups),
+    (7, "ai_cost_tracking", _migration_007_ai_cost_tracking),
+    (8, "prediction_snapshots", _migration_008_prediction_snapshots),
 ]
 
 

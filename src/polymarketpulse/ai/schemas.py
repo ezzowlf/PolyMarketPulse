@@ -92,3 +92,74 @@ class AIRunMeta(BaseModel):
 class AIAnalysisResponse(BaseModel):
     result: AnalysisResult
     meta: AIRunMeta
+
+
+# --- Phase 7: statistics-engine + GPT-5-nano explanation layer -------------
+
+EXPLANATION_PROMPT_VERSION = "explain-v1"
+
+DirectionLiteral = Literal["YES", "NO", "NONE"]
+RecommendationLiteral = Literal[
+    "STRONG_YES", "YES", "WATCH_YES", "NO_BET", "WATCH_NO", "NO", "STRONG_NO", "INSUFFICIENT_DATA"
+]
+ImpactLiteral = Literal["low", "medium", "high"]
+
+
+class ProbabilityExplanation(BaseModel):
+    market_yes_percent: float | None = None
+    model_yes_percent: float | None = None
+    model_no_percent: float | None = None
+    net_edge_percentage_points: float | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+class ExplanationFactor(BaseModel):
+    factor: str
+    impact: ImpactLiteral
+    source_ids: list[str] = Field(default_factory=list)
+
+    model_config = {"extra": "forbid"}
+
+
+class ExplanationResult(BaseModel):
+    """GPT-5 nano's only allowed output shape: it explains numbers the
+    statistics engine (prediction.py) already computed. `direction` and
+    `recommendation` must match the engine's values exactly — enforced by
+    ai/validation.py, not by trusting the model."""
+
+    direction: DirectionLiteral
+    recommendation: RecommendationLiteral
+    headline: str
+    summary: str
+    probability_explanation: ProbabilityExplanation
+    supports_yes: list[ExplanationFactor] = Field(default_factory=list)
+    supports_no: list[ExplanationFactor] = Field(default_factory=list)
+    uncertainties: list[str] = Field(default_factory=list)
+    data_gaps: list[str] = Field(default_factory=list)
+    historical_context: str = ""
+    recommendation_explanation: str
+    warning: str = "Prognose, keine Gewissheit."
+
+    model_config = {"extra": "forbid"}
+
+
+class ExplanationRunMeta(BaseModel):
+    analysis_id: int
+    model: str
+    prompt_version: str
+    cached: bool
+    duration_ms: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    estimated_cost_usd: float | None = None
+    actual_cost_usd: float | None = None
+    used_fallback: bool = False
+    fallback_reason: str | None = None
+    created_at: str
+
+
+class ExplainRecommendationResponse(BaseModel):
+    prediction: dict
+    explanation: ExplanationResult
+    meta: ExplanationRunMeta

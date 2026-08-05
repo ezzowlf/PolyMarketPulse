@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { hash: "#/performance", icon: "💹", label: "Auswertung" },
   { hash: "#/stats", icon: "📊", label: "Statistik" },
   { hash: "#/analytics", icon: "📐", label: "Statistiken (erweitert)" },
+  { hash: "#/backtest", icon: "🧮", label: "Backtest & KI-Kosten" },
   { hash: "#/quality", icon: "🧹", label: "Datenqualität" },
   { hash: "#/compare", icon: "⚖", label: "Plattform-Vergleich" },
   { hash: "#/providers", icon: "🔌", label: "Datenquellen" },

@@ -15,7 +15,9 @@ Browser  →  Dashboard (statisches HTML/JS)  →  REST API (FastAPI)  →  Rese
 - **Provider-Schicht** (`src/polymarketpulse/providers/`): gemeinsame Schnittstelle `PredictionMarketProvider`, Registry, ein Adapter je Plattform.
 - **Research Engine**: `scoring.py` (transparenter Score), `signals.py` (typisierte, erklärbare Signalereignisse), `stats.py` (Auswertung), `matching.py` (Cross-Provider-Kandidaten + Preisdivergenz), `news/` (RSS-Abruf, Klassifizierung, Verknüpfung, Reaktionsmessung), `data_quality.py` (Datenqualitätsprüfung), `price_analytics.py` (gleitende Durchschnitte, Volatilität, Trends), `performance.py` (virtuelle Equity-Kurve/Drawdown), `explain.py` (rein datenbasiertes Analysemodul, kein LLM).
 - **Storage**: `storage.py` + `migrations.py` (nummerierte, idempotente Migrationen, kein Datenverlust bei bestehenden DBs).
-- **AI-Schicht** (`src/polymarketpulse/ai/`): kontrollierter GPT-4.1-mini-Research-Assistent — siehe eigener Abschnitt unten. Standardmäßig deaktiviert.
+- **Prognose-Engine** (`prediction.py`): transparente, base-rate-blendende statistische Prognose (kein ML-Blackbox-Modell) — berechnet Markt-/Modellwahrscheinlichkeit, Edge, Konfidenz, Datenqualität und Empfehlung, bevor irgendeine KI aufgerufen wird.
+- **AI-Erklärungsschicht** (`src/polymarketpulse/ai/`): kontrollierter GPT-5-nano-Research-Assistent, der die Prognose-Engine nur *erklärt*, nie selbst Wahrscheinlichkeiten erfindet — siehe eigener Abschnitt unten. Standardmäßig deaktiviert.
+- **Backtest-Engine** (`backtest.py`): zeitbasierter Walk-Forward-Backtest der Prognose-Engine (kein Look-ahead), Brier Score, Log Loss, Kalibrierung, simulierte Performance/Drawdown, Aufschlüsselung nach Richtung und Kategorie.
 - **REST API**: `api.py` (FastAPI, ausschließlich lesend + Watchlist-CRUD, Swagger unter `/docs`).
 - **Dashboard**: `web/` (Vanilla HTML/CSS/JS, kein Build-Schritt, wird von der API unter `/` mit ausgeliefert).
 - **CLI**: `cli.py` — bleibt vollständig erhalten und unabhängig von API/Dashboard nutzbar.
@@ -64,6 +66,11 @@ python -m polymarketpulse quality --provider polymarket
 python -m polymarketpulse performance
 python -m polymarketpulse search "Fed rate"
 python -m polymarketpulse explain <market_id> --mode movement
+python -m polymarketpulse predict <market_id>
+python -m polymarketpulse explain-recommendation <market_id> [--no-cache]
+python -m polymarketpulse cost-report --days 7
+python -m polymarketpulse backtest [--category <name>] [--min-train-size 5]
+python -m polymarketpulse evaluation
 ```
 
 (Falls das Skript `polymarketpulse` nach der Installation nicht im PATH gefunden wird, funktioniert alternativ `python -m polymarketpulse.cli <command>`.)
@@ -76,11 +83,11 @@ python -m polymarketpulse serve
 
 Öffnet die API auf `http://127.0.0.1:8000` (Swagger unter `/docs`) und liefert das Dashboard unter `/` aus. Das Dashboard liest **ausschließlich aus der lokalen SQLite-Datenbank** — es fragt bei jedem Seitenaufruf keine Provider live ab. Neue Daten kommen ausschließlich über `polymarketpulse scan` (CLI oder als geplanter Task).
 
-Seiten: Dashboard, Märkte, Marktdetail (Charts, historische Analyse, Signalhistorie, News), Watchlist, Chancen (Signale), Research (datenbasierte Erklärungen), News, Kalender, Resolutionen, Simulation, Performance, Statistik, Analytics, Data Quality, Provider-Vergleich (Cross-Provider-Preisdivergenz), Provider (Capability-Dashboard), Scanner-Monitoring, Heatmap, Suche, Einstellungen.
+Seiten: Dashboard, Märkte, Marktdetail (Charts, historische Analyse, Signalhistorie, News, **eigene Prognose & KI-Erklärung**), Watchlist, Chancen (Signale), Research (datenbasierte Erklärungen), News, Kalender, Resolutionen, Simulation, Performance, Statistik, Analytics, **Backtest & KI-Kosten**, Data Quality, Provider-Vergleich (Cross-Provider-Preisdivergenz), Provider (Capability-Dashboard), Scanner-Monitoring, Heatmap, Suche, Einstellungen.
 
 ### REST-Endpunkte
 
-`GET /health`, `/providers`, `/provider/{name}`, `/providers/status`, `/markets`, `/market/{id}`, `/signals`, `/signal/{id}`, `/stats`, `/news`, `/history/{market_id}`, `/history/full/{market_id}`, `/watchlist`, `/calendar`, `/heatmap`, `/analytics`, `/settings`, `/quality`, `/performance`, `/simulation`, `/resolutions`, `/search`, `/compare`, `/explain/{market_id}` · `POST /watchlist` · `DELETE /watchlist/{id}`. Alle Antworten sind JSON, keine HTML-Ausgabe über die API. Keine Order-, Wallet- oder Tradingendpunkte (per Test abgesichert).
+`GET /health`, `/providers`, `/provider/{name}`, `/providers/status`, `/markets`, `/market/{id}`, `/signals`, `/signal/{id}`, `/stats`, `/news`, `/history/{market_id}`, `/history/full/{market_id}`, `/watchlist`, `/calendar`, `/heatmap`, `/analytics`, `/settings`, `/quality`, `/performance`, `/simulation`, `/resolutions`, `/search`, `/compare`, `/explain/{market_id}`, `/prediction/{market_id}`, `/ai/explain-recommendation/{market_id}`, `/ai/cost-report`, `/backtest`, `/evaluation` · `POST /watchlist`, `/ai/explain-recommendation/{market_id}/recompute` · `DELETE /watchlist/{id}`. Alle Antworten sind JSON, keine HTML-Ausgabe über die API. Keine Order-, Wallet- oder Tradingendpunkte (per Test abgesichert).
 
 ## Tests und Lint
 
@@ -140,9 +147,131 @@ Jedes Signal wird bei Auflösung mit 1.0 virtueller Einheit simuliert (`signal_e
 
 `explain.py` beantwortet vier Fragetypen ausschließlich durch Retrieval und Arithmetik über SQLite — kein generatives Modell, keine Halluzination: „Warum bewegt sich der Markt?“, „Welche News waren relevant?“, „Welche Signale lagen vorher vor?“, „Welche historischen Märkte waren vergleichbar?“. Jede Aussage kommt mit den zugrundeliegenden Datenbank-Zeilen als `evidence`. Abrufbar über `GET /explain/{market_id}`, CLI `explain` und die Dashboard-Seite „Research“.
 
-## KI-Research-Assistent (GPT-4.1 mini, optional)
+## Prognose-Engine V2 & GPT-5 nano-Erklärungsschicht
 
-Ein **kontrollierter** Research-Assistent auf Basis von OpenAI GPT-4.1 mini (`src/polymarketpulse/ai/`). Die KI hat **keinen** Zugriff auf SQLite, Dateien, Shell oder das Internet — sie bekommt ausschließlich einen begrenzten, vom Backend zusammengestellten JSON-Kontext (`context_builder.py`) und antwortet strikt im vorgegebenen JSON-Schema (OpenAI Structured Outputs). Standardmäßig **deaktiviert**; ohne `OPENAI_API_KEY` läuft die gesamte Anwendung unverändert weiter.
+Diese Trennung ist die zentrale, unveränderte Architekturregel seit Phase 7: **die eigene Engine berechnet,
+GPT-5 nano erklärt nur.** Version 2 ersetzt den einzelnen Basisraten-Blend aus Phase 7 durch ein Ensemble
+unabhängiger, jeweils eigenständig testbarer Teilmodelle (`src/polymarketpulse/prediction/` — vormals eine
+einzelne Datei `prediction.py`, jetzt ein Package). `compute_prediction()` (in `prediction/engine.py`) bleibt
+das gleiche, öffentliche Einstiegssignatur wie in V1 — bestehende Aufrufer (`ai/service.py`, `backtest.py`)
+mussten nicht geändert werden.
+
+### 1. Prognose-Engine V2 — bindend, unveränderbar für die KI
+
+Der Orchestrator berechnet, bevor irgendeine KI aufgerufen wird, die vollständigen, bindenden Werte:
+`market_yes_probability`, `market_no_probability`, `estimated_yes_probability`, `estimated_no_probability`,
+`gross_yes_edge`, `net_yes_edge`, `confidence_score`, `data_quality_score` (sechsteilige Aufschlüsselung),
+`uncertainty_lower`/`uncertainty_upper`, `recommendation` — plus neu in V2: `deadline_phase`,
+`submodel_estimates` (volle Transparenz über jedes Teilmodell), `ensemble_agreement`, `scenarios`
+(Base/Bull/Bear), `news_sentiment_score`, `news_confirmation_count`.
+
+**Module** (jedes eigenständig unit-getestet, `tests/test_prediction_v2.py`):
+
+- **`deadline.py` — Deadline Engine.** Klassifiziert die verbleibende Zeit bis zur Resolution in 7 Phasen
+  (`MORE_THAN_7_DAYS` … `FINAL_MINUTES`) und liefert dafür konfigurierte Gewichte: je näher die Deadline, desto
+  höher das Gewicht für News/Momentum und desto niedriger das Gewicht der (langsam reagierenden) historischen
+  Basisrate — plus eine empfohlene Scan-Frequenz je Phase (nur eine Empfehlung; die tatsächliche Scan-Cadence
+  bleibt Sache der Scanner-Konfiguration).
+- **`momentum.py` — Momentum/Markt-Modell.** Baut auf den bestehenden, transparenten Kennzahlen aus
+  `price_analytics.py` auf (gleitende Durchschnitte, Volatilität, Trendwechsel). Der aktuelle Marktpreis ist
+  immer der Anker; Momentum-Fortsetzung und Mean-Reversion wirken nur als klein gedeckelte Anpassung (± 5
+  Prozentpunkte) darauf, sofern genug Preis-Historie vorliegt (≥ 3 Snapshots) — sonst wird der reine Marktpreis
+  unverändert übernommen, statt das Signal komplett zu verwerfen.
+- **`history.py` — Historisches Modell.** Die aus Phase 7 bekannte Basisraten-Logik, jetzt als eigenständiges
+  Ensemble-Mitglied mit eigenem, stichprobengrößen-abhängigem Gewicht (gedeckelt bei 60 %).
+- **`news.py` — News-Modell (nicht-LLM, deterministisch).** Bewusst **kein** Sprachmodell: ein kleines,
+  auditierbares Lexikon (positiv/negativ, DE+EN) bewertet bereits verknüpfte, gespeicherte News-Titel
+  (`news_events`/`news_market_links`, gefüllt von `news/` — hier wird nicht live nachgeladen). Zusätzlich fließen
+  Quellvertrauen (feste Tabelle je Domain, unbekannt = neutral 0.5), Aktualität (Exponential-Decay, Halbwertszeit
+  48h) und die Anzahl unabhängiger, gleichgerichtet bestätigender Quellen ein.
+- **`bayesian.py` — Bayesianisches Update.** Faltet die gewichtete News-Stimmung per Log-Odds-Update in die
+  Prior-Schätzung (History+Momentum-Ensemble) ein — inkrementell, keine komplette Neuberechnung. Ohne
+  Nachrichtenevidenz ist das Update ein No-Op (Posterior = Prior). Verschiebung ist hart gedeckelt
+  (`MAX_LOG_ODDS_SHIFT`), damit einzelne Schlagzeilen die Prognose nicht dominieren können.
+- **`confidence.py` — Konfidenz, strikt getrennt von der Wahrscheinlichkeit.** Aus Datenqualität (35 %),
+  Anzahl verfügbarer Teilmodelle (25 %), Modellübereinstimmung/Ensemble-Agreement (25 %) und Marktstabilität
+  (15 %). Ein Score von 80 ist niemals automatisch eine Wahrscheinlichkeit von 80 % — dieselbe Regel wie im
+  System-Prompt für GPT-5 nano.
+- **`scenarios.py` — Szenario-Engine (nicht-LLM).** Erzeugt Base-/Bull-/Bear-Case ausschließlich aus bereits
+  berechneten, strukturierten Fakten (Teilmodell-Schätzungen, positive/negative News, historische Basisrate) über
+  feste Textbausteine — keine KI ist an der Entscheidung beteiligt, *was* die Szenarien aussagen; GPT-5 nano
+  bekommt dieses fertige Set später nur zur sprachlichen Ausformulierung.
+- **`ensemble.py` — Meta-Modell.** Transparent gewichteter Durchschnitt der verfügbaren Teilmodelle (nicht
+  verfügbare Teilmodelle — z. B. History ohne genug Vergleichsfälle — werden ausgeschlossen, nie stillschweigend
+  auf 0.5 gesetzt).
+- **`engine.py` — Orchestrator.** Verdrahtet alle Module in der Reihenfolge Deadline → History+Momentum-Ensemble
+  (Prior) → News+Bayesianisches Update (Posterior) → Konfidenz → Empfehlung → Szenarien, exakt wie in Punkt 4
+  der ursprünglichen Auftragsvorgabe beschrieben.
+
+Empfehlungsschwellen sind unverändert aus Phase 7 übernommen (`NO_BET` < 3pp Netto-Edge, `WATCH_*` < 8pp, sonst
+`YES`/`NO`, `STRONG_*` ≥ 18pp; unter 5 Vergleichsfällen immer `INSUFFICIENT_DATA`; unter Konfidenz 40 immer
+`NO_BET`) — dokumentiert in `prediction/engine.py`, nicht kalibriert auf einen bestimmten Datensatz.
+
+### 2. Performance Tracking V2 (`evaluation.py`)
+
+Jede berechnete Prognose wird unabhängig von einem KI-Aufruf dauerhaft gespeichert (`prediction_snapshots`,
+Migration 8) — `get_prediction()` allein löst das bereits aus. `evaluate_predictions()` verknüpft diese
+Snapshots nach Marktauflösung mit `market_resolutions` und berechnet: Accuracy/Precision/Recall (nur über
+YES/NO-Empfehlungen, `NO_BET`/`INSUFFICIENT_DATA` ausgeschlossen), Brier Score, Log Loss, Kalibrierung, Ø
+Netto-Edge und simulierten ROI einer festen-Einsatz-Strategie, die jeder YES/NO-Empfehlung folgt (nie ein echter
+Trade). Unterschied zu `backtest.py`: der Backtest simuliert rückwirkend mit striktem Zeit-Split ("wie hätte
+das Modell historisch performt"), `evaluation.py` wertet aus, was die Engine tatsächlich im Betrieb
+vorhergesagt hat. Abrufbar über `GET /evaluation`, CLI `evaluation`, Dashboard-Seite „Backtest & KI-Kosten“.
+
+### 2. GPT-5 nano — erklärt, erfindet nicht
+
+Verbindliches Standardmodell: **`gpt-5-nano`** (`OPENAI_MODEL`), Fallback **`gpt-5-mini`** (`OPENAI_FALLBACK_MODEL`) —
+nur bei zweimal ungültiger/inkonsistenter Nano-Antwort, weiterhin unter demselben Kostenlimit. `gpt-4.1-mini`
+bleibt als separates, günstigeres Modell **nur** für den allgemeinen Research-Assistenten (Abschnitt unten)
+verfügbar, wird für die Prognose-Erklärung nicht mehr verwendet.
+
+Der 12-Schritte-Ablauf (`ai/service.py::explain_recommendation`): Markt laden → externe Datenquellen prüfen →
+historische Vergleichsdaten laden → Datenqualität prüfen → Prognose berechnen (`compute_prediction`) → Markt-
+vs. Eigenprognose vergleichen → Kosten/Spread/Unsicherheit einrechnen → Empfehlung bestimmen (alles Schritte 1–8,
+**vor** jedem KI-Aufruf) → GPT-5 nano **nur zur Erklärung** aufrufen → JSON gegen Schema validieren → gegen die
+mathematische Prognose validieren (`ai/validation.py`) → Analyse + Kosten speichern → im Dashboard anzeigen.
+
+`ai/validation.py::validate_explanation` verwirft die KI-Antwort komplett (ein Reparaturversuch, danach
+regelbasierter Fallback), wenn `direction`/`recommendation` nicht zur Engine passen, eine der vier
+Wahrscheinlichkeits-/Edge-Zahlen um mehr als 1 Prozentpunkt abweicht, oder eine `source_id` zitiert wird, die
+nicht in `allowed_source_ids` steht. Der Systemprompt (`ai/prompts.py::EXPLANATION_SYSTEM_PROMPT`) verbietet
+zusätzlich explizit das Erfinden von Wahrscheinlichkeiten, das Ändern der Empfehlung und die Gleichsetzung eines
+Scores mit einer Wahrscheinlichkeit ("Ein Score von 80 ist niemals automatisch eine Wahrscheinlichkeit von 80 %").
+
+### 3. Kostenkontrolle
+
+- `.env`: `OPENAI_MAX_COST_PER_ANALYSIS_USD=0.01`, `OPENAI_MAX_INPUT_TOKENS=10000`, `OPENAI_MAX_OUTPUT_TOKENS=1500`, `OPENAI_DAILY_BUDGET_USD=1.00`.
+- Vor jedem Aufruf: Zeichen-basierte Token-Schätzung → Kostenschätzung (`ai/cost.py`, Preistabelle für `gpt-5-nano`/`gpt-5-mini`/`gpt-4.1-mini`) → nur senden, wenn unter dem Limit; sonst regelbasierter Fallback, kein automatisches Kürzen auf Kosten der Aussagekraft.
+- Tagesbudget wird per SQL-Summe über `ai_analysis_runs.actual_cost_usd` seit Mitternacht geprüft (`within_daily_budget`).
+- Nach jedem echten Aufruf werden die tatsächlichen Token-Zahlen aus der Antwort gespeichert (`input_tokens`, `output_tokens`, `estimated_cost_usd`, `actual_cost_usd`) — keine geschätzten Werte werden nachträglich als „echt“ ausgegeben.
+- Sichtbar über `GET /ai/cost-report`, CLI `cost-report`, Dashboard-Seite „Backtest & KI-Kosten“.
+
+### 4. Fallback ohne KI
+
+`ai/fallback.py::build_fallback_explanation` erzeugt aus den reinen `PredictionResult`-Werten eine vollständige,
+deutschsprachige Erklärung — deterministisch, ohne jeden API-Aufruf. Ausgelöst bei: AI deaktiviert/kein Key,
+Eingabe über Token-Limit, geschätzte Kosten über dem Limit, Tagesbudget erreicht, GPT zweimal ungültig/inkonsistent.
+Das Dashboard zeigt **niemals** einen leeren Zustand, solange die Prognose existiert.
+
+### 5. Caching
+
+Cache-Schlüssel (`hash_payload`) aus Markt-ID, Prognose-Version, Daten-Snapshot-Version, Empfehlung,
+Quellen-Hash, Prompt-Version und Modell — ändert sich einer dieser Werte (z. B. neuer Marktpreis-Snapshot),
+ist der Cache-Eintrag ungültig und es wird neu bewertet (bei aktivierter KI ggf. mit neuem Aufruf). `--no-cache`
+(CLI) bzw. `POST .../recompute` (API/Dashboard-Button) erzwingen eine Neuberechnung unabhängig vom Cache-Alter.
+
+### 6. Backtest
+
+`backtest.py::run_backtest` — Walk-Forward über alle aufgelösten Märkte, chronologisch sortiert: für den
+n-ten Fall werden ausschließlich die zuvor aufgelösten Fälle derselben Kategorie zur Bildung der Basisrate
+verwendet (kein Look-ahead-Bias, per Test verifiziert: `tests/test_backtest.py::test_backtest_never_uses_future_resolutions`).
+Metriken: Brier Score, Log Loss, Kalibrierungstabelle (vorhergesagt vs. beobachtet je Dezil), simulierte
+kumulierte Rendite und Max-Drawdown, getrennt nach YES-/NO-Empfehlungen und nach Kategorie. Abrufbar über
+`GET /backtest`, CLI `backtest`, Dashboard-Seite „Backtest & KI-Kosten“.
+
+## Allgemeiner KI-Research-Assistent (GPT-4.1 mini, optional)
+
+Ein **kontrollierter** Research-Assistent auf Basis von OpenAI GPT-4.1 mini (`src/polymarketpulse/ai/`) für freie Fragen, Markt-/Signal-/News-Einordnung und Marktvergleiche — unabhängig von der Prognose-Erklärung oben. Die KI hat **keinen** Zugriff auf SQLite, Dateien, Shell oder das Internet — sie bekommt ausschließlich einen begrenzten, vom Backend zusammengestellten JSON-Kontext (`context_builder.py`) und antwortet strikt im vorgegebenen JSON-Schema (OpenAI Structured Outputs). Standardmäßig **deaktiviert**; ohne `OPENAI_API_KEY` läuft die gesamte Anwendung unverändert weiter.
 
 ### Einrichtung
 
@@ -151,11 +280,17 @@ Ein **kontrollierter** Research-Assistent auf Basis von OpenAI GPT-4.1 mini (`sr
    ```env
    POLYMARKETPULSE_AI_ENABLED=true
    OPENAI_API_KEY=sk-...
-   OPENAI_MODEL=gpt-4.1-mini
+   OPENAI_MODEL=gpt-5-nano
+   OPENAI_FALLBACK_MODEL=gpt-5-mini
    OPENAI_TIMEOUT_SECONDS=30
-   OPENAI_MAX_OUTPUT_TOKENS=1200
+   OPENAI_MAX_OUTPUT_TOKENS=1500
+   OPENAI_MAX_INPUT_TOKENS=10000
+   OPENAI_MAX_COST_PER_ANALYSIS_USD=0.01
+   OPENAI_DAILY_BUDGET_USD=1.00
    POLYMARKETPULSE_AI_CACHE_TTL_SECONDS=900
    ```
+   `OPENAI_MODEL`/`OPENAI_FALLBACK_MODEL` gelten für die Prognose-Erklärung (Abschnitt oben); der allgemeine
+   Research-Assistent unten kann unabhängig davon mit `gpt-4.1-mini` konfiguriert bleiben, wenn gewünscht.
 3. Ohne `POLYMARKETPULSE_AI_ENABLED=true` **und** einen gesetzten Key bleiben alle `/ai/*`-Endpunkte auf `503`, die CLI-`ai-*`-Befehle brechen kontrolliert ab, das Dashboard zeigt einen klaren „AI nicht verfügbar“-Zustand — nirgendwo ein Absturz oder ein automatischer Aufruf.
 
 ### Funktionen
@@ -209,6 +344,10 @@ Logs/DB-Zeilen enthalten Analyse-ID, Modell, Dauer, Status, Tokenverbrauch, Kont
 
 ## Bekannte Einschränkungen
 
+- **`category` ist derzeit kein normalisiertes Themenfeld.** In der produktiven Datenbank wird `markets.category` faktisch mit dem (meist eindeutigen) Marktfragetext befüllt statt mit einer echten Taxonomie (z. B. "Esports", "Politik US"). Dadurch findet die Basisraten-Abfrage der Prognose-Engine für die meisten realen Märkte aktuell **keine** ≥5 vergleichbaren aufgelösten Fälle, und die Empfehlung fällt auf `INSUFFICIENT_DATA` zurück — dokumentiert und reproduzierbar in `analysis/reports/phase7_acceptance_examples.json` (Beispiel D). Eine normalisierte Kategorisierung ist der wirkungsvollste nächste Schritt, um die Prognose-Engine auf echten Produktionsdaten nutzbar zu machen.
+- Die simulierte Backtest-Rendite und der `performance.py`-Equity-Verlauf sind vereinfachte Modelle (fester Einsatz je Trade, kein Portfolio-/Kapitalmodell, kein Compounding) — keine reale Handelsperformance.
+- `backtest.py` verwendet weiterhin die einfachere V1-Basisraten-Blend-Formel, nicht das volle V2-Ensemble (Deadline/Momentum/News/Bayesianisches Update) — eine vollständige V2-Rückrechnung bräuchte historische Preis-Snapshot- und News-Daten *zum jeweiligen Zeitpunkt* jedes Altfalls, die aktuell nicht in dieser Tiefe gespeichert sind. `evaluation.py` (Performance Tracking V2) bewertet dagegen bereits die echten V2-Prognosen im Betrieb.
+- Das News-Sentiment-Lexikon (`prediction/news.py`) ist bewusst klein und regelbasiert (auditierbar, kein NLP-Modell) — Ironie, Verneinung ("nicht bestätigt") und komplexe Satzstrukturen werden nicht erkannt; die Quellvertrauens-Tabelle deckt nur eine Handvoll bekannter Domains ab, alles andere fällt auf neutrales Vertrauen (0.5) zurück.
 - Kalshi und Metaculus sind noch nicht live angebunden (siehe Tabelle oben).
 - PredictIt liefert keine Volumen-/Liquiditätsdaten und keinen separaten Resolution-Feed.
 - `CROSS_PROVIDER_DIVERGENCE` und Cross-Provider-Matching liefern nur `status='candidate'` — nichts wird automatisch als identisch bestätigt; es gibt noch keine UI zum manuellen Bestätigen/Ablehnen.

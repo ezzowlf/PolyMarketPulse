@@ -22,7 +22,13 @@ from .ai.client import (
     AIResponseError,
     AITimeoutError,
 )
-from .ai.schemas import AIAnalysisResponse, AIStatusResponse, AskRequest, CompareRequest
+from .ai.schemas import (
+    AIAnalysisResponse,
+    AIStatusResponse,
+    AskRequest,
+    CompareRequest,
+    ExplainRecommendationResponse,
+)
 from .config import Settings
 from .providers.registry import create_provider, list_provider_names
 from .stats import compute_signal_stats
@@ -951,6 +957,54 @@ def ai_compare(payload: CompareRequest, storage: Storage = Depends(get_storage))
 def ai_ask(payload: AskRequest, storage: Storage = Depends(get_storage)) -> AIAnalysisResponse:
     settings = Settings.load()
     return ai_service.ask_research_question(storage, settings, payload.question, payload.market_id)
+
+
+@app.get("/prediction/{market_id}")
+@_handle_ai_errors
+def prediction(market_id: str, storage: Storage = Depends(get_storage)) -> dict:
+    """The binding statistical prediction only — no AI call, no cost. This
+    is what GPT-5 nano is only ever allowed to explain, never invent."""
+    return ai_service.get_prediction(storage, market_id).as_dict()
+
+
+@app.get("/ai/explain-recommendation/{market_id}")
+@_handle_ai_errors
+def ai_explain_recommendation(market_id: str, storage: Storage = Depends(get_storage)) -> ExplainRecommendationResponse:
+    """Cached-first: returns the market/NO_BET/YES/NO analysis, calling
+    GPT-5 nano only if there is no valid cached explanation for the current
+    prediction/data snapshot."""
+    settings = Settings.load()
+    return ai_service.explain_recommendation(storage, settings, market_id)
+
+
+@app.post("/ai/explain-recommendation/{market_id}/recompute")
+@_handle_ai_errors
+def ai_explain_recommendation_recompute(
+    market_id: str, storage: Storage = Depends(get_storage)
+) -> ExplainRecommendationResponse:
+    """Forces a fresh analysis, bypassing the cache — still subject to the
+    same cost budget and validation as any other call."""
+    settings = Settings.load()
+    return ai_service.explain_recommendation(storage, settings, market_id, force_recompute=True)
+
+
+@app.get("/ai/cost-report")
+def ai_cost_report(days: int = 7, storage: Storage = Depends(get_storage)) -> dict:
+    return storage.cost_report(days=days)
+
+
+@app.get("/backtest")
+def backtest(category: str | None = None, min_train_size: int = 5, storage: Storage = Depends(get_storage)) -> dict:
+    from .backtest import run_backtest
+
+    return run_backtest(storage.connection, category=category, min_train_size=min_train_size).as_dict()
+
+
+@app.get("/evaluation")
+def evaluation(storage: Storage = Depends(get_storage)) -> dict:
+    from .evaluation import evaluate_predictions
+
+    return evaluate_predictions(storage.connection).as_dict()
 
 
 @app.exception_handler(Exception)

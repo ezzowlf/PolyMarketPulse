@@ -1,0 +1,343 @@
+{
+  "A_YES": {
+    "market_id": "polymarket:target",
+    "category": "beispiel-yes-esport",
+    "seed": {
+      "n_yes": 18,
+      "n_no": 2,
+      "market_yes_price": 0.55
+    },
+    "data_source": "isolierte Test-Datenbank (echte Engine, realistische Trainingsdaten, gleiche Migrationen wie Produktion)",
+    "response": {
+      "prediction": {
+        "market_id": "polymarket:target",
+        "market_yes_probability": 0.55,
+        "market_no_probability": 0.44999999999999996,
+        "estimated_yes_probability": 0.69,
+        "estimated_no_probability": 0.31000000000000005,
+        "gross_yes_edge": 0.14,
+        "net_yes_edge": 0.12,
+        "confidence_score": 62.9,
+        "data_quality_score": 65.8,
+        "data_quality_breakdown": {
+          "vollstaendigkeit": 60.0,
+          "aktualitaet": 85.0,
+          "quellenuebereinstimmung": 50.0,
+          "historische_fallzahl": 100.0,
+          "resolution_klarheit": 40.0,
+          "liquiditaet": 60.0,
+          "gesamt": 65.8
+        },
+        "uncertainty_lower": 0.5658,
+        "uncertainty_upper": 0.8142,
+        "recommendation": "YES",
+        "comparable_sample_size": 20,
+        "observed_historical_yes_rate": 0.9,
+        "reasoning_notes": [
+          "20 historisch aufgelöste(r) Markt/Märkte in Kategorie 'beispiel-yes-esport' gefunden, davon 18 mit Ausgang YES (90%).",
+          "Eigene Prognose = 40% historische Basisrate + 60% aktueller Marktpreis.",
+          "Netto-Edge nach pauschalem Kosten-/Spread-Abschlag von 2%: +12.0%."
+        ]
+      },
+      "explanation": {
+        "direction": "YES",
+        "recommendation": "YES",
+        "headline": "Empfehlung: für YES",
+        "summary": "Eigene Prognose: YES 69% / NO 31%. Marktpreis: YES 55%. Netto-Edge: +12 Prozentpunkte.",
+        "probability_explanation": {
+          "market_yes_percent": 55.0,
+          "model_yes_percent": 69.0,
+          "model_no_percent": 31.0,
+          "net_edge_percentage_points": 12.0
+        },
+        "supports_yes": [
+          {
+            "factor": "Eigene Prognose liegt 12 Prozentpunkte über dem Marktpreis",
+            "impact": "medium",
+            "source_ids": []
+          }
+        ],
+        "supports_no": [],
+        "uncertainties": [
+          "20 historisch aufgelöste(r) Markt/Märkte in Kategorie 'beispiel-yes-esport' gefunden, davon 18 mit Ausgang YES (90%).",
+          "Eigene Prognose = 40% historische Basisrate + 60% aktueller Marktpreis.",
+          "Netto-Edge nach pauschalem Kosten-/Spread-Abschlag von 2%: +12.0%.",
+          "Realistische YES-Spanne liegt zwischen 57% und 81%."
+        ],
+        "data_gaps": [],
+        "historical_context": "In 20 vergleichbaren, bereits aufgelösten Fällen lag die beobachtete YES-Quote bei 90%.",
+        "recommendation_explanation": "Empfehlung YES (für YES), weil Modellvertrauen 63/100 und Datenqualität 66/100 beträgt, basierend auf 20 historischen Vergleichsfällen.",
+        "warning": "Prognose, keine Gewissheit. Regelbasierte Erklärung (keine KI-Anfrage durchgeführt)."
+      },
+      "meta": {
+        "analysis_id": 1,
+        "model": "gpt-4.1-mini",
+        "prompt_version": "explain-v1",
+        "cached": false,
+        "duration_ms": 0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "estimated_cost_usd": null,
+        "actual_cost_usd": 0.0,
+        "used_fallback": true,
+        "fallback_reason": "AI deaktiviert oder kein API-Key konfiguriert",
+        "created_at": "2026-08-04T10:07:56.485349+00:00"
+      }
+    }
+  },
+  "B_NO": {
+    "market_id": "polymarket:target",
+    "category": "beispiel-no-esport",
+    "seed": {
+      "n_yes": 3,
+      "n_no": 17,
+      "market_yes_price": 0.6
+    },
+    "data_source": "isolierte Test-Datenbank (echte Engine, realistische Trainingsdaten, gleiche Migrationen wie Produktion)",
+    "response": {
+      "prediction": {
+        "market_id": "polymarket:target",
+        "market_yes_probability": 0.6,
+        "market_no_probability": 0.4,
+        "estimated_yes_probability": 0.42,
+        "estimated_no_probability": 0.5800000000000001,
+        "gross_yes_edge": -0.18,
+        "net_yes_edge": -0.16,
+        "confidence_score": 62.9,
+        "data_quality_score": 65.8,
+        "data_quality_breakdown": {
+          "vollstaendigkeit": 60.0,
+          "aktualitaet": 85.0,
+          "quellenuebereinstimmung": 50.0,
+          "historische_fallzahl": 100.0,
+          "resolution_klarheit": 40.0,
+          "liquiditaet": 60.0,
+          "gesamt": 65.8
+        },
+        "uncertainty_lower": 0.2958,
+        "uncertainty_upper": 0.5442,
+        "recommendation": "NO",
+        "comparable_sample_size": 20,
+        "observed_historical_yes_rate": 0.15,
+        "reasoning_notes": [
+          "20 historisch aufgelöste(r) Markt/Märkte in Kategorie 'beispiel-no-esport' gefunden, davon 3 mit Ausgang YES (15%).",
+          "Eigene Prognose = 40% historische Basisrate + 60% aktueller Marktpreis.",
+          "Netto-Edge nach pauschalem Kosten-/Spread-Abschlag von 2%: -16.0%."
+        ]
+      },
+      "explanation": {
+        "direction": "NO",
+        "recommendation": "NO",
+        "headline": "Empfehlung: für NO",
+        "summary": "Eigene Prognose: YES 42% / NO 58%. Marktpreis: YES 60%. Netto-Edge: -16 Prozentpunkte.",
+        "probability_explanation": {
+          "market_yes_percent": 60.0,
+          "model_yes_percent": 42.0,
+          "model_no_percent": 58.0,
+          "net_edge_percentage_points": -16.0
+        },
+        "supports_yes": [],
+        "supports_no": [
+          {
+            "factor": "Eigene Prognose liegt 16 Prozentpunkte unter dem Marktpreis",
+            "impact": "high",
+            "source_ids": []
+          }
+        ],
+        "uncertainties": [
+          "20 historisch aufgelöste(r) Markt/Märkte in Kategorie 'beispiel-no-esport' gefunden, davon 3 mit Ausgang YES (15%).",
+          "Eigene Prognose = 40% historische Basisrate + 60% aktueller Marktpreis.",
+          "Netto-Edge nach pauschalem Kosten-/Spread-Abschlag von 2%: -16.0%.",
+          "Realistische YES-Spanne liegt zwischen 30% und 54%."
+        ],
+        "data_gaps": [],
+        "historical_context": "In 20 vergleichbaren, bereits aufgelösten Fällen lag die beobachtete YES-Quote bei 15%.",
+        "recommendation_explanation": "Empfehlung NO (für NO), weil Modellvertrauen 63/100 und Datenqualität 66/100 beträgt, basierend auf 20 historischen Vergleichsfällen.",
+        "warning": "Prognose, keine Gewissheit. Regelbasierte Erklärung (keine KI-Anfrage durchgeführt)."
+      },
+      "meta": {
+        "analysis_id": 1,
+        "model": "gpt-4.1-mini",
+        "prompt_version": "explain-v1",
+        "cached": false,
+        "duration_ms": 0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "estimated_cost_usd": null,
+        "actual_cost_usd": 0.0,
+        "used_fallback": true,
+        "fallback_reason": "AI deaktiviert oder kein API-Key konfiguriert",
+        "created_at": "2026-08-04T10:07:56.546142+00:00"
+      }
+    }
+  },
+  "C_NO_BET": {
+    "market_id": "polymarket:target",
+    "category": "beispiel-no-bet-esport",
+    "seed": {
+      "n_yes": 10,
+      "n_no": 10,
+      "market_yes_price": 0.5
+    },
+    "data_source": "isolierte Test-Datenbank (echte Engine, realistische Trainingsdaten, gleiche Migrationen wie Produktion)",
+    "response": {
+      "prediction": {
+        "market_id": "polymarket:target",
+        "market_yes_probability": 0.5,
+        "market_no_probability": 0.5,
+        "estimated_yes_probability": 0.5,
+        "estimated_no_probability": 0.5,
+        "gross_yes_edge": 0.0,
+        "net_yes_edge": 0.02,
+        "confidence_score": 62.9,
+        "data_quality_score": 65.8,
+        "data_quality_breakdown": {
+          "vollstaendigkeit": 60.0,
+          "aktualitaet": 85.0,
+          "quellenuebereinstimmung": 50.0,
+          "historische_fallzahl": 100.0,
+          "resolution_klarheit": 40.0,
+          "liquiditaet": 60.0,
+          "gesamt": 65.8
+        },
+        "uncertainty_lower": 0.3758,
+        "uncertainty_upper": 0.6242,
+        "recommendation": "NO_BET",
+        "comparable_sample_size": 20,
+        "observed_historical_yes_rate": 0.5,
+        "reasoning_notes": [
+          "20 historisch aufgelöste(r) Markt/Märkte in Kategorie 'beispiel-no-bet-esport' gefunden, davon 10 mit Ausgang YES (50%).",
+          "Eigene Prognose = 40% historische Basisrate + 60% aktueller Marktpreis.",
+          "Netto-Edge nach pauschalem Kosten-/Spread-Abschlag von 2%: +2.0%."
+        ]
+      },
+      "explanation": {
+        "direction": "NONE",
+        "recommendation": "NO_BET",
+        "headline": "Empfehlung: keine Wette",
+        "summary": "Eigene Prognose: YES 50% / NO 50%. Marktpreis: YES 50%. Netto-Edge: +2 Prozentpunkte.",
+        "probability_explanation": {
+          "market_yes_percent": 50.0,
+          "model_yes_percent": 50.0,
+          "model_no_percent": 50.0,
+          "net_edge_percentage_points": 2.0
+        },
+        "supports_yes": [
+          {
+            "factor": "Eigene Prognose liegt 2 Prozentpunkte über dem Marktpreis",
+            "impact": "medium",
+            "source_ids": []
+          }
+        ],
+        "supports_no": [],
+        "uncertainties": [
+          "20 historisch aufgelöste(r) Markt/Märkte in Kategorie 'beispiel-no-bet-esport' gefunden, davon 10 mit Ausgang YES (50%).",
+          "Eigene Prognose = 40% historische Basisrate + 60% aktueller Marktpreis.",
+          "Netto-Edge nach pauschalem Kosten-/Spread-Abschlag von 2%: +2.0%.",
+          "Realistische YES-Spanne liegt zwischen 38% und 62%."
+        ],
+        "data_gaps": [],
+        "historical_context": "In 20 vergleichbaren, bereits aufgelösten Fällen lag die beobachtete YES-Quote bei 50%.",
+        "recommendation_explanation": "Empfehlung NO_BET (keine Wette), weil Modellvertrauen 63/100 und Datenqualität 66/100 beträgt, basierend auf 20 historischen Vergleichsfällen.",
+        "warning": "Prognose, keine Gewissheit. Regelbasierte Erklärung (keine KI-Anfrage durchgeführt)."
+      },
+      "meta": {
+        "analysis_id": 1,
+        "model": "gpt-4.1-mini",
+        "prompt_version": "explain-v1",
+        "cached": false,
+        "duration_ms": 0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "estimated_cost_usd": null,
+        "actual_cost_usd": 0.0,
+        "used_fallback": true,
+        "fallback_reason": "AI deaktiviert oder kein API-Key konfiguriert",
+        "created_at": "2026-08-04T10:07:56.605639+00:00"
+      }
+    }
+  },
+  "D_INSUFFICIENT_DATA": {
+    "market_id": "2698861",
+    "data_source": "echte Produktions-Datenbank (POLYMARKETPULSE_DATABASE_PATH)",
+    "missing_data_explanation": "Die Produktionsdatenbank enthält aktuell 10 aufgelöste Märkte insgesamt. Das `category`-Feld wird je Markt mit dem (praktisch eindeutigen) Fragetext befüllt statt mit einer normalisierten Themen-Taxonomie — dadurch findet die Basisraten-Abfrage in compute_prediction() für so gut wie keinen einzelnen Markt >= 5 vergleichbare aufgelöste Fälle in derselben Kategorie. Das ist der dokumentierte, reale Grund für INSUFFICIENT_DATA in Produktion, keine künstliche Einschränkung des Beispiels.",
+    "response": {
+      "prediction": {
+        "market_id": "2698861",
+        "market_yes_probability": 0.0085,
+        "market_no_probability": 0.9915,
+        "estimated_yes_probability": 0.0085,
+        "estimated_no_probability": 0.9915,
+        "gross_yes_edge": 0.0,
+        "net_yes_edge": 0.02,
+        "confidence_score": 24.2,
+        "data_quality_score": 48.5,
+        "data_quality_breakdown": {
+          "vollstaendigkeit": 90.0,
+          "aktualitaet": 85.0,
+          "quellenuebereinstimmung": 50.0,
+          "historische_fallzahl": 0.0,
+          "resolution_klarheit": 40.0,
+          "liquiditaet": 25.8,
+          "gesamt": 48.5
+        },
+        "uncertainty_lower": 0.0,
+        "uncertainty_upper": 0.2101,
+        "recommendation": "INSUFFICIENT_DATA",
+        "comparable_sample_size": 0,
+        "observed_historical_yes_rate": null,
+        "reasoning_notes": [
+          "Keine historisch aufgelösten Vergleichsmärkte in Kategorie 'Who will Trump speak to in July?' gefunden.",
+          "Zu wenige Vergleichsfälle (< 5) — eigene Prognose entspricht dem Marktpreis.",
+          "Netto-Edge nach pauschalem Kosten-/Spread-Abschlag von 2%: +2.0%."
+        ]
+      },
+      "explanation": {
+        "direction": "NONE",
+        "recommendation": "INSUFFICIENT_DATA",
+        "headline": "Keine belastbare Prognose möglich",
+        "summary": "Es liegen zu wenige belastbare historische Vergleichsfälle vor (0 gefunden), um eine verlässliche Prognose zu erstellen.",
+        "probability_explanation": {
+          "market_yes_percent": 1.0,
+          "model_yes_percent": 1.0,
+          "model_no_percent": 99.0,
+          "net_edge_percentage_points": 2.0
+        },
+        "supports_yes": [
+          {
+            "factor": "Eigene Prognose liegt 2 Prozentpunkte über dem Marktpreis",
+            "impact": "medium",
+            "source_ids": []
+          }
+        ],
+        "supports_no": [],
+        "uncertainties": [
+          "Keine historisch aufgelösten Vergleichsmärkte in Kategorie 'Who will Trump speak to in July?' gefunden.",
+          "Zu wenige Vergleichsfälle (< 5) — eigene Prognose entspricht dem Marktpreis.",
+          "Netto-Edge nach pauschalem Kosten-/Spread-Abschlag von 2%: +2.0%.",
+          "Realistische YES-Spanne liegt zwischen 0% und 21%."
+        ],
+        "data_gaps": [
+          "Zu wenige historische Vergleichsfälle für eine robuste Basisrate."
+        ],
+        "historical_context": "Keine ausreichende historische Vergleichsbasis vorhanden.",
+        "recommendation_explanation": "Empfehlung INSUFFICIENT_DATA (unzureichende Datenlage), weil Modellvertrauen 24/100 und Datenqualität 48/100 beträgt, basierend auf 0 historischen Vergleichsfällen.",
+        "warning": "Prognose, keine Gewissheit. Regelbasierte Erklärung (keine KI-Anfrage durchgeführt)."
+      },
+      "meta": {
+        "analysis_id": 4,
+        "model": "gpt-4.1-mini",
+        "prompt_version": "explain-v1",
+        "cached": false,
+        "duration_ms": 0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "estimated_cost_usd": null,
+        "actual_cost_usd": 0.0,
+        "used_fallback": true,
+        "fallback_reason": "AI deaktiviert oder kein API-Key konfiguriert",
+        "created_at": "2026-08-04T10:07:56.613964+00:00"
+      }
+    }
+  }
+}

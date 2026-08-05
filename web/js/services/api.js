@@ -83,4 +83,16 @@ const Api = {
   home: () => Api._get("/home"),
   shadowSetups: (status) => Api._get(`/shadow-setups${status ? `?status=${encodeURIComponent(status)}` : ""}`),
   shadowSetup: (id) => Api._get(`/shadow-setup/${id}`),
+  prediction: (marketId) => Api._get(`/prediction/${encodeURIComponent(marketId)}`),
+  explainRecommendation: (marketId) => Api._get(`/ai/explain-recommendation/${encodeURIComponent(marketId)}`),
+  explainRecommendationRecompute: (marketId) =>
+    Api._send(`/ai/explain-recommendation/${encodeURIComponent(marketId)}/recompute`, "POST"),
+  costReport: (days) => Api._get(`/ai/cost-report${days ? `?days=${days}` : ""}`),
+  evaluation: () => Api._get("/evaluation"),
+  backtest: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "")
+    );
+    return Api._get(`/backtest?${qs.toString()}`);
+  },
 };

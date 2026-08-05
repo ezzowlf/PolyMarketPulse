@@ -38,9 +38,13 @@ class Settings:
     ai_enabled: bool
     openai_api_key: str | None
     openai_model: str
+    openai_fallback_model: str
     openai_timeout_seconds: float
     openai_max_output_tokens: int
     ai_cache_ttl_seconds: int
+    openai_max_cost_per_analysis_usd: float
+    openai_max_input_tokens: int
+    openai_daily_budget_usd: float
 
     @classmethod
     def load(cls) -> Settings:
@@ -69,10 +73,14 @@ class Settings:
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID") or None,
             ai_enabled=_bool(_env("POLYMARKETPULSE_AI_ENABLED", default="false")),
             openai_api_key=os.getenv("OPENAI_API_KEY") or None,
-            openai_model=_env("OPENAI_MODEL", default="gpt-4.1-mini") or "gpt-4.1-mini",
+            openai_model=_env("OPENAI_MODEL", default="gpt-5-nano") or "gpt-5-nano",
+            openai_fallback_model=_env("OPENAI_FALLBACK_MODEL", default="gpt-5-mini") or "gpt-5-mini",
             openai_timeout_seconds=float(_env("OPENAI_TIMEOUT_SECONDS") or "30"),
-            openai_max_output_tokens=int(_env("OPENAI_MAX_OUTPUT_TOKENS") or "1200"),
+            openai_max_output_tokens=int(_env("OPENAI_MAX_OUTPUT_TOKENS") or "1500"),
             ai_cache_ttl_seconds=int(_env("POLYMARKETPULSE_AI_CACHE_TTL_SECONDS") or "900"),
+            openai_max_cost_per_analysis_usd=float(_env("OPENAI_MAX_COST_PER_ANALYSIS_USD") or "0.01"),
+            openai_max_input_tokens=int(_env("OPENAI_MAX_INPUT_TOKENS") or "10000"),
+            openai_daily_budget_usd=float(_env("OPENAI_DAILY_BUDGET_USD") or "1.00"),
         )
 
     @property
