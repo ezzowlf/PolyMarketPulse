@@ -8,31 +8,68 @@ from pydantic import BaseModel, ValidationError
 
 class AIError(RuntimeError):
     """Base class for all AI-layer failures. Never carries the API key or
-    raw request/response payloads in its message — only what's safe to log."""
+    raw request/response payloads in its message — only what's safe to log.
+
+    `error_code` is a stable, machine-readable identifier (see
+    ai/status.py's AI_STATUS_* constants) used to persist *why* an attempt
+    failed, instead of collapsing every failure into a single generic
+    outcome. `input_tokens`/`output_tokens` are attached whenever OpenAI
+    actually returned a response with usage data before the failure
+    occurred (e.g. invalid JSON, schema mismatch) — `None` means no
+    response/usage was ever received (e.g. timeout, network error), which
+    must never be confused with "zero tokens were used"."""
+
+    error_code = "api_error"
+
+    def __init__(self, message: str, input_tokens: int | None = None, output_tokens: int | None = None) -> None:
+        super().__init__(message)
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
 
 
 class AIDisabledError(AIError):
     """AI is disabled or no API key is configured."""
 
+    error_code = "disabled"
+
 
 class AIContextError(AIError):
     """Not enough stored data exists to build a meaningful context."""
 
+    error_code = "context_error"
+
 
 class AITimeoutError(AIError):
-    pass
+    error_code = "timeout"
 
 
 class AIRateLimitError(AIError):
-    pass
+    error_code = "rate_limit"
 
 
 class AINetworkError(AIError):
-    pass
+    error_code = "network_error"
 
 
 class AIResponseError(AIError):
-    """The model's output didn't parse or didn't satisfy the schema."""
+    """The model's output didn't parse or didn't satisfy the schema. Base
+    class for the three more specific response-stage failures below — code
+    that only needs "something about the response was wrong" can still
+    catch this base class."""
+
+    error_code = "api_error"
+
+
+class AIEmptyResponseError(AIResponseError):
+    error_code = "empty_response"
+
+
+class AIInvalidJSONError(AIResponseError):
+    error_code = "invalid_json"
+
+
+class AISchemaValidationError(AIResponseError):
+    error_code = "schema_validation_failed"
 
 
 def _redact(text: str, limit: int = 200) -> str:
@@ -80,7 +117,13 @@ class OpenAIStructuredClient:
     def generate_structured(
         self, system_prompt: str, user_prompt: str, schema_model: type[BaseModel], schema_name: str
     ) -> tuple[dict[str, Any], int | None, int | None]:
-        """Returns (parsed_json, input_tokens, output_tokens)."""
+        """Returns (parsed_json, input_tokens, output_tokens).
+
+        Every raised exception below `response = self._client.responses...`
+        carries whatever usage data OpenAI actually returned, even though
+        the response itself is being rejected — callers must be able to
+        persist real token/cost data for a *failed* attempt, not just a
+        successful one."""
         schema = _strictify_schema(schema_model.model_json_schema())
         try:
             response = self._client.responses.create(
@@ -108,21 +151,27 @@ class OpenAIStructuredClient:
         except self._openai.APIError as exc:
             raise AIResponseError(f"OpenAI API error: {_redact(str(exc))}") from exc
 
+        # Usage is available on the response object regardless of what the
+        # generated text turned out to contain — extract it once, up front,
+        # so every failure branch below can attach the real numbers.
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "input_tokens", None) if usage else None
+        output_tokens = getattr(usage, "output_tokens", None) if usage else None
+
         output_text = getattr(response, "output_text", None)
         if not output_text:
-            raise AIResponseError("Empty response from OpenAI")
+            raise AIEmptyResponseError("Empty response from OpenAI", input_tokens, output_tokens)
 
         try:
             parsed = json.loads(output_text)
         except json.JSONDecodeError as exc:
-            raise AIResponseError("Response was not valid JSON") from exc
+            raise AIInvalidJSONError("Response was not valid JSON", input_tokens, output_tokens) from exc
 
         try:
             schema_model.model_validate(parsed)
         except ValidationError as exc:
-            raise AIResponseError(f"Response did not match schema: {_redact(str(exc))}") from exc
+            raise AISchemaValidationError(
+                f"Response did not match schema: {_redact(str(exc))}", input_tokens, output_tokens
+            ) from exc
 
-        usage = getattr(response, "usage", None)
-        input_tokens = getattr(usage, "input_tokens", None) if usage else None
-        output_tokens = getattr(usage, "output_tokens", None) if usage else None
         return parsed, input_tokens, output_tokens

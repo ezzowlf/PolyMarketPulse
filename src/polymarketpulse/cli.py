@@ -926,15 +926,44 @@ def cmd_cost_report(args: argparse.Namespace) -> int:
     finally:
         storage.close()
     if args.json:
-        print(json.dumps(report, indent=2))
+        print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
         print(f"Zeitraum: letzte {report['period_days']} Tage")
         print(f"Heute ausgegeben: {report['spent_today_usd']:.5f} USD")
-        print(f"Regelbasierte Fallback-Analysen (kein AI-Call): {report['rule_based_fallback_runs']}")
+        print(f"Regelbasierte Fallback-Analysen (kein AI-Call oder verworfene Antwort): {report['rule_based_fallback_runs']}")
+
+        totals = report.get("totals", {})
+        attempts = report.get("attempts", {})
+        if totals:
+            print(
+                f"Analysen gesamt: {totals['runs']} (erfolgreich: {totals['successful_runs']}, "
+                f"Fallback: {totals['fallback_runs']})"
+            )
+            print(
+                f"Modellaufrufe: {totals['total_attempts']} gesamt, davon {totals['runs_with_repair_attempted']} "
+                f"Analysen mit Reparaturversuch"
+            )
+            cost = totals["total_actual_cost_usd"]
+            print(f"Gesamtkosten (alle Versuche, inkl. verworfener Antworten): {cost:.6f} USD" if cost is not None else "Gesamtkosten: unbekannt (keine Usage-Daten verfügbar)")
+            if totals["runs_with_unknown_cost"]:
+                print(f"  davon Analysen ohne bekannte Kosten (Aufruf nie gesendet oder Fehler vor Antwort): {totals['runs_with_unknown_cost']}")
+        if attempts:
+            print(
+                f"Versuche gesendet: {attempts['attempts_sent']} (Hauptversuche: {attempts['main_attempts_sent']}, "
+                f"Reparaturversuche: {attempts['repair_attempts_sent']}), "
+                f"vor dem Senden durch Budget blockiert: {attempts['attempts_blocked_before_send']}"
+            )
+        if report.get("by_status"):
+            print("Nach Status:")
+            for status, count in report["by_status"].items():
+                print(f"  {status}: {count}")
+
         for row in report["by_model"]:
+            avg = row["avg_actual_cost_usd"]
             print(
                 f"  {row['model']}: {row['runs']} Analysen ({row['live_runs']} live, {row['cache_hits']} aus Cache), "
-                f"Gesamtkosten {row['total_actual_cost_usd']:.5f} USD, Ø {row['avg_actual_cost_usd']:.6f} USD/Analyse, "
+                f"Gesamtkosten {row['total_actual_cost_usd']:.5f} USD, "
+                f"Ø {f'{avg:.6f} USD/Analyse' if avg is not None else 'unbekannt'}, "
                 f"Tokens in={row['total_input_tokens']} out={row['total_output_tokens']}"
             )
     return 0

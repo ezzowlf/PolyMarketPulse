@@ -471,6 +471,44 @@ def _migration_008_prediction_snapshots(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_009_ai_attempt_tracking(conn: sqlite3.Connection) -> None:
+    """Adds full per-attempt transparency after a live smoke test revealed
+    that any failed OpenAI call (timeout, invalid JSON, schema mismatch,
+    budget block, ...) was persisted identically — no way to tell afterwards
+    whether real, billable usage had occurred. Purely additive: existing
+    `ai_analysis_runs` rows are untouched and remain readable (new columns
+    default to NULL), and `ai_model_attempts` is a brand-new table."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS ai_model_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL REFERENCES ai_analysis_runs(id),
+            attempt_number INTEGER NOT NULL,
+            is_repair INTEGER NOT NULL DEFAULT 0,
+            requested_model TEXT NOT NULL,
+            actual_model TEXT,
+            status TEXT NOT NULL,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
+            estimated_cost_usd REAL,
+            actual_cost_usd REAL,
+            duration_ms INTEGER,
+            error_detail TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_model_attempts_run ON ai_model_attempts(run_id);
+        """
+    )
+    _add_column(conn, "ai_analysis_runs", "requested_model", "TEXT")
+    _add_column(conn, "ai_analysis_runs", "final_status", "TEXT")
+    _add_column(conn, "ai_analysis_runs", "total_attempts", "INTEGER")
+    _add_column(conn, "ai_analysis_runs", "repair_attempted", "INTEGER")
+    _add_column(conn, "ai_analysis_runs", "total_input_tokens", "INTEGER")
+    _add_column(conn, "ai_analysis_runs", "total_output_tokens", "INTEGER")
+    _add_column(conn, "ai_analysis_runs", "total_estimated_cost_usd", "REAL")
+    _add_column(conn, "ai_analysis_runs", "total_actual_cost_usd", "REAL")
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -480,6 +518,7 @@ MIGRATIONS: list[Migration] = [
     (6, "shadow_setups", _migration_006_shadow_setups),
     (7, "ai_cost_tracking", _migration_007_ai_cost_tracking),
     (8, "prediction_snapshots", _migration_008_prediction_snapshots),
+    (9, "ai_attempt_tracking", _migration_009_ai_attempt_tracking),
 ]
 
 

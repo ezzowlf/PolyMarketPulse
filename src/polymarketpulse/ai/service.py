@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 
+from pydantic import ValidationError as PydanticValidationError
+
 from ..config import Settings
 from ..prediction import PREDICTION_VERSION, PredictionResult, compute_prediction
 from ..storage import Storage
@@ -15,7 +17,13 @@ from .client import (
     OpenAIStructuredClient,
 )
 from .context_builder import build_market_context, context_hash
-from .cost import estimate_cost, estimate_tokens_from_text, within_daily_budget
+from .cost import (
+    CostEstimate,
+    actual_cost,
+    estimate_cost,
+    estimate_tokens_from_text,
+    spent_today_usd,
+)
 from .fallback import build_fallback_explanation
 from .prompts import (
     EXPLANATION_SYSTEM_PROMPT,
@@ -37,6 +45,17 @@ from .schemas import (
     ExplainRecommendationResponse,
     ExplanationResult,
     ExplanationRunMeta,
+)
+from .status import (
+    AI_STATUS_BLOCKED_COST_LIMIT,
+    AI_STATUS_BLOCKED_DAILY_BUDGET,
+    AI_STATUS_BLOCKED_INPUT_TOKEN_LIMIT,
+    AI_STATUS_DISABLED,
+    AI_STATUS_INCONSISTENT_WITH_ENGINE,
+    AI_STATUS_REPAIR_FAILED,
+    AI_STATUS_SUCCESS,
+    ModelAttempt,
+    sum_optional,
 )
 from .validation import ValidationError, validate_explanation
 
@@ -360,22 +379,40 @@ def _persist_and_wrap(
     prediction: PredictionResult,
     explanation: ExplanationResult,
     duration_ms: int,
-    input_tokens: int | None,
-    output_tokens: int | None,
-    cached_input_tokens: int | None,
-    estimated_cost_usd: float | None,
-    actual_cost_usd: float | None,
     cached: bool,
     used_fallback: bool,
     fallback_reason: str | None,
+    requested_model: str,
+    final_status: str,
+    attempts: list[ModelAttempt],
 ) -> ExplainRecommendationResponse:
+    """Persists the run *and* every individual call attempt (see
+    ai/status.py::ModelAttempt / ai_model_attempts). Totals are computed
+    from the attempts themselves via `sum_optional`, so a fallback caused
+    by a rejected-but-real response still records the real usage/cost that
+    was incurred — the exact gap a live smoke test exposed."""
+    total_input_tokens = sum_optional([a.input_tokens for a in attempts])
+    total_output_tokens = sum_optional([a.output_tokens for a in attempts])
+    total_estimated_cost_usd = sum_optional([a.estimated_cost_usd for a in attempts])
+    total_actual_cost_usd = sum_optional([a.actual_cost_usd for a in attempts])
+    total_attempts = sum(1 for a in attempts if a.actual_model is not None)
+    repair_attempted = any(a.is_repair and a.actual_model is not None for a in attempts)
+
     run_id = storage.record_ai_run(
         _ANALYSIS_TYPE_EXPLAIN_RECOMMENDATION, market_id, model, EXPLANATION_PROMPT_VERSION, key_hash,
-        status="completed", duration_ms=duration_ms, input_tokens=input_tokens, output_tokens=output_tokens,
-        cached=cached, error_code=None, response_json=explanation.model_dump_json(),
-        cached_input_tokens=cached_input_tokens, estimated_cost_usd=estimated_cost_usd,
-        actual_cost_usd=actual_cost_usd,
+        status="completed", duration_ms=duration_ms, input_tokens=total_input_tokens, output_tokens=total_output_tokens,
+        cached=cached, error_code=None if used_fallback is False else final_status,
+        response_json=explanation.model_dump_json(),
+        cached_input_tokens=0 if total_input_tokens is not None else None,
+        estimated_cost_usd=total_estimated_cost_usd, actual_cost_usd=total_actual_cost_usd,
+        requested_model=requested_model, final_status=final_status, total_attempts=total_attempts,
+        repair_attempted=repair_attempted, total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens, total_estimated_cost_usd=total_estimated_cost_usd,
+        total_actual_cost_usd=total_actual_cost_usd,
     )
+    for attempt in attempts:
+        storage.record_ai_model_attempt(run_id, attempt)
+
     return ExplainRecommendationResponse(
         prediction=prediction.as_dict(),
         explanation=explanation,
@@ -385,10 +422,10 @@ def _persist_and_wrap(
             prompt_version=EXPLANATION_PROMPT_VERSION,
             cached=cached,
             duration_ms=duration_ms,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            estimated_cost_usd=estimated_cost_usd,
-            actual_cost_usd=actual_cost_usd,
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+            estimated_cost_usd=total_estimated_cost_usd,
+            actual_cost_usd=total_actual_cost_usd,
             used_fallback=used_fallback,
             fallback_reason=fallback_reason,
             created_at=datetime.now(UTC).isoformat(),
@@ -495,11 +532,14 @@ def explain_recommendation(
         )
     if cached is not None:
         explanation = ExplanationResult.model_validate_json(cached["response_json"])
-        # The fallback path always persists input_tokens=None (see _fallback()
-        # below); a genuine model response always has a real token count.
-        # Without this check, a cached *fallback* explanation would be
-        # reported as a real KI response on every subsequent cache hit.
-        cached_was_fallback = cached["input_tokens"] is None
+        # `final_status` is the authoritative signal (added in migration 9).
+        # Legacy rows (pre-migration) have final_status = NULL — fall back
+        # to the old input_tokens-is-None heuristic for those only, so
+        # older cached entries stay interpretable rather than erroring.
+        if cached.get("final_status") is not None:
+            cached_was_fallback = cached["final_status"] != AI_STATUS_SUCCESS
+        else:
+            cached_was_fallback = cached["input_tokens"] is None
         return ExplainRecommendationResponse(
             prediction=prediction.as_dict(),
             explanation=explanation,
@@ -513,16 +553,19 @@ def explain_recommendation(
             ),
         )
 
-    def _fallback(reason: str) -> ExplainRecommendationResponse:
+    requested_model = settings.openai_model
+    attempts: list[ModelAttempt] = []
+
+    def _fallback(reason: str, status: str) -> ExplainRecommendationResponse:
         explanation = build_fallback_explanation(prediction)
         return _persist_and_wrap(
-            storage, settings, settings.openai_model, market_id, key_hash, prediction, explanation,
-            duration_ms=0, input_tokens=None, output_tokens=None, cached_input_tokens=None,
-            estimated_cost_usd=None, actual_cost_usd=0.0, cached=False, used_fallback=True, fallback_reason=reason,
+            storage, settings, requested_model, market_id, key_hash, prediction, explanation,
+            duration_ms=0, cached=False, used_fallback=True, fallback_reason=reason,
+            requested_model=requested_model, final_status=status, attempts=attempts,
         )
 
     if not settings.ai_ready:
-        return _fallback("AI deaktiviert oder kein API-Key konfiguriert")
+        return _fallback("AI deaktiviert oder kein API-Key konfiguriert", AI_STATUS_DISABLED)
 
     payload = _build_recommendation_payload(market, prediction, allowed_source_ids)
     user_prompt = build_explain_recommendation_input(payload)
@@ -530,66 +573,150 @@ def explain_recommendation(
     est_input_tokens = estimate_tokens_from_text(EXPLANATION_SYSTEM_PROMPT + user_prompt)
     est_output_tokens = settings.openai_max_output_tokens
     if est_input_tokens > settings.openai_max_input_tokens:
-        return _fallback("Eingabe überschreitet Token-Limit selbst nach Verdichtung")
+        return _fallback("Eingabe überschreitet Token-Limit selbst nach Verdichtung", AI_STATUS_BLOCKED_INPUT_TOKEN_LIMIT)
 
-    estimate = estimate_cost(settings.openai_model, est_input_tokens, est_output_tokens)
-    if estimate.estimated_cost_usd > settings.openai_max_cost_per_analysis_usd:
-        return _fallback(
-            f"Geschätzte Kosten ({estimate.estimated_cost_usd:.5f} USD) über dem Limit "
-            f"({settings.openai_max_cost_per_analysis_usd:.5f} USD)"
+    def _budget_check(model_name: str) -> tuple[bool, str | None, CostEstimate]:
+        """Re-checked before *every* attempt (main, repair, fallback-model
+        escalation) — not just once up front — so the per-analysis cap
+        accounts for cost already incurred by earlier attempts in this
+        same call, and the daily budget accounts for both today's prior
+        spend and this call's own running total."""
+        est = estimate_cost(model_name, est_input_tokens, est_output_tokens)
+        already_spent_this_call = sum_optional([a.actual_cost_usd for a in attempts]) or 0.0
+        if already_spent_this_call + est.estimated_cost_usd > settings.openai_max_cost_per_analysis_usd:
+            return False, AI_STATUS_BLOCKED_COST_LIMIT, est
+        spent_today = spent_today_usd(storage.connection)
+        if spent_today + already_spent_this_call + est.estimated_cost_usd > settings.openai_daily_budget_usd:
+            return False, AI_STATUS_BLOCKED_DAILY_BUDGET, est
+        return True, None, est
+
+    def _record_blocked_attempt(attempt_number: int, is_repair: bool, model_name: str, status: str, est: CostEstimate) -> None:
+        attempts.append(
+            ModelAttempt(
+                attempt_number=attempt_number, is_repair=is_repair, requested_model=model_name, actual_model=None,
+                status=status, input_tokens=None, output_tokens=None, estimated_cost_usd=est.estimated_cost_usd,
+                actual_cost_usd=None, duration_ms=0,
+                error_detail="Aufruf nicht gesendet: Kosten-/Tagesbudget hätte überschritten." if status == AI_STATUS_BLOCKED_COST_LIMIT
+                else "Aufruf nicht gesendet: Tagesbudget für KI-Analysen erreicht.",
+            )
         )
-    if not within_daily_budget(storage.connection, settings.openai_daily_budget_usd, estimate.estimated_cost_usd):
-        return _fallback("Tagesbudget für KI-Analysen erreicht")
 
-    def _try_model(model_name: str, client: OpenAIStructuredClient | None) -> tuple[ExplanationResult, int, int] | None:
+    def _try_model(
+        attempt_number: int, is_repair: bool, model_name: str, client: OpenAIStructuredClient | None, est: CostEstimate
+    ) -> ExplanationResult | None:
         c = client or OpenAIStructuredClient(
             api_key=settings.openai_api_key,  # type: ignore[arg-type]
             model=model_name,
             timeout_seconds=settings.openai_timeout_seconds,
             max_output_tokens=settings.openai_max_output_tokens,
         )
+        started = time.monotonic()
         try:
             parsed, in_tok, out_tok = c.generate_structured(
                 EXPLANATION_SYSTEM_PROMPT, user_prompt, ExplanationResult, "explanation"
             )
-            result = ExplanationResult.model_validate(parsed)
-            validate_explanation(result, prediction, set(allowed_source_ids))
-            return result, in_tok or est_input_tokens, out_tok or 0
-        except (AIError, ValidationError):
-            # Covers AIResponseError (bad/invalid JSON), AITimeoutError,
-            # AIRateLimitError, AINetworkError, and our own ValidationError
-            # (number mismatch / invented source) — every one of these must
-            # fall through to a retry or the rule-based fallback, never crash.
+        except AIError as exc:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            in_tok, out_tok = exc.input_tokens, exc.output_tokens
+            cost = actual_cost(model_name, in_tok, 0, out_tok) if (in_tok is not None or out_tok is not None) else None
+            attempts.append(
+                ModelAttempt(
+                    attempt_number=attempt_number, is_repair=is_repair, requested_model=model_name,
+                    actual_model=model_name, status=exc.error_code, input_tokens=in_tok, output_tokens=out_tok,
+                    estimated_cost_usd=est.estimated_cost_usd, actual_cost_usd=cost, duration_ms=duration_ms,
+                    error_detail=str(exc)[:200],
+                )
+            )
             return None
 
-    started = time.monotonic()
-    outcome = _try_model(settings.openai_model, nano_client)
-    if outcome is None:
-        outcome = _try_model(settings.openai_model, nano_client)  # one repair attempt, same model
+        duration_ms = int((time.monotonic() - started) * 1000)
+        cost = actual_cost(model_name, in_tok or 0, 0, out_tok or 0) if (in_tok is not None or out_tok is not None) else None
+
+        try:
+            result = ExplanationResult.model_validate(parsed)
+        except PydanticValidationError as exc:
+            attempts.append(
+                ModelAttempt(
+                    attempt_number=attempt_number, is_repair=is_repair, requested_model=model_name,
+                    actual_model=model_name, status="schema_validation_failed", input_tokens=in_tok,
+                    output_tokens=out_tok, estimated_cost_usd=est.estimated_cost_usd, actual_cost_usd=cost,
+                    duration_ms=duration_ms, error_detail=str(exc)[:200],
+                )
+            )
+            return None
+
+        try:
+            validate_explanation(result, prediction, set(allowed_source_ids))
+        except ValidationError as exc:
+            # Our own consistency check (validation.py) — the response was
+            # valid JSON matching the schema, but the numbers/claims didn't
+            # match the engine. Real usage still happened; still recorded.
+            attempts.append(
+                ModelAttempt(
+                    attempt_number=attempt_number, is_repair=is_repair, requested_model=model_name,
+                    actual_model=model_name, status=AI_STATUS_INCONSISTENT_WITH_ENGINE, input_tokens=in_tok,
+                    output_tokens=out_tok, estimated_cost_usd=est.estimated_cost_usd, actual_cost_usd=cost,
+                    duration_ms=duration_ms, error_detail=str(exc)[:200],
+                )
+            )
+            return None
+
+        attempts.append(
+            ModelAttempt(
+                attempt_number=attempt_number, is_repair=is_repair, requested_model=model_name, actual_model=model_name,
+                status=AI_STATUS_SUCCESS, input_tokens=in_tok, output_tokens=out_tok,
+                estimated_cost_usd=est.estimated_cost_usd, actual_cost_usd=cost, duration_ms=duration_ms,
+                error_detail=None,
+            )
+        )
+        return result
+
+    overall_started = time.monotonic()
+
+    allowed, block_status, est1 = _budget_check(requested_model)
+    if not allowed:
+        _record_blocked_attempt(1, False, requested_model, block_status, est1)
+        return _fallback(
+            f"Geschätzte Kosten über dem Limit (Modell: {requested_model})" if block_status == AI_STATUS_BLOCKED_COST_LIMIT
+            else "Tagesbudget für KI-Analysen erreicht",
+            block_status,
+        )
+
+    explanation = _try_model(1, False, requested_model, nano_client, est1)
+
+    if explanation is None:
+        allowed, block_status, est2 = _budget_check(requested_model)
+        if allowed:
+            explanation = _try_model(2, True, requested_model, nano_client, est2)  # one repair attempt, same model
+        else:
+            _record_blocked_attempt(2, True, requested_model, block_status, est2)
+
     used_mini = False
-    if outcome is None:
-        # GPT-5 nano failed validation/parsing twice in a row — the one
-        # documented condition under which the (pricier) fallback model may
-        # be tried automatically, still subject to the same cost budget.
-        mini_estimate = estimate_cost(settings.openai_fallback_model, est_input_tokens, est_output_tokens)
-        if (
-            mini_estimate.estimated_cost_usd <= settings.openai_max_cost_per_analysis_usd
-            and within_daily_budget(storage.connection, settings.openai_daily_budget_usd, mini_estimate.estimated_cost_usd)
-        ):
-            outcome = _try_model(settings.openai_fallback_model, mini_client)
-            used_mini = True
+    if explanation is None:
+        # GPT-5 nano failed twice in a row (or the repair was budget-
+        # blocked) — the one documented condition under which the pricier
+        # fallback model may be tried, still subject to the same budget,
+        # re-checked fresh (accounting for whatever nano already cost).
+        allowed, block_status, est3 = _budget_check(settings.openai_fallback_model)
+        if allowed:
+            explanation = _try_model(3, False, settings.openai_fallback_model, mini_client, est3)
+            used_mini = explanation is not None
+        else:
+            _record_blocked_attempt(3, False, settings.openai_fallback_model, block_status, est3)
 
-    duration_ms = int((time.monotonic() - started) * 1000)
-    if outcome is None:
-        return _fallback("GPT-Ausgabe zweimal ungültig oder nicht mit der Prognose konsistent")
+    duration_ms = int((time.monotonic() - overall_started) * 1000)
+    if explanation is None:
+        # Distinguish "a repair attempt genuinely ran and still failed"
+        # from "the immediate cause was the last recorded attempt's own
+        # status" — both are legitimate, but a repair having been tried at
+        # all is itself meaningful information worth surfacing.
+        repair_happened = any(a.is_repair and a.actual_model is not None for a in attempts)
+        final_status = AI_STATUS_REPAIR_FAILED if repair_happened else (attempts[-1].status if attempts else AI_STATUS_BLOCKED_COST_LIMIT)
+        return _fallback("GPT-Ausgabe zweimal ungültig oder nicht mit der Prognose konsistent", final_status)
 
-    explanation, input_tokens, output_tokens = outcome
-    model_used = settings.openai_fallback_model if used_mini else settings.openai_model
-    actual = estimate_cost(model_used, input_tokens, output_tokens).estimated_cost_usd
-
+    model_used = settings.openai_fallback_model if used_mini else requested_model
     return _persist_and_wrap(
         storage, settings, model_used, market_id, key_hash, prediction, explanation,
-        duration_ms=duration_ms, input_tokens=input_tokens, output_tokens=output_tokens,
-        cached_input_tokens=0, estimated_cost_usd=estimate.estimated_cost_usd, actual_cost_usd=actual,
-        cached=False, used_fallback=False, fallback_reason=None,
+        duration_ms=duration_ms, cached=False, used_fallback=False, fallback_reason=None,
+        requested_model=requested_model, final_status=AI_STATUS_SUCCESS, attempts=attempts,
     )

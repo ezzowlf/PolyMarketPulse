@@ -799,7 +799,7 @@ class Storage:
         row = self.connection.execute(
             """
             SELECT id, response_json, input_tokens, output_tokens, created_at,
-                   estimated_cost_usd, actual_cost_usd
+                   estimated_cost_usd, actual_cost_usd, final_status
             FROM ai_analysis_runs
             WHERE analysis_type = ? AND model = ? AND prompt_version = ? AND context_hash = ?
               AND status = 'completed' AND created_at >= ?
@@ -817,6 +817,7 @@ class Storage:
             "created_at": row[4],
             "estimated_cost_usd": row[5],
             "actual_cost_usd": row[6],
+            "final_status": row[7],
         }
 
     def record_ai_run(
@@ -836,6 +837,14 @@ class Storage:
         cached_input_tokens: int | None = None,
         estimated_cost_usd: float | None = None,
         actual_cost_usd: float | None = None,
+        requested_model: str | None = None,
+        final_status: str | None = None,
+        total_attempts: int | None = None,
+        repair_attempted: bool | None = None,
+        total_input_tokens: int | None = None,
+        total_output_tokens: int | None = None,
+        total_estimated_cost_usd: float | None = None,
+        total_actual_cost_usd: float | None = None,
     ) -> int:
         now = datetime.now(UTC).isoformat()
         cursor = self.connection.execute(
@@ -843,8 +852,10 @@ class Storage:
             INSERT INTO ai_analysis_runs (
                 analysis_type, market_id, model, prompt_version, context_hash, status,
                 created_at, duration_ms, input_tokens, output_tokens, cached, error_code, response_json,
-                cached_input_tokens, estimated_cost_usd, actual_cost_usd
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                cached_input_tokens, estimated_cost_usd, actual_cost_usd,
+                requested_model, final_status, total_attempts, repair_attempted,
+                total_input_tokens, total_output_tokens, total_estimated_cost_usd, total_actual_cost_usd
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 analysis_type,
@@ -863,10 +874,57 @@ class Storage:
                 cached_input_tokens,
                 estimated_cost_usd,
                 actual_cost_usd,
+                requested_model,
+                final_status,
+                total_attempts,
+                None if repair_attempted is None else int(repair_attempted),
+                total_input_tokens,
+                total_output_tokens,
+                total_estimated_cost_usd,
+                total_actual_cost_usd,
             ),
         )
         self.connection.commit()
         return int(cursor.lastrowid)
+
+    def record_ai_model_attempt(self, run_id: int, attempt) -> int:
+        """Persists one `ai.status.ModelAttempt` — including attempts that
+        were never actually sent (budget-blocked), so the full decision
+        trail (main attempt, repair attempt, fallback-model escalation) is
+        always reconstructable from the database alone."""
+        now = datetime.now(UTC).isoformat()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO ai_model_attempts (
+                run_id, attempt_number, is_repair, requested_model, actual_model, status,
+                input_tokens, output_tokens, estimated_cost_usd, actual_cost_usd, duration_ms,
+                error_detail, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id, attempt.attempt_number, int(attempt.is_repair), attempt.requested_model,
+                attempt.actual_model, attempt.status, attempt.input_tokens, attempt.output_tokens,
+                attempt.estimated_cost_usd, attempt.actual_cost_usd, attempt.duration_ms,
+                attempt.error_detail, now,
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def list_ai_model_attempts(self, run_id: int) -> list[dict]:
+        rows = self.connection.execute(
+            """
+            SELECT attempt_number, is_repair, requested_model, actual_model, status,
+                   input_tokens, output_tokens, estimated_cost_usd, actual_cost_usd, duration_ms, error_detail
+            FROM ai_model_attempts WHERE run_id = ? ORDER BY attempt_number ASC
+            """,
+            (run_id,),
+        ).fetchall()
+        cols = (
+            "attempt_number", "is_repair", "requested_model", "actual_model", "status",
+            "input_tokens", "output_tokens", "estimated_cost_usd", "actual_cost_usd", "duration_ms", "error_detail",
+        )
+        return [dict(zip(cols, r, strict=True)) for r in rows]
 
     def list_ai_runs(self, limit: int = 20) -> list[dict]:
         rows = self.connection.execute(
@@ -909,17 +967,33 @@ class Storage:
     def cost_report(self, days: int = 7) -> dict:
         """Aggregate KI-cost figures for the CLI/API cost report. Groups by
         model so nano vs. mini usage — and their very different unit costs —
-        stay visible instead of being averaged away."""
+        stay visible instead of being averaged away.
+
+        Extended after a live smoke test revealed that failed calls (bad
+        JSON, schema mismatch, inconsistent numbers) were persisted
+        identically to a plain "AI disabled" fallback, making real-but-
+        rejected usage invisible. `by_status`/`attempts` below are built
+        from `ai_model_attempts`, which records every individual call
+        attempt (including ones never sent due to a budget block) with its
+        own status, tokens, and cost — `total_actual_cost_usd` sums only
+        the attempts that actually reported a cost, and is `None` (not
+        `0.0`) when not a single attempt in the period ever reported one,
+        so "no spend" and "spend unknown" never collapse into each other.
+        """
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
         today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+        # Legacy rows (pre-migration 9) have final_status = NULL; fall back
+        # to the old "input_tokens IS NULL" heuristic for those so older
+        # entries stay readable/interpretable instead of erroring out.
         by_model = self.connection.execute(
             """
             SELECT model,
                    COUNT(*) AS runs,
                    SUM(CASE WHEN cached = 0 THEN 1 ELSE 0 END) AS live_runs,
                    SUM(CASE WHEN cached = 1 THEN 1 ELSE 0 END) AS cache_hits,
-                   COALESCE(SUM(actual_cost_usd), 0) AS total_actual_cost_usd,
-                   COALESCE(AVG(actual_cost_usd), 0) AS avg_actual_cost_usd,
+                   SUM(CASE WHEN actual_cost_usd IS NOT NULL THEN actual_cost_usd ELSE 0 END) AS total_actual_cost_usd,
+                   SUM(CASE WHEN actual_cost_usd IS NOT NULL THEN 1 ELSE 0 END) AS runs_with_known_cost,
                    COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
                    COALESCE(SUM(output_tokens), 0) AS total_output_tokens
             FROM ai_analysis_runs
@@ -928,26 +1002,101 @@ class Storage:
             """,
             (cutoff,),
         ).fetchall()
-        spent_today = self.connection.execute(
-            "SELECT COALESCE(SUM(actual_cost_usd), 0) FROM ai_analysis_runs "
+        by_model_rows = []
+        for model, runs, live_runs, cache_hits, total_cost, runs_with_known_cost, total_in, total_out in by_model:
+            by_model_rows.append(
+                {
+                    "model": model, "runs": runs, "live_runs": live_runs, "cache_hits": cache_hits,
+                    "total_actual_cost_usd": round(total_cost, 6),
+                    "avg_actual_cost_usd": round(total_cost / runs_with_known_cost, 6) if runs_with_known_cost else None,
+                    "total_input_tokens": total_in, "total_output_tokens": total_out,
+                }
+            )
+
+        spent_today_row = self.connection.execute(
+            "SELECT SUM(CASE WHEN actual_cost_usd IS NOT NULL THEN actual_cost_usd ELSE 0 END) FROM ai_analysis_runs "
             "WHERE analysis_type = 'explain_recommendation' AND created_at >= ?",
             (today_start,),
         ).fetchone()[0]
+        spent_today = round(spent_today_row or 0.0, 6)
+
         fallback_count = self.connection.execute(
             "SELECT COUNT(*) FROM ai_analysis_runs "
             "WHERE analysis_type = 'explain_recommendation' AND created_at >= ? "
-            "AND (actual_cost_usd IS NULL OR actual_cost_usd = 0) AND input_tokens IS NULL",
+            "AND (final_status IS NOT NULL AND final_status != 'success' "
+            "     OR (final_status IS NULL AND input_tokens IS NULL))",
             (cutoff,),
         ).fetchone()[0]
-        cols = (
-            "model", "runs", "live_runs", "cache_hits", "total_actual_cost_usd",
-            "avg_actual_cost_usd", "total_input_tokens", "total_output_tokens",
-        )
+
+        by_status_rows = self.connection.execute(
+            """
+            SELECT COALESCE(final_status, 'unknown_legacy'), COUNT(*)
+            FROM ai_analysis_runs
+            WHERE analysis_type = 'explain_recommendation' AND created_at >= ?
+            GROUP BY COALESCE(final_status, 'unknown_legacy')
+            """,
+            (cutoff,),
+        ).fetchall()
+
+        run_totals = self.connection.execute(
+            """
+            SELECT
+                COUNT(*),
+                SUM(CASE WHEN final_status = 'success' THEN 1 ELSE 0 END),
+                SUM(COALESCE(total_attempts, 0)),
+                SUM(CASE WHEN repair_attempted = 1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN total_actual_cost_usd IS NOT NULL THEN total_actual_cost_usd ELSE 0 END),
+                SUM(CASE WHEN total_actual_cost_usd IS NOT NULL THEN 1 ELSE 0 END),
+                COALESCE(SUM(total_input_tokens), 0),
+                COALESCE(SUM(total_output_tokens), 0)
+            FROM ai_analysis_runs
+            WHERE analysis_type = 'explain_recommendation' AND created_at >= ?
+            """,
+            (cutoff,),
+        ).fetchone()
+        (
+            total_runs, successful_runs, total_attempts_sum, runs_with_repair,
+            total_cost_sum, runs_with_known_total_cost, total_in_sum, total_out_sum,
+        ) = run_totals
+
+        attempt_totals = self.connection.execute(
+            """
+            SELECT
+                SUM(CASE WHEN is_repair = 0 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN is_repair = 1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN actual_model IS NOT NULL THEN 1 ELSE 0 END),
+                SUM(CASE WHEN actual_model IS NULL THEN 1 ELSE 0 END)
+            FROM ai_model_attempts a
+            JOIN ai_analysis_runs r ON r.id = a.run_id
+            WHERE r.analysis_type = 'explain_recommendation' AND a.created_at >= ?
+            """,
+            (cutoff,),
+        ).fetchone()
+        main_attempts, repair_attempts, sent_attempts, blocked_attempts = (v or 0 for v in attempt_totals)
+
         return {
             "period_days": days,
-            "spent_today_usd": round(spent_today, 6),
-            "by_model": [dict(zip(cols, r, strict=True)) for r in by_model],
+            "spent_today_usd": spent_today,
+            "by_model": by_model_rows,
             "rule_based_fallback_runs": fallback_count,
+            "by_status": {status: count for status, count in by_status_rows},
+            "totals": {
+                "runs": total_runs or 0,
+                "successful_runs": successful_runs or 0,
+                "fallback_runs": (total_runs or 0) - (successful_runs or 0),
+                "total_attempts": total_attempts_sum or 0,
+                "runs_with_repair_attempted": runs_with_repair or 0,
+                "total_input_tokens": total_in_sum,
+                "total_output_tokens": total_out_sum,
+                "total_actual_cost_usd": round(total_cost_sum, 6) if runs_with_known_total_cost else None,
+                "runs_with_unknown_cost": (total_runs or 0) - (runs_with_known_total_cost or 0),
+            },
+            "attempts": {
+                "main_attempts_sent": main_attempts,
+                "repair_attempts_sent": repair_attempts,
+                "attempts_sent": sent_attempts,
+                "attempts_blocked_before_send": blocked_attempts,
+            },
         }
 
     # --- Shadow-Setups (permanente Research-Historie) ---------------------
