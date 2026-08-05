@@ -45,6 +45,8 @@ class Settings:
     openai_max_cost_per_analysis_usd: float
     openai_max_input_tokens: int
     openai_daily_budget_usd: float
+    openai_reasoning_effort: str | None
+    openai_escalation_enabled: bool
 
     @classmethod
     def load(cls) -> Settings:
@@ -76,11 +78,18 @@ class Settings:
             openai_model=_env("OPENAI_MODEL", default="gpt-5-nano") or "gpt-5-nano",
             openai_fallback_model=_env("OPENAI_FALLBACK_MODEL", default="gpt-5-mini") or "gpt-5-mini",
             openai_timeout_seconds=float(_env("OPENAI_TIMEOUT_SECONDS") or "30"),
-            openai_max_output_tokens=int(_env("OPENAI_MAX_OUTPUT_TOKENS") or "1500"),
+            # Reasoning models (gpt-5-*) spend part of max_output_tokens on
+            # internal reasoning before writing the final answer — 1500 was
+            # too tight and produced empty responses (status=incomplete,
+            # incomplete_reason=max_output_tokens). 2000 leaves realistic
+            # headroom for both reasoning and the compact JSON explanation.
+            openai_max_output_tokens=int(_env("OPENAI_MAX_OUTPUT_TOKENS") or "2000"),
             ai_cache_ttl_seconds=int(_env("POLYMARKETPULSE_AI_CACHE_TTL_SECONDS") or "900"),
             openai_max_cost_per_analysis_usd=float(_env("OPENAI_MAX_COST_PER_ANALYSIS_USD") or "0.01"),
             openai_max_input_tokens=int(_env("OPENAI_MAX_INPUT_TOKENS") or "10000"),
             openai_daily_budget_usd=float(_env("OPENAI_DAILY_BUDGET_USD") or "1.00"),
+            openai_reasoning_effort=_env("OPENAI_REASONING_EFFORT", default="low") or None,
+            openai_escalation_enabled=_bool(_env("OPENAI_ESCALATION_ENABLED", default="false")),
         )
 
     @property

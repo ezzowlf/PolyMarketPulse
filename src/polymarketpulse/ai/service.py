@@ -320,52 +320,35 @@ def _news_stats(storage: Storage, provider: str, provider_market_id: str) -> tup
 
 
 def _build_recommendation_payload(market: dict, prediction: PredictionResult, allowed_source_ids: list[str]) -> dict:
-    """Compact, bounded input for GPT-5 nano — mirrors the example structure
-    exactly. No raw tables, no unfiltered dumps."""
-    positive = [
-        {"factor": note, "weight": None, "source_ids": [f"reasoning_{i}"]}
-        for i, note in enumerate(prediction.reasoning_notes)
-        if prediction.net_yes_edge is not None and prediction.net_yes_edge >= 0
-    ]
-    negative = [
-        {"factor": note, "weight": None, "source_ids": [f"reasoning_{i}"]}
-        for i, note in enumerate(prediction.reasoning_notes)
-        if prediction.net_yes_edge is not None and prediction.net_yes_edge < 0
-    ]
+    """Compact, bounded input for GPT-5 nano — deliberately minimal (market
+    question, own probability, edge, confidence, deadline phase, top
+    factors, scenarios, warnings) rather than a full data dump. Less input
+    means less reasoning effort and a lower chance of exhausting the
+    output-token budget before a final answer is written. No raw tables,
+    no historical row dumps — GPT only ever explains, never computes."""
+    key_factors = [
+        {"factor": note, "source_ids": [f"reasoning_{i}"]} for i, note in enumerate(prediction.reasoning_notes)
+    ][:5]
+    scenarios = prediction.scenarios
+    data_gaps = [] if prediction.comparable_sample_size >= 5 else ["Zu wenige historische Vergleichsfälle"]
     return {
-        "task": "Explain an already calculated prediction market analysis.",
+        "task": "Erkläre kurz die bereits berechnete Prognose.",
         "language": "de",
-        "market": {
-            "id": market["market_id"],
-            "question": market["question"],
-            "category": market["category"],
-            "resolution_date": market["end_date"],
-            "resolution_rules": market["resolution_source"] or "nicht angegeben",
+        "market_question": market["question"],
+        "market_yes_probability": prediction.market_yes_probability,
+        "estimated_yes_probability": prediction.estimated_yes_probability,
+        "estimated_no_probability": prediction.estimated_no_probability,
+        "net_yes_edge": prediction.net_yes_edge,
+        "confidence_score": prediction.confidence_score,
+        "deadline_phase": prediction.deadline_phase,
+        "recommendation": prediction.recommendation,
+        "key_factors": key_factors,
+        "scenarios": {
+            "base": scenarios.base_case if scenarios else None,
+            "bull": scenarios.bull_case[:2] if scenarios else [],
+            "bear": scenarios.bear_case[:2] if scenarios else [],
         },
-        "prediction": {
-            "market_yes_probability": prediction.market_yes_probability,
-            "estimated_yes_probability": prediction.estimated_yes_probability,
-            "estimated_no_probability": prediction.estimated_no_probability,
-            "net_yes_edge": prediction.net_yes_edge,
-            "confidence_score": prediction.confidence_score,
-            "data_quality_score": prediction.data_quality.total,
-            "uncertainty_interval": {
-                "lower": prediction.uncertainty_lower,
-                "upper": prediction.uncertainty_upper,
-            },
-            "recommendation": prediction.recommendation,
-        },
-        "positive_factors": positive,
-        "negative_factors": negative,
-        "historical_comparisons": [
-            {
-                "description": f"{prediction.comparable_sample_size} vergleichbare Begegnungen",
-                "observed_yes_rate": prediction.observed_historical_yes_rate,
-                "sample_size": prediction.comparable_sample_size,
-                "source_ids": ["historical_comparables"] if prediction.comparable_sample_size else [],
-            }
-        ],
-        "data_gaps": [] if prediction.comparable_sample_size >= 5 else ["Zu wenige historische Vergleichsfälle"],
+        "data_gaps": data_gaps,
         "allowed_source_ids": allowed_source_ids,
     }
 
@@ -609,6 +592,7 @@ def explain_recommendation(
             model=model_name,
             timeout_seconds=settings.openai_timeout_seconds,
             max_output_tokens=settings.openai_max_output_tokens,
+            reasoning_effort=settings.openai_reasoning_effort,
         )
         started = time.monotonic()
         try:
@@ -692,11 +676,13 @@ def explain_recommendation(
             _record_blocked_attempt(2, True, requested_model, block_status, est2)
 
     used_mini = False
-    if explanation is None:
+    if explanation is None and settings.openai_escalation_enabled:
         # GPT-5 nano failed twice in a row (or the repair was budget-
         # blocked) — the one documented condition under which the pricier
         # fallback model may be tried, still subject to the same budget,
         # re-checked fresh (accounting for whatever nano already cost).
+        # Disabled by default (OPENAI_ESCALATION_ENABLED=false) until a
+        # separately controlled test explicitly enables it.
         allowed, block_status, est3 = _budget_check(settings.openai_fallback_model)
         if allowed:
             explanation = _try_model(3, False, settings.openai_fallback_model, mini_client, est3)

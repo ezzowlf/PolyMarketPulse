@@ -211,11 +211,27 @@ def test_invalid_json_twice_falls_back_to_mini(storage: Storage, ai_settings: Se
     market_id = _seed_market(storage)
     nano = FakeNanoClient(bad_responder)
     mini = FakeNanoClient(good_responder)
-    response = ai_service.explain_recommendation(storage, ai_settings, market_id, nano_client=nano, mini_client=mini)
+    # Escalation to gpt-5-mini is opt-in (OPENAI_ESCALATION_ENABLED=false by
+    # default) — explicitly enable it for this test of that specific path.
+    escalation_settings = replace(ai_settings, openai_escalation_enabled=True)
+    response = ai_service.explain_recommendation(storage, escalation_settings, market_id, nano_client=nano, mini_client=mini)
     assert nano.calls == 2  # one retry on the same model before falling to mini
     assert mini.calls == 1
     assert response.meta.model == "gpt-5-mini"
     assert response.meta.used_fallback is False
+
+
+def test_mini_escalation_disabled_by_default(storage: Storage, ai_settings: Settings) -> None:
+    def bad_responder(call_n):
+        raise AITimeoutError("simulated failure")
+
+    market_id = _seed_market(storage)
+    nano = FakeNanoClient(bad_responder)
+    mini = FakeNanoClient(lambda call_n: (_ for _ in ()).throw(AssertionError("mini must not be called by default")))
+    response = ai_service.explain_recommendation(storage, ai_settings, market_id, nano_client=nano, mini_client=mini)
+    assert ai_settings.openai_escalation_enabled is False
+    assert mini.calls == 0
+    assert response.meta.used_fallback is True
 
 
 def test_all_models_failing_uses_rule_based_fallback(storage: Storage, ai_settings: Settings) -> None:

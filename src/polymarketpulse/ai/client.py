@@ -97,16 +97,77 @@ def _strictify_schema(node: Any) -> Any:
     return node
 
 
+def _extract_output_text(response: Any) -> tuple[str | None, dict[str, Any]]:
+    """Robustly pulls the final text out of a Responses API result.
+
+    `response.output_text` is a convenience property that concatenates
+    every `output_text` content segment across every `message` item — for
+    reasoning models it is usually correct, but we do not want a single
+    quirk in that property to be the only thing standing between us and a
+    valid answer that's actually sitting in `response.output`. So: walk
+    `response.output` ourselves, collect every `message` item's
+    `output_text` segments, and only fall back to the SDK's own
+    `output_text` property if our manual walk finds nothing.
+
+    Returns (final_text_or_None, diagnostics) — diagnostics is a small,
+    secret-free dict (item/segment counts, reasoning presence, completion
+    status) used only to build a short, non-sensitive error message; it
+    never contains prompt or response content."""
+    output_items = getattr(response, "output", None) or []
+    text_segments: list[str] = []
+    has_reasoning = False
+    for item in output_items:
+        item_type = getattr(item, "type", None)
+        if item_type == "reasoning":
+            has_reasoning = True
+            continue
+        if item_type != "message":
+            continue
+        for content in getattr(item, "content", None) or []:
+            if getattr(content, "type", None) == "output_text":
+                text = getattr(content, "text", None)
+                if text:
+                    text_segments.append(text)
+
+    final_text = "".join(text_segments) if text_segments else (getattr(response, "output_text", None) or None)
+
+    incomplete_details = getattr(response, "incomplete_details", None)
+    diagnostics = {
+        "status": getattr(response, "status", None),
+        "incomplete_reason": getattr(incomplete_details, "reason", None) if incomplete_details else None,
+        "output_item_count": len(output_items),
+        "text_segment_count": len(text_segments),
+        "has_reasoning": has_reasoning,
+    }
+    return final_text, diagnostics
+
+
+def _diagnostics_summary(diagnostics: dict[str, Any]) -> str:
+    return (
+        f"status={diagnostics['status']} incomplete_reason={diagnostics['incomplete_reason']} "
+        f"output_items={diagnostics['output_item_count']} text_segments={diagnostics['text_segment_count']} "
+        f"has_reasoning={diagnostics['has_reasoning']}"
+    )
+
+
 class OpenAIStructuredClient:
     """Thin wrapper around the OpenAI Responses API for one purpose:
     produce a JSON object that validates against a given Pydantic schema.
     All OpenAI SDK exceptions are caught here and re-raised as our own
     typed errors so callers never need to import the `openai` package."""
 
-    def __init__(self, api_key: str, model: str, timeout_seconds: float, max_output_tokens: int) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        timeout_seconds: float,
+        max_output_tokens: int,
+        reasoning_effort: str | None = None,
+    ) -> None:
         self._model = model
         self._timeout_seconds = timeout_seconds
         self._max_output_tokens = max_output_tokens
+        self._reasoning_effort = reasoning_effort
         try:
             import openai
         except ImportError as exc:  # pragma: no cover - openai is a declared dependency
@@ -125,23 +186,26 @@ class OpenAIStructuredClient:
         persist real token/cost data for a *failed* attempt, not just a
         successful one."""
         schema = _strictify_schema(schema_model.model_json_schema())
+        create_kwargs: dict[str, Any] = {
+            "model": self._model,
+            "input": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "max_output_tokens": self._max_output_tokens,
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": schema_name,
+                    "schema": schema,
+                    "strict": True,
+                }
+            },
+        }
+        if self._reasoning_effort:
+            create_kwargs["reasoning"] = {"effort": self._reasoning_effort}
         try:
-            response = self._client.responses.create(
-                model=self._model,
-                input=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                max_output_tokens=self._max_output_tokens,
-                text={
-                    "format": {
-                        "type": "json_schema",
-                        "name": schema_name,
-                        "schema": schema,
-                        "strict": True,
-                    }
-                },
-            )
+            response = self._client.responses.create(**create_kwargs)
         except self._openai.APITimeoutError as exc:
             raise AITimeoutError("OpenAI request timed out") from exc
         except self._openai.RateLimitError as exc:
@@ -158,9 +222,11 @@ class OpenAIStructuredClient:
         input_tokens = getattr(usage, "input_tokens", None) if usage else None
         output_tokens = getattr(usage, "output_tokens", None) if usage else None
 
-        output_text = getattr(response, "output_text", None)
+        output_text, diagnostics = _extract_output_text(response)
         if not output_text:
-            raise AIEmptyResponseError("Empty response from OpenAI", input_tokens, output_tokens)
+            raise AIEmptyResponseError(
+                f"Empty response from OpenAI ({_diagnostics_summary(diagnostics)})", input_tokens, output_tokens
+            )
 
         try:
             parsed = json.loads(output_text)

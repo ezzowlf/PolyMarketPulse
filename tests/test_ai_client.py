@@ -34,6 +34,7 @@ def _client_with_fake_openai(create_fn):
     client._model = "gpt-4.1-mini"
     client._timeout_seconds = 30
     client._max_output_tokens = 1200
+    client._reasoning_effort = None
 
     import openai as real_openai
 
@@ -54,6 +55,118 @@ def test_generate_structured_success() -> None:
     assert parsed["summary"] == "Test"
     assert in_tok == 10
     assert out_tok == 20
+
+
+def _message_item(text: str) -> SimpleNamespace:
+    return SimpleNamespace(type="message", content=[SimpleNamespace(type="output_text", text=text)])
+
+
+def _reasoning_item() -> SimpleNamespace:
+    return SimpleNamespace(type="reasoning", content=[])
+
+
+def test_generate_structured_falls_back_to_output_array_when_output_text_empty() -> None:
+    """`output_text` empty but a real message item exists in `output` — the
+    exact gap a live smoke test found (empty_response despite real usage)."""
+    def create_fn(**kwargs):
+        return SimpleNamespace(
+            output_text="",
+            output=[_message_item(json.dumps(_valid_payload()))],
+            usage=SimpleNamespace(input_tokens=50, output_tokens=30),
+            status="completed",
+            incomplete_details=None,
+        )
+
+    client = _client_with_fake_openai(create_fn)
+    parsed, in_tok, out_tok = client.generate_structured("sys", "user", AnalysisResult, "market_analysis")
+    assert parsed["summary"] == "Test"
+    assert in_tok == 50
+    assert out_tok == 30
+
+
+def test_generate_structured_reasoning_item_plus_final_text() -> None:
+    def create_fn(**kwargs):
+        return SimpleNamespace(
+            output_text="",
+            output=[_reasoning_item(), _message_item(json.dumps(_valid_payload()))],
+            usage=SimpleNamespace(input_tokens=80, output_tokens=60),
+            status="completed",
+            incomplete_details=None,
+        )
+
+    client = _client_with_fake_openai(create_fn)
+    parsed, _in_tok, _out_tok = client.generate_structured("sys", "user", AnalysisResult, "market_analysis")
+    assert parsed["summary"] == "Test"
+
+
+def test_generate_structured_multiple_output_items_concatenated() -> None:
+    payload_text = json.dumps(_valid_payload())
+    def create_fn(**kwargs):
+        return SimpleNamespace(
+            output_text="",
+            output=[_message_item(payload_text[: len(payload_text) // 2]), _message_item(payload_text[len(payload_text) // 2 :])],
+            usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+            status="completed",
+            incomplete_details=None,
+        )
+
+    client = _client_with_fake_openai(create_fn)
+    parsed, _, _ = client.generate_structured("sys", "user", AnalysisResult, "market_analysis")
+    assert parsed["summary"] == "Test"
+
+
+def test_generate_structured_empty_despite_usage_raises_with_diagnostics() -> None:
+    """Reasoning-only output, no message item at all — a real empty
+    response, correctly still raised, but now with diagnostics in the
+    message (status/incomplete_reason/item counts) instead of a bare
+    'Empty response'."""
+    def create_fn(**kwargs):
+        return SimpleNamespace(
+            output_text="",
+            output=[_reasoning_item()],
+            usage=SimpleNamespace(input_tokens=40, output_tokens=800),
+            status="incomplete",
+            incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+        )
+
+    client = _client_with_fake_openai(create_fn)
+    with pytest.raises(AIResponseError) as exc_info:
+        client.generate_structured("sys", "user", AnalysisResult, "market_analysis")
+    assert "max_output_tokens" in str(exc_info.value)
+    assert exc_info.value.input_tokens == 40
+    assert exc_info.value.output_tokens == 800
+
+
+def test_generate_structured_unknown_incomplete_reason() -> None:
+    def create_fn(**kwargs):
+        return SimpleNamespace(
+            output_text="",
+            output=[],
+            usage=SimpleNamespace(input_tokens=5, output_tokens=5),
+            status="incomplete",
+            incomplete_details=SimpleNamespace(reason=None),
+        )
+
+    client = _client_with_fake_openai(create_fn)
+    with pytest.raises(AIResponseError):
+        client.generate_structured("sys", "user", AnalysisResult, "market_analysis")
+
+
+def test_error_message_never_contains_full_response_text() -> None:
+    secret_looking_text = "SENSITIVE_PROMPT_ECHO_MARKER"
+    def create_fn(**kwargs):
+        return SimpleNamespace(
+            output_text="",
+            output=[_reasoning_item()],
+            usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+            status="incomplete",
+            incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+        )
+
+    client = _client_with_fake_openai(create_fn)
+    with pytest.raises(AIResponseError) as exc_info:
+        client.generate_structured("sys", secret_looking_text, AnalysisResult, "market_analysis")
+    assert secret_looking_text not in str(exc_info.value)
 
 
 def test_generate_structured_empty_response_raises() -> None:

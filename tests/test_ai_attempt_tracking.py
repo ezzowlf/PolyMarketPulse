@@ -204,6 +204,27 @@ def test_successful_repair_attempt(storage: Storage, ai_settings: Settings) -> N
 
 
 def test_failed_repair_attempt(storage: Storage, ai_settings: Settings) -> None:
+    # Escalation disabled by default: only the nano main + repair attempts
+    # happen, no third (mini) call.
+    market_id = _seed_market(storage)
+
+    def always_invalid():
+        raise AIInvalidJSONError("bad json", 200, 40)
+
+    nano = ScriptedClient(always_invalid, always_invalid)
+    mini = ScriptedClient(lambda: (_ for _ in ()).throw(AssertionError("mini must not be called by default")))
+    response = ai_service.explain_recommendation(storage, ai_settings, market_id, nano_client=nano, mini_client=mini)
+
+    assert response.meta.used_fallback is True
+    attempts = _attempts_for(storage, response.meta.analysis_id)
+    assert len(attempts) == 2  # nano main, nano repair — no mini escalation by default
+    assert attempts[0]["is_repair"] == 0
+    assert attempts[1]["is_repair"] == 1
+    assert mini.calls == 0
+    assert response.meta.fallback_reason is not None
+
+
+def test_failed_repair_then_escalation_when_enabled(storage: Storage, ai_settings: Settings) -> None:
     market_id = _seed_market(storage)
 
     def always_invalid():
@@ -211,15 +232,14 @@ def test_failed_repair_attempt(storage: Storage, ai_settings: Settings) -> None:
 
     nano = ScriptedClient(always_invalid, always_invalid)
     mini = ScriptedClient(always_invalid)
-    response = ai_service.explain_recommendation(storage, ai_settings, market_id, nano_client=nano, mini_client=mini)
+    escalation_settings = replace(ai_settings, openai_escalation_enabled=True)
+    response = ai_service.explain_recommendation(storage, escalation_settings, market_id, nano_client=nano, mini_client=mini)
 
     assert response.meta.used_fallback is True
     attempts = _attempts_for(storage, response.meta.analysis_id)
     assert len(attempts) == 3  # nano main, nano repair, mini escalation
-    assert attempts[0]["is_repair"] == 0
-    assert attempts[1]["is_repair"] == 1
     assert attempts[2]["actual_model"] == "gpt-5-mini"
-    assert response.meta.fallback_reason is not None
+    assert mini.calls == 1
 
 
 def test_costs_of_both_attempts_are_summed(storage: Storage, ai_settings: Settings) -> None:
@@ -255,14 +275,35 @@ def test_second_attempt_skipped_for_budget(storage: Storage, ai_settings: Settin
 
     assert nano.calls == 1  # repair never sent
     attempts = _attempts_for(storage, response.meta.analysis_id)
-    # attempt 1: real, sent; attempt 2 (nano repair) and attempt 3 (mini
-    # escalation) both blocked pre-flight by the same tight budget.
-    assert len(attempts) == 3
+    # attempt 1: real, sent; attempt 2 (nano repair) blocked pre-flight by
+    # the tight budget. No mini escalation attempt is recorded at all,
+    # since escalation is disabled by default.
+    assert len(attempts) == 2
     assert attempts[0]["actual_model"] == "gpt-5-nano"
     assert attempts[1]["actual_model"] is None
     assert attempts[1]["status"] in ("blocked_cost_limit", "blocked_daily_budget")
-    assert attempts[2]["actual_model"] is None
-    assert attempts[2]["status"] in ("blocked_cost_limit", "blocked_daily_budget")
+
+
+def test_escalation_blocked_by_remaining_budget(storage: Storage, ai_settings: Settings) -> None:
+    market_id = _seed_market(storage)
+
+    def cheap_failure():
+        raise AIInvalidJSONError("bad json", 100, 20)
+
+    # Budget covers two small nano attempts but not a third, pricier mini
+    # attempt (mini costs 5x nano's rate).
+    tight_budget = replace(
+        ai_settings, openai_escalation_enabled=True,
+        openai_max_cost_per_analysis_usd=0.00006, openai_max_output_tokens=50,
+    )
+    nano = ScriptedClient(cheap_failure, cheap_failure)
+    mini = ScriptedClient(lambda: (_ for _ in ()).throw(AssertionError("mini must not be called when budget-blocked")))
+    response = ai_service.explain_recommendation(storage, tight_budget, market_id, nano_client=nano, mini_client=mini)
+
+    assert mini.calls == 0
+    attempts = _attempts_for(storage, response.meta.analysis_id)
+    assert attempts[-1]["actual_model"] is None
+    assert attempts[-1]["status"] in ("blocked_cost_limit", "blocked_daily_budget")
 
 
 def test_timeout_without_usage(storage: Storage, ai_settings: Settings) -> None:
