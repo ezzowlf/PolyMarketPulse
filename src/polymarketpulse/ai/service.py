@@ -319,13 +319,22 @@ def _news_stats(storage: Storage, provider: str, provider_market_id: str) -> tup
     return (row[0] or 0), row[1]
 
 
+def _as_percent(value: float | None) -> float | None:
+    return round(value * 100, 1) if value is not None else None
+
+
 def _build_recommendation_payload(market: dict, prediction: PredictionResult, allowed_source_ids: list[str]) -> dict:
     """Compact, bounded input for GPT-5 nano — deliberately minimal (market
     question, own probability, edge, confidence, deadline phase, top
     factors, scenarios, warnings) rather than a full data dump. Less input
     means less reasoning effort and a lower chance of exhausting the
     output-token budget before a final answer is written. No raw tables,
-    no historical row dumps — GPT only ever explains, never computes."""
+    no historical row dumps — GPT only ever explains, never computes.
+
+    Every probability-shaped value is sent as an explicit 0-100 percent
+    under a `_percent`-suffixed key — never a bare 0-1 fraction — mirroring
+    exactly the field names and scale GPT is expected to echo back in
+    `probability_explanation` (see ai/schemas.py, ai/prompts.py's example)."""
     key_factors = [
         {"factor": note, "source_ids": [f"reasoning_{i}"]} for i, note in enumerate(prediction.reasoning_notes)
     ][:5]
@@ -335,11 +344,11 @@ def _build_recommendation_payload(market: dict, prediction: PredictionResult, al
         "task": "Erkläre kurz die bereits berechnete Prognose.",
         "language": "de",
         "market_question": market["question"],
-        "market_yes_probability": prediction.market_yes_probability,
-        "estimated_yes_probability": prediction.estimated_yes_probability,
-        "estimated_no_probability": prediction.estimated_no_probability,
-        "net_yes_edge": prediction.net_yes_edge,
-        "confidence_score": prediction.confidence_score,
+        "market_yes_percent": _as_percent(prediction.market_yes_probability),
+        "estimated_yes_percent": _as_percent(prediction.estimated_yes_probability),
+        "estimated_no_percent": _as_percent(prediction.estimated_no_probability),
+        "confidence_percent": round(prediction.confidence_score, 1),
+        "net_edge_percentage_points": _as_percent(prediction.net_yes_edge),
         "deadline_phase": prediction.deadline_phase,
         "recommendation": prediction.recommendation,
         "key_factors": key_factors,
@@ -585,7 +594,8 @@ def explain_recommendation(
         )
 
     def _try_model(
-        attempt_number: int, is_repair: bool, model_name: str, client: OpenAIStructuredClient | None, est: CostEstimate
+        attempt_number: int, is_repair: bool, model_name: str, client: OpenAIStructuredClient | None,
+        est: CostEstimate, repair_note: str | None = None,
     ) -> ExplanationResult | None:
         c = client or OpenAIStructuredClient(
             api_key=settings.openai_api_key,  # type: ignore[arg-type]
@@ -594,10 +604,18 @@ def explain_recommendation(
             max_output_tokens=settings.openai_max_output_tokens,
             reasoning_effort=settings.openai_reasoning_effort,
         )
+        # On a repair attempt, name the concrete violation from the failed
+        # attempt instead of blindly repeating the identical prompt — the
+        # model is told exactly what was wrong, never asked to re-derive
+        # the engine's values itself.
+        prompt_for_attempt = (
+            f"{user_prompt}\n\nKORREKTUR ERFORDERLICH: {repair_note}. Nutze weiterhin exakt die "
+            f"vorgegebenen Engine-Werte, ändere nur das genannte Feld." if repair_note else user_prompt
+        )
         started = time.monotonic()
         try:
             parsed, in_tok, out_tok = c.generate_structured(
-                EXPLANATION_SYSTEM_PROMPT, user_prompt, ExplanationResult, "explanation"
+                EXPLANATION_SYSTEM_PROMPT, prompt_for_attempt, ExplanationResult, "explanation"
             )
         except AIError as exc:
             duration_ms = int((time.monotonic() - started) * 1000)
@@ -671,7 +689,8 @@ def explain_recommendation(
     if explanation is None:
         allowed, block_status, est2 = _budget_check(requested_model)
         if allowed:
-            explanation = _try_model(2, True, requested_model, nano_client, est2)  # one repair attempt, same model
+            repair_note = attempts[-1].error_detail if attempts else None
+            explanation = _try_model(2, True, requested_model, nano_client, est2, repair_note=repair_note)  # one repair attempt, same model
         else:
             _record_blocked_attempt(2, True, requested_model, block_status, est2)
 

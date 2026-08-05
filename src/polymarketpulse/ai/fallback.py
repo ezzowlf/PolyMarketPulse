@@ -98,8 +98,9 @@ def build_fallback_explanation(prediction: PredictionResult) -> ExplanationResul
         summary=summary,
         probability_explanation=ProbabilityExplanation(
             market_yes_percent=market_pct,
-            model_yes_percent=model_yes_pct,
-            model_no_percent=model_no_pct,
+            estimated_yes_percent=model_yes_pct,
+            estimated_no_percent=model_no_pct,
+            confidence_percent=round(prediction.confidence_score, 1),
             net_edge_percentage_points=edge_pp,
         ),
         supports_yes=supports_yes,

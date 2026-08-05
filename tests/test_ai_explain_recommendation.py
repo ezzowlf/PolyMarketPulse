@@ -23,8 +23,9 @@ def _valid_explanation_for(prediction) -> ExplanationResult:
         summary="Test summary",
         probability_explanation=ProbabilityExplanation(
             market_yes_percent=round(prediction.market_yes_probability * 100) if prediction.market_yes_probability is not None else None,
-            model_yes_percent=round(prediction.estimated_yes_probability * 100) if prediction.estimated_yes_probability is not None else None,
-            model_no_percent=round(prediction.estimated_no_probability * 100) if prediction.estimated_no_probability is not None else None,
+            estimated_yes_percent=round(prediction.estimated_yes_probability * 100) if prediction.estimated_yes_probability is not None else None,
+            estimated_no_percent=round(prediction.estimated_no_probability * 100) if prediction.estimated_no_probability is not None else None,
+            confidence_percent=round(prediction.confidence_score),
             net_edge_percentage_points=round(prediction.net_yes_edge * 100) if prediction.net_yes_edge is not None else None,
         ),
         supports_yes=[],

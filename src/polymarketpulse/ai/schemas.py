@@ -106,10 +106,17 @@ ImpactLiteral = Literal["low", "medium", "high"]
 
 
 class ProbabilityExplanation(BaseModel):
-    market_yes_percent: float | None = None
-    model_yes_percent: float | None = None
-    model_no_percent: float | None = None
-    net_edge_percentage_points: float | None = None
+    """Every field here is an explicit 0-100 percentage — never a 0-1
+    fraction. The `_percent`/`_percentage_points` suffixes are load-bearing:
+    a model that returns 0.135 instead of 13.5 for `market_yes_percent`
+    fails the 0-100 range check below before it even reaches the
+    engine-value comparison in ai/validation.py."""
+
+    market_yes_percent: float | None = Field(default=None, ge=0, le=100)
+    estimated_yes_percent: float | None = Field(default=None, ge=0, le=100)
+    estimated_no_percent: float | None = Field(default=None, ge=0, le=100)
+    confidence_percent: float | None = Field(default=None, ge=0, le=100)
+    net_edge_percentage_points: float | None = Field(default=None, ge=-100, le=100)
 
     model_config = {"extra": "forbid"}
 

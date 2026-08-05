@@ -6,6 +6,7 @@ from .schemas import ExplanationResult
 
 # Rounding tolerance in percentage points — GPT is asked to echo rounded
 # whole-percent numbers, so exact float equality would be too strict.
+# Documented, small, and applied identically to every percent field below.
 TOLERANCE_PP = 1.0
 
 
@@ -24,7 +25,23 @@ def validate_explanation(
 ) -> None:
     """Raises ValidationError on the first mismatch. Never silently
     'corrects' the model's output — a wrong number is always rejected, not
-    patched, since we can't know which side is right."""
+    patched, since we can't know which side is right.
+
+    Percent-range validity (0-100, not a 0-1 fraction) is already enforced
+    by ai/schemas.py's `Field(ge=0, le=100)` constraints at parse time —
+    a response with `market_yes_percent=0.135` never even reaches this
+    function; it fails Pydantic validation first (AISchemaValidationError).
+    This function only checks the *values* against the engine's numbers.
+    """
+    # Hard, explicit rule (not just a side effect of the direction lookup
+    # below): INSUFFICIENT_DATA must never be paired with a trade direction
+    # of any kind. Checked first and separately so the error message names
+    # the exact rule that was violated, for a precise repair prompt.
+    if prediction.recommendation == "INSUFFICIENT_DATA" and explanation.direction != "NONE":
+        raise ValidationError(
+            f"direction must be NONE because recommendation is INSUFFICIENT_DATA, model said {explanation.direction!r}"
+        )
+
     expected_direction = direction_for(prediction.recommendation)
     if explanation.direction != expected_direction:
         raise ValidationError(
@@ -39,15 +56,16 @@ def validate_explanation(
 
     checks = (
         ("market_yes_percent", explanation.probability_explanation.market_yes_percent, _pct(prediction.market_yes_probability)),
-        ("model_yes_percent", explanation.probability_explanation.model_yes_percent, _pct(prediction.estimated_yes_probability)),
-        ("model_no_percent", explanation.probability_explanation.model_no_percent, _pct(prediction.estimated_no_probability)),
+        ("estimated_yes_percent", explanation.probability_explanation.estimated_yes_percent, _pct(prediction.estimated_yes_probability)),
+        ("estimated_no_percent", explanation.probability_explanation.estimated_no_percent, _pct(prediction.estimated_no_probability)),
+        ("confidence_percent", explanation.probability_explanation.confidence_percent, round(prediction.confidence_score)),
         ("net_edge_percentage_points", explanation.probability_explanation.net_edge_percentage_points, _pct(prediction.net_yes_edge)),
     )
     for name, actual, expected in checks:
         if expected is None:
             continue  # engine didn't have this value either; nothing to check
         if actual is None or abs(actual - expected) > TOLERANCE_PP:
-            raise ValidationError(f"{name} mismatch: model said {actual!r}, engine computed {expected!r}")
+            raise ValidationError(f"{name} must equal {expected}, not {actual!r}")
 
     cited_ids = {
         sid
