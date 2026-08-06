@@ -22,6 +22,7 @@ from .bayesian import bayesian_update
 from .confidence import compute_confidence
 from .deadline import classify_deadline_phase, deadline_weights_for
 from .ensemble import combine_submodels
+from .evidence import compute_independent_evidence
 from .history import compute_history_estimate
 from .momentum import compute_momentum_estimate
 from .news import collect_news_evidence, compute_news_estimate
@@ -108,6 +109,8 @@ def compute_prediction(
     news_count: int,
     news_agreement: float | None,
     resolution_rules_present: bool,
+    question: str = "",
+    resolution_text: str | None = None,
 ) -> PredictionResult:
     reasoning: list[str] = []
     now = datetime.now(UTC)
@@ -143,8 +146,27 @@ def compute_prediction(
         available=history_estimate.available, detail=history_estimate.detail,
     )
 
-    # --- Ensemble: history + momentum -> prior --------------------------
-    prior_estimate, _ = combine_submodels([history_estimate, momentum_estimate])
+    # --- Independent Evidence & Early-Signal Engine -----------------------
+    # Computed WITHOUT market_yes_price as an anchor (see evidence.py) —
+    # only afterward compared against it to report divergence/edge. Feeds
+    # into the ensemble like any other submodel so real, independent
+    # evidence can actually move the recommendation (not just be displayed).
+    independent_evidence = compute_independent_evidence(
+        conn, provider=provider, provider_market_id=provider_market_id,
+        question=question, resolution_text=resolution_text,
+        market_yes_price=market_yes_price, now=now,
+    )
+    independent_evidence_estimate = SubmodelEstimate(
+        name="independent_evidence",
+        estimated_yes_probability=independent_evidence.independent_yes_probability,
+        weight=(0.45 * deadline_weights.news_weight) if independent_evidence.available else 0.0,
+        available=independent_evidence.available,
+        detail=independent_evidence.detail,
+    )
+    reasoning.append(independent_evidence.detail)
+
+    # --- Ensemble: history + momentum + independent evidence -> prior ----
+    prior_estimate, _ = combine_submodels([history_estimate, momentum_estimate, independent_evidence_estimate])
     if prior_estimate is None:
         prior_estimate = market_yes_price  # last resort: no submodel had enough to say anything
 
@@ -189,7 +211,7 @@ def compute_prediction(
     )
 
     # --- Confidence (new: ensemble-aware, separate from probability) -----
-    all_submodels = [history_estimate, momentum_estimate, news_estimate]
+    all_submodels = [history_estimate, momentum_estimate, news_estimate, independent_evidence_estimate]
     market_stability = 1.0
     if price_analytics is not None and price_analytics.volatility is not None:
         market_stability = max(0.0, 1 - min(1.0, price_analytics.volatility * 10))
@@ -233,4 +255,5 @@ def compute_prediction(
         scenarios=scenarios,
         news_sentiment_score=weighted_sentiment,
         news_confirmation_count=confirmation_count,
+        independent_evidence=independent_evidence,
     )

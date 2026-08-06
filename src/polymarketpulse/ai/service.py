@@ -464,6 +464,8 @@ def get_prediction(storage: Storage, market_id: str) -> PredictionResult:
         news_count=news_count,
         news_agreement=news_agreement,
         resolution_rules_present=bool(market["resolution_source"]),
+        question=market["question"] or "",
+        resolution_text=market["resolution_source"],
     )
     _persist_prediction_snapshot(storage, market, prediction)
     return prediction
@@ -502,6 +504,8 @@ def explain_recommendation(
         news_count=news_count,
         news_agreement=news_agreement,
         resolution_rules_present=bool(market["resolution_source"]),
+        question=market["question"] or "",
+        resolution_text=market["resolution_source"],
     )
     _persist_prediction_snapshot(storage, market, prediction)
 

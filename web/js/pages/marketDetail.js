@@ -67,6 +67,7 @@ async function renderMarketDetailPage(container, marketId) {
       </div>
 
       <div class="panel" id="changes-panel"></div>
+      <div class="panel" id="evidence-panel"></div>
 
       <div class="panel" id="prediction-panel">
         <h3>KI-Einschätzung</h3>
@@ -270,6 +271,47 @@ function _dataQualityPanelHtml(p) {
   `;
 }
 
+function _evidenceSectionHtml(p) {
+  const ie = p && p.independent_evidence;
+  if (!ie) {
+    return `<h3>Unabhängige Evidenz</h3><div class="empty-state">Keine unabhängige Schätzung möglich — keine unabhängige Evidenz-Infrastruktur verfügbar.</div>`;
+  }
+  if (!ie.available) {
+    return `<h3>Unabhängige Evidenz</h3><div class="empty-state">keine unabhängige Schätzung möglich — ${ie.detail}</div>`;
+  }
+  const marketPct = fmtPct(p.market_yes_probability);
+  const independentPct = fmtPct(ie.independent_yes_probability);
+  const divergenceStr = ie.divergence !== null ? fmtEdgePp(ie.divergence) : "–";
+  const evidenceList = (items) =>
+    items && items.length
+      ? `<ul>${items.map((e) => `<li>${fmtDate(e.published_at)} — <a href="${e.url}" target="_blank" rel="noopener">${e.title}</a> <span class="sub">(${e.source_domain || e.source})</span></li>`).join("")}</ul>`
+      : `<p class="sub">keine</p>`;
+
+  return `
+    <h3>Unabhängige Evidenz</h3>
+    <div class="widget-grid">
+      ${widgetCard({ title: "MARKT", value: marketPct })}
+      ${widgetCard({ title: "UNABHÄNGIGES MODELL", value: independentPct })}
+      ${widgetCard({ title: "DIVERGENZ", value: divergenceStr })}
+      ${widgetCard({ title: "Quellenqualität", value: ie.source_quality_score !== null ? `${fmtNum(ie.source_quality_score, 0)} / 100` : "–" })}
+      ${widgetCard({ title: "Zeit seit Erstmeldung", value: ie.time_since_first_report_hours !== null ? `${fmtNum(ie.time_since_first_report_hours, 1)} h` : "–" })}
+      ${widgetCard({ title: "Information Edge", value: ie.information_edge_score !== null ? `${fmtNum(ie.information_edge_score, 0)} / 100` : "–" })}
+    </div>
+    ${ie.breaking ? `<div class="badge yellow">Breaking (unter 48h)</div>` : ""}
+    ${ie.contradiction_detected ? `<div class="badge yellow">Widersprüchliche Quellenlage</div>` : ""}
+    <p><strong>Spricht für YES (${ie.evidence_for_yes.length}):</strong></p>
+    ${evidenceList(ie.evidence_for_yes)}
+    <p><strong>Spricht für NO (${ie.evidence_for_no.length}):</strong></p>
+    ${evidenceList(ie.evidence_for_no)}
+    ${
+      ie.not_yet_priced_in.length
+        ? `<p><strong>Noch nicht eingepreist:</strong></p>${evidenceList(ie.not_yet_priced_in)}`
+        : ""
+    }
+    <p class="sub">${ie.detail}</p>
+  `;
+}
+
 function _aiCardHtml(response) {
   const p = response.prediction;
   const e = response.explanation;
@@ -310,11 +352,13 @@ async function renderPredictionPanel(marketId, market) {
   const scenariosPanel = document.getElementById("scenarios-panel");
   const submodelsPanel = document.getElementById("submodels-panel");
   const dqPanel = document.getElementById("data-quality-panel");
+  const evidencePanel = document.getElementById("evidence-panel");
   if (!panel) return;
 
   const paint = (response) => {
     headlinePanel.innerHTML = _headlinePanelHtml(market, market.opportunity, response.prediction);
     summaryPanel.innerHTML = _summaryPanelHtml(response.prediction);
+    if (evidencePanel) evidencePanel.innerHTML = _evidenceSectionHtml(response.prediction);
     panel.innerHTML = _aiCardHtml(response);
     scenariosPanel.innerHTML = _scenarioSectionHtml(response.prediction.scenarios);
     submodelsPanel.innerHTML = _submodelSectionHtml(response.prediction);

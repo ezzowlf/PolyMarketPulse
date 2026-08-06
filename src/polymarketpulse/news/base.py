@@ -14,6 +14,8 @@ class NewsEvent:
     fetched_at: datetime
     summary: str = ""
     entities: tuple[str, ...] = field(default_factory=tuple)
+    tone: float | None = None  # GDELT-style sentiment tone (-100..+100), None if source doesn't provide one
+    source_domain: str = ""  # publisher domain, used for reliability lookup and confirmation-source counting
 
     @property
     def content_hash(self) -> str:

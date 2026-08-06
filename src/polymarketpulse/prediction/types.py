@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from .evidence import IndependentEvidenceResult
 
 Recommendation = Literal[
     "STRONG_YES", "YES", "WATCH_YES", "NO_BET", "WATCH_NO", "NO", "STRONG_NO", "INSUFFICIENT_DATA"
@@ -119,6 +122,9 @@ class PredictionResult:
     news_sentiment_score: float | None = None  # -1 (negativ) .. +1 (positiv)
     news_confirmation_count: int = 0
 
+    # --- Independent Evidence & Early-Signal Engine (additive) ---------
+    independent_evidence: IndependentEvidenceResult | None = None
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -149,4 +155,5 @@ class PredictionResult:
             "scenarios": self.scenarios.as_dict() if self.scenarios else None,
             "news_sentiment_score": self.news_sentiment_score,
             "news_confirmation_count": self.news_confirmation_count,
+            "independent_evidence": self.independent_evidence.as_dict() if self.independent_evidence else None,
         }

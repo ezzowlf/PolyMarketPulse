@@ -138,6 +138,7 @@ def compute_opportunity(storage: Storage, market_row: dict) -> dict | None:
         "last_seen_at": market_row.get("last_seen_at"),
         "first_seen_at": market_row.get("first_seen_at"),
         "change_since_last_analysis": _change_since_last(storage.connection, market_row["market_id"]),
+        "independent_evidence": prediction.independent_evidence.as_dict() if prediction.independent_evidence else None,
     }
 
 

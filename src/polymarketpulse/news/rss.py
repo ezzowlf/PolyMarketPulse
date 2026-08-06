@@ -3,6 +3,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from urllib.parse import urlparse
 
 import httpx
 
@@ -15,6 +16,10 @@ DEFAULT_FEEDS: dict[str, str] = {
     "federal_reserve": "https://www.federalreserve.gov/feeds/press_all.xml",
     "ecb": "https://www.ecb.europa.eu/rss/press.html",
     "whitehouse": "https://www.whitehouse.gov/feed/",
+    "un_news": "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
+    "state_department": "https://www.state.gov/rss-feed/press-releases/feed/",
+    "nato": "https://www.nato.int/cps/en/natohq/news.rss",
+    "sec": "https://www.sec.gov/news/pressreleases.rss",
 }
 
 
@@ -60,6 +65,7 @@ def fetch_feed(url: str, source_name: str, timeout: float = 20.0) -> list[NewsEv
                 published_at=_parse_date(item.findtext("pubDate")),
                 fetched_at=now,
                 summary=(item.findtext("description") or "").strip()[:500],
+                source_domain=urlparse(link).netloc,
             )
         )
 
@@ -79,6 +85,7 @@ def fetch_feed(url: str, source_name: str, timeout: float = 20.0) -> list[NewsEv
                     title=title,
                     published_at=_parse_date(entry.findtext("atom:updated", namespaces=ns)),
                     fetched_at=now,
+                    source_domain=urlparse(link).netloc,
                 )
             )
 

@@ -431,19 +431,13 @@ def cmd_news_fetch(args: argparse.Namespace) -> int:
         )
         return 0
 
+    from .news.gdelt import build_query_for_question, fetch_gdelt
     from .news.linker import link_news_to_markets
     from .news.rss import fetch_all
 
     storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
     try:
         events = fetch_all(timeout=settings.request_timeout)
-        new_count = 0
-        saved_ids = {}
-        for event in events:
-            row_id = storage.save_news_event(event)
-            if row_id is not None:
-                new_count += 1
-                saved_ids[event.source_url] = row_id
 
         provider = create_provider(settings.default_provider, timeout=settings.request_timeout)
         try:
@@ -453,6 +447,23 @@ def cmd_news_fetch(args: argparse.Namespace) -> int:
             markets = []
         finally:
             provider.close()
+
+        # Free GDELT DOC 2.1 API — one broad-coverage query per open market,
+        # in addition to the small curated RSS feed list, so the Independent
+        # Evidence Engine has real primary-source coverage to work with.
+        # Only public, lawfully accessible data (see news/gdelt.py); never
+        # exceeds free/no-key usage.
+        for market in markets[: min(settings.scan_limit, 50)]:
+            query = build_query_for_question(market.question)
+            events.extend(fetch_gdelt(query, timeout=settings.request_timeout))
+
+        new_count = 0
+        saved_ids = {}
+        for event in events:
+            row_id = storage.save_news_event(event)
+            if row_id is not None:
+                new_count += 1
+                saved_ids[event.source_url] = row_id
 
         links = link_news_to_markets(events, markets)
         links_saved = 0
