@@ -95,4 +95,12 @@ const Api = {
     );
     return Api._get(`/backtest?${qs.toString()}`);
   },
+  commandCenter: () => Api._get("/command-center"),
+  opportunities: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "")
+    );
+    return Api._get(`/opportunities?${qs.toString()}`);
+  },
+  scan: (provider) => Api._send(`/scan${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`, "POST"),
 };

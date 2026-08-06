@@ -61,3 +61,37 @@ const RESOLUTION_STATUS_DE = {
 function fmtStatus(status) {
   return RESOLUTION_STATUS_DE[status] || status || "–";
 }
+
+const OPPORTUNITY_STATUS_BADGE = {
+  "Interessant": "green",
+  "Beobachten": "yellow",
+  "Kurz vor Deadline": "yellow",
+  "Keine klare Edge": "",
+  "Datenlage unzureichend": "",
+  "Preis fehlt": "red",
+};
+
+function statusBadge(status) {
+  const cls = OPPORTUNITY_STATUS_BADGE[status] ?? "";
+  return `<span class="badge ${cls}">${status}</span>`;
+}
+
+function fmtDeadline(hours) {
+  if (hours === null || hours === undefined) return "unbekannt";
+  if (hours < 0) return "abgelaufen";
+  if (hours < 24) return `${Math.round(hours)} Std.`;
+  const days = hours / 24;
+  return `${days < 10 ? days.toFixed(1) : Math.round(days)} Tage`;
+}
+
+function fmtEdgePp(edge) {
+  if (edge === null || edge === undefined) return "–";
+  return (edge * 100).toFixed(1) + " pp";
+}
+
+function fmtChangeArrow(from, to, formatter) {
+  if (from === null || from === undefined || to === null || to === undefined) return "";
+  const f = formatter || ((v) => v);
+  if (Math.abs(to - from) < 1e-9) return "";
+  return ` <span class="sub">(${f(from)} → ${f(to)})</span>`;
+}

@@ -7,6 +7,7 @@ import json
 import sys
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from .config import Settings
 from .data_quality import assess_market
@@ -1059,6 +1060,24 @@ def cmd_serve(args: argparse.Namespace) -> int:
     except ImportError:
         print("uvicorn ist nicht installiert. `pip install -e \".[dev]\"` ausführen.", file=sys.stderr)
         return 1
+
+    settings = Settings.load()
+    from .migrations import current_schema_version, run_migrations
+
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    applied = run_migrations(storage.connection)
+    schema_version = current_schema_version(storage.connection)
+    storage.close()
+
+    # Safe startup diagnostics — presence/config only, never the key itself
+    # or any other secret. This is the one place a normal user can see at a
+    # glance why the AI layer might be falling back without opening a
+    # browser dev console.
+    print("PolymarketPulse startet…", file=sys.stderr)
+    print(f"  Arbeitsverzeichnis: {Path.cwd()}", file=sys.stderr)
+    print(f"  Datenbank: {settings.database_path} (Schema-Version {schema_version}, {len(applied)} Migration(en) angewendet)", file=sys.stderr)
+    print(f"  KI aktiviert: {settings.ai_enabled} | API-Key vorhanden: {bool(settings.openai_api_key)}", file=sys.stderr)
+    print(f"  Modell: {settings.openai_model} | Kostenlimit/Analyse: ${settings.openai_max_cost_per_analysis_usd} | Tagesbudget: ${settings.openai_daily_budget_usd} | Eskalation aktiv: {settings.openai_escalation_enabled}", file=sys.stderr)
     print(f"Dashboard/API auf http://{args.host}:{args.port} (Strg+C zum Beenden)", file=sys.stderr)
     uvicorn.run("polymarketpulse.api:app", host=args.host, port=args.port, reload=False)
     return 0

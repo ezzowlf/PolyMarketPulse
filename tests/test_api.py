@@ -340,3 +340,57 @@ def test_ai_cost_report_endpoint(client: TestClient) -> None:
     data = resp.json()
     assert "spent_today_usd" in data
     assert "by_model" in data
+
+
+def test_command_center_endpoint(client: TestClient) -> None:
+    resp = client.get("/command-center")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "uebersicht" in data
+    assert "interessanteste_maerkte" in data
+    assert data["uebersicht"]["aktive_maerkte"] >= 1
+
+
+def test_opportunities_endpoint(client: TestClient) -> None:
+    resp = client.get("/opportunities")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) >= 1
+    assert "status" in items[0]
+    assert "opportunity_score" in items[0]
+
+
+def test_opportunities_endpoint_filters_require_price(client: TestClient) -> None:
+    resp = client.get("/opportunities?require_price=true")
+    assert resp.status_code == 200
+    for item in resp.json():
+        assert item["market_yes_probability"] is not None
+
+
+def test_watchlist_enriched_with_opportunity(client: TestClient) -> None:
+    client.post("/watchlist", json={"provider": "polymarket", "provider_market_id": "1"})
+    resp = client.get("/watchlist")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 1
+    assert items[0]["opportunity"] is not None
+    assert "status" in items[0]["opportunity"]
+
+
+def test_market_detail_includes_opportunity(client: TestClient) -> None:
+    market_id = _seeded_market_id(client)
+    resp = client.get(f"/market/{market_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "opportunity" in data
+    assert data["opportunity"]["market_id"] == market_id
+
+
+def test_settings_endpoint_includes_ai_diagnostics_without_key(client: TestClient) -> None:
+    resp = client.get("/settings")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "ai" in data
+    assert data["ai"]["enabled"] is False
+    assert data["ai"]["api_key_present"] is False
+    assert "editable_in_browser" in data

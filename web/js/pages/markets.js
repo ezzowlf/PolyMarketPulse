@@ -1,96 +1,91 @@
-async function renderMarketsPage(container, query) {
-  const params = new URLSearchParams(query || "");
-  const state = {
-    provider: params.get("provider") || "",
-    search: params.get("search") || "",
-    min_liquidity: params.get("min_liquidity") || "",
-    limit: 25,
-    offset: parseInt(params.get("offset") || "0", 10),
-  };
+let _marketsState = {
+  search: "", category: "", sort: "opportunity_score",
+  minLiquidity: "", minVolume: "", minConfidence: "", minEdge: "", requirePrice: false,
+};
 
+function _marketRow(o) {
+  return `
+    <tr onclick="location.hash='#/market/${encodeURIComponent(o.market_id)}'" style="cursor:pointer">
+      <td>${o.question}</td>
+      <td>${o.market_yes_probability !== null ? fmtPct(o.market_yes_probability) : statusBadge("Preis fehlt")}</td>
+      <td>${fmtPct(o.estimated_yes_probability)}</td>
+      <td>${fmtEdgePp(o.net_yes_edge)}</td>
+      <td>${fmtNum(o.confidence_score, 0)}</td>
+      <td>${fmtNum(o.data_quality_score, 0)}</td>
+      <td>${fmtDeadline(o.deadline_hours)}</td>
+      <td>${statusBadge(o.status)}</td>
+      <td>${fmtDate(o.last_seen_at)}</td>
+    </tr>
+  `;
+}
+
+async function renderMarketsPage(container) {
   container.innerHTML = `
     <div class="panel">
       <div class="filters">
-        <input id="f-search" placeholder="Suche nach Frage…" value="${state.search}" />
-        <select id="f-provider"><option value="">Alle Provider</option></select>
-        <input id="f-liquidity" type="number" placeholder="Min. Liquidität" value="${state.min_liquidity}" />
+        <input id="f-search" placeholder="Suche nach Frage…" value="${_marketsState.search}" />
+        <input id="f-category" placeholder="Kategorie" value="${_marketsState.category}" />
+        <input id="f-liquidity" type="number" placeholder="Min. Liquidität" value="${_marketsState.minLiquidity}" />
+        <input id="f-volume" type="number" placeholder="Min. Volumen" value="${_marketsState.minVolume}" />
+        <input id="f-confidence" type="number" placeholder="Min. Confidence" value="${_marketsState.minConfidence}" />
+        <input id="f-edge" type="number" placeholder="Min. Edge (pp)" value="${_marketsState.minEdge}" />
+        <label><input type="checkbox" id="f-require-price" ${_marketsState.requirePrice ? "checked" : ""} /> Nur mit Preis</label>
+        <select id="f-sort">
+          <option value="opportunity_score">Interessanteste zuerst</option>
+          <option value="edge">Größte Edge</option>
+          <option value="confidence">Höchste Confidence</option>
+          <option value="deadline">Nächste Deadline</option>
+          <option value="liquidity">Höchste Liquidität</option>
+          <option value="volume">Höchstes Volumen</option>
+          <option value="last_seen">Zuletzt aktualisiert</option>
+        </select>
         <button class="btn" id="f-apply">Filtern</button>
       </div>
       <div id="markets-table"><div class="empty-state">Lade Märkte…</div></div>
-      <div class="pagination" id="markets-pagination"></div>
     </div>
   `;
-
-  const providers = await Api.providers();
-  const providerSelect = document.getElementById("f-provider");
-  providers.forEach((p) => {
-    const opt = document.createElement("option");
-    opt.value = p.name;
-    opt.textContent = p.name;
-    if (p.name === state.provider) opt.selected = true;
-    providerSelect.appendChild(opt);
-  });
+  document.getElementById("f-sort").value = _marketsState.sort;
 
   async function load() {
-    const data = await Api.markets({
-      provider: state.provider || undefined,
-      search: state.search || undefined,
-      min_liquidity: state.min_liquidity || undefined,
-      limit: state.limit,
-      offset: state.offset,
-    });
     const tableEl = document.getElementById("markets-table");
-    if (data.items.length === 0) {
-      tableEl.innerHTML = `<div class="empty-state">Keine Märkte gefunden.</div>`;
-    } else {
-      tableEl.innerHTML = `
-        <table>
-          <thead><tr><th>Frage</th><th>Datenquelle</th><th>YES</th><th>Liquidität</th><th>Score</th><th>Ende</th></tr></thead>
-          <tbody>
-            ${data.items
-              .map(
-                (m) => `
-              <tr class="clickable" data-id="${m.market_id}">
-                <td>${m.question}</td>
-                <td><span class="badge">${m.provider}</span></td>
-                <td>${m.yes_price !== null ? fmtPct(m.yes_price) : "–"}</td>
-                <td>$${fmtNum(m.liquidity)}</td>
-                <td>${m.opportunity_score !== null ? fmtNum(m.opportunity_score, 1) : "–"}</td>
-                <td>${fmtDate(m.end_date)}</td>
-              </tr>`
-              )
-              .join("")}
-          </tbody>
-        </table>
-      `;
-      tableEl.querySelectorAll("tr.clickable").forEach((row) => {
-        row.onclick = () => {
-          window.location.hash = `#/market/${encodeURIComponent(row.dataset.id)}`;
-        };
-      });
-    }
+    tableEl.innerHTML = `<div class="empty-state">Lade Märkte…</div>`;
+    try {
+      const params = { sort: _marketsState.sort, require_price: _marketsState.requirePrice };
+      if (_marketsState.category) params.category = _marketsState.category;
+      if (_marketsState.minLiquidity) params.min_liquidity = _marketsState.minLiquidity;
+      if (_marketsState.minConfidence) params.min_confidence = _marketsState.minConfidence;
+      if (_marketsState.minEdge) params.min_edge = Number(_marketsState.minEdge) / 100;
+      let items = await Api.opportunities(params);
+      if (_marketsState.search) {
+        const term = _marketsState.search.toLowerCase();
+        items = items.filter((o) => o.question.toLowerCase().includes(term));
+      }
+      if (_marketsState.minVolume) {
+        items = items.filter((o) => (o.volume_24h || 0) >= Number(_marketsState.minVolume));
+      }
 
-    const pag = document.getElementById("markets-pagination");
-    pag.innerHTML = `
-      <button class="btn secondary" id="prev-page" ${state.offset === 0 ? "disabled" : ""}>Zurück</button>
-      <span>${state.offset + 1}–${state.offset + data.items.length} von ${data.total}</span>
-      <button class="btn secondary" id="next-page" ${state.offset + state.limit >= data.total ? "disabled" : ""}>Weiter</button>
-    `;
-    document.getElementById("prev-page").onclick = () => {
-      state.offset = Math.max(0, state.offset - state.limit);
-      load();
-    };
-    document.getElementById("next-page").onclick = () => {
-      state.offset += state.limit;
-      load();
-    };
+      tableEl.innerHTML = items.length
+        ? `<table>
+            <thead><tr><th>Frage</th><th>YES-Preis</th><th>Eigene Wahrscheinlichkeit</th><th>Edge</th><th>Confidence</th><th>Datenqualität</th><th>Deadline</th><th>Status</th><th>Aktualisiert</th></tr></thead>
+            <tbody>${items.map(_marketRow).join("")}</tbody>
+          </table>`
+        : `<div class="empty-state">Keine Märkte gefunden.</div>`;
+    } catch (err) {
+      tableEl.innerHTML = `<div class="empty-state">Fehler: ${err.message}</div>`;
+    }
   }
 
   document.getElementById("f-apply").onclick = () => {
-    state.search = document.getElementById("f-search").value;
-    state.provider = document.getElementById("f-provider").value;
-    state.min_liquidity = document.getElementById("f-liquidity").value;
-    state.offset = 0;
+    _marketsState = {
+      search: document.getElementById("f-search").value,
+      category: document.getElementById("f-category").value,
+      minLiquidity: document.getElementById("f-liquidity").value,
+      minVolume: document.getElementById("f-volume").value,
+      minConfidence: document.getElementById("f-confidence").value,
+      minEdge: document.getElementById("f-edge").value,
+      requirePrice: document.getElementById("f-require-price").checked,
+      sort: document.getElementById("f-sort").value,
+    };
     load();
   };
 

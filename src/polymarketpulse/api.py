@@ -285,6 +285,18 @@ def market_detail(market_id: str, storage: Storage = Depends(get_storage)) -> di
         for r in news_rows
     ]
 
+    from .opportunities import compute_opportunity
+
+    latest = market.get("latest") or {}
+    market_row_for_opportunity = {
+        "market_id": market["market_id"], "provider": market["provider"], "provider_market_id": market["provider_market_id"],
+        "question": market["question"], "category": market["category"], "url": market["url"],
+        "end_date": market["end_date"], "first_seen_at": market["first_seen_at"], "last_seen_at": market["last_seen_at"],
+        "yes_price": latest.get("yes_price"), "liquidity": latest.get("liquidity"),
+        "volume_24h": latest.get("volume_24h"), "spread": latest.get("spread"),
+    }
+    market["opportunity"] = compute_opportunity(storage, market_row_for_opportunity)
+
     return market
 
 
@@ -424,7 +436,34 @@ def history(market_id: str, storage: Storage = Depends(get_storage)) -> list[dic
 
 @app.get("/watchlist")
 def get_watchlist(storage: Storage = Depends(get_storage)) -> list[dict]:
-    return storage.list_watchlist()
+    """Enriched with live prediction data (edge/confidence/deadline/status)
+    and change-since-added, so the watchlist is a work area, not just a
+    list of favorites."""
+    from .opportunities import compute_opportunity
+
+    items = storage.list_watchlist()
+    for item in items:
+        row = storage.connection.execute(
+            "SELECT market_id, provider, provider_market_id, question, category, url, "
+            "end_date, first_seen_at, last_seen_at FROM markets WHERE provider = ? AND provider_market_id = ?",
+            (item["provider"], item["provider_market_id"]),
+        ).fetchone()
+        if row is None:
+            item["opportunity"] = None
+            continue
+        snap = storage.connection.execute(
+            "SELECT yes_price, liquidity, volume_24h, spread FROM market_snapshots WHERE market_id = ? "
+            "ORDER BY captured_at DESC LIMIT 1",
+            (row[0],),
+        ).fetchone()
+        market_row = {
+            "market_id": row[0], "provider": row[1], "provider_market_id": row[2], "question": row[3],
+            "category": row[4], "url": row[5], "end_date": row[6], "first_seen_at": row[7], "last_seen_at": row[8],
+            "yes_price": snap[0] if snap else None, "liquidity": snap[1] if snap else None,
+            "volume_24h": snap[2] if snap else None, "spread": snap[3] if snap else None,
+        }
+        item["opportunity"] = compute_opportunity(storage, market_row)
+    return items
 
 
 @app.post("/watchlist")
@@ -619,7 +658,26 @@ def get_settings() -> dict:
         "store_unchanged_snapshots": settings.store_unchanged_snapshots,
         "news_enabled": settings.news_enabled,
         "telegram_enabled": settings.telegram_enabled,
-        # Never expose token/chat id values, even masked.
+        # Never expose token/chat id/API-key values, even masked — presence
+        # only, exactly like ai_ready already does for the AI layer.
+        "ai": {
+            "enabled": settings.ai_enabled,
+            "api_key_present": bool(settings.openai_api_key),
+            "ready": settings.ai_ready,
+            "model": settings.openai_model,
+            "fallback_model": settings.openai_fallback_model,
+            "escalation_enabled": settings.openai_escalation_enabled,
+            "max_cost_per_analysis_usd": settings.openai_max_cost_per_analysis_usd,
+            "daily_budget_usd": settings.openai_daily_budget_usd,
+        },
+        "thresholds": {
+            "min_liquidity": settings.min_liquidity,
+            "min_volume_24h": settings.min_volume_24h,
+        },
+        # Note for the settings page: these values come from .env and are
+        # read-only in the browser by design — changing them requires
+        # editing .env and restarting, never a silently-ignored form field.
+        "editable_in_browser": False,
     }
 
 
@@ -1005,6 +1063,143 @@ def evaluation(storage: Storage = Depends(get_storage)) -> dict:
     from .evaluation import evaluate_predictions
 
     return evaluate_predictions(storage.connection).as_dict()
+
+
+@app.get("/opportunities")
+def opportunities(
+    min_edge: float | None = None, min_confidence: float | None = None, category: str | None = None,
+    max_deadline_hours: float | None = None, require_price: bool = False,
+    sort: str = "opportunity_score", limit: int = 300, storage: Storage = Depends(get_storage),
+) -> list[dict]:
+    """The ranked 'what's interesting right now' list — Prediction Engine V2
+    output translated into a product-facing status + composite score, never
+    just raw |edge|. See opportunities.py for the ranking rationale."""
+    from .opportunities import list_opportunities
+
+    items = list_opportunities(storage, limit=limit)
+    if require_price:
+        items = [o for o in items if o["market_yes_probability"] is not None]
+    if min_edge is not None:
+        items = [o for o in items if o["net_yes_edge"] is not None and abs(o["net_yes_edge"]) >= min_edge]
+    if min_confidence is not None:
+        items = [o for o in items if o["confidence_score"] >= min_confidence]
+    if category:
+        items = [o for o in items if o["category"] == category]
+    if max_deadline_hours is not None:
+        items = [o for o in items if o["deadline_hours"] is not None and 0 <= o["deadline_hours"] <= max_deadline_hours]
+
+    sort_keys = {
+        "opportunity_score": lambda o: o["opportunity_score"],
+        "edge": lambda o: abs(o["net_yes_edge"] or 0),
+        "confidence": lambda o: o["confidence_score"],
+        "deadline": lambda o: o["deadline_hours"] if o["deadline_hours"] is not None else float("inf"),
+        "liquidity": lambda o: o["liquidity"] or 0,
+        "volume": lambda o: o["volume_24h"] or 0,
+        "last_seen": lambda o: o["last_seen_at"] or "",
+    }
+    key = sort_keys.get(sort, sort_keys["opportunity_score"])
+    reverse = sort != "deadline"
+    items.sort(key=key, reverse=reverse)
+    return items
+
+
+@app.get("/command-center")
+def command_center(storage: Storage = Depends(get_storage)) -> dict:
+    """The new Startseite's data source: counts + a handful of curated,
+    prioritized lists — never a raw table dump."""
+    from .opportunities import list_opportunities
+
+    now = datetime.now(UTC)
+    since_24h = (now - timedelta(hours=24)).isoformat()
+
+    all_items = list_opportunities(storage, limit=500)
+    with_price = [o for o in all_items if o["market_yes_probability"] is not None]
+    sufficient_quality = [o for o in with_price if o["recommendation"] != "INSUFFICIENT_DATA"]
+    watchlist_count = storage.connection.execute("SELECT COUNT(*) FROM watchlist_items").fetchone()[0]
+    last_scan = storage.connection.execute(
+        "SELECT MAX(started_at) FROM scanner_runs"
+    ).fetchone()[0]
+
+    top_opportunities = sorted(with_price, key=lambda o: -o["opportunity_score"])[:5]
+    deadline_soon = sorted(
+        [o for o in with_price if o["deadline_hours"] is not None and 0 <= o["deadline_hours"] <= 168],
+        key=lambda o: o["deadline_hours"],
+    )[:8]
+    biggest_movers = sorted(
+        [o for o in with_price if o["change_since_last_analysis"]],
+        key=lambda o: abs(
+            (o["change_since_last_analysis"]["market_yes_probability"]["to"] or 0)
+            - (o["change_since_last_analysis"]["market_yes_probability"]["from"] or 0)
+        ),
+        reverse=True,
+    )[:5]
+    highest_liquidity = sorted(with_price, key=lambda o: -(o["liquidity"] or 0))[:5]
+    biggest_deviation = sorted(with_price, key=lambda o: -abs(o["net_yes_edge"] or 0))[:5]
+    new_markets = sorted(
+        [o for o in all_items if o["first_seen_at"] and o["first_seen_at"] >= since_24h],
+        key=lambda o: o["first_seen_at"], reverse=True,
+    )[:5]
+    data_problems = [o for o in all_items if o["status"] in ("Preis fehlt", "Datenlage unzureichend")][:8]
+
+    recent_ai_runs = storage.connection.execute(
+        "SELECT market_id, model, final_status, created_at FROM ai_analysis_runs "
+        "WHERE analysis_type = 'explain_recommendation' ORDER BY created_at DESC LIMIT 5"
+    ).fetchall()
+
+    return {
+        "generiert_am": now.isoformat(),
+        "letzter_scan": last_scan,
+        "uebersicht": {
+            "aktive_maerkte": len(all_items),
+            "maerkte_mit_preis": len(with_price),
+            "maerkte_mit_ausreichender_datenqualitaet": len(sufficient_quality),
+            "watchlist_anzahl": watchlist_count,
+        },
+        "interessanteste_maerkte": top_opportunities,
+        "kurz_vor_entscheidung": deadline_soon,
+        "groesste_preisbewegungen": biggest_movers,
+        "hoechste_liquiditaet": highest_liquidity,
+        "groesste_modellabweichung": biggest_deviation,
+        "neue_maerkte": new_markets,
+        "maerkte_mit_datenproblemen": data_problems,
+        "letzte_ki_auswertungen": [
+            {"market_id": r[0], "model": r[1], "status": r[2], "created_at": r[3]} for r in recent_ai_runs
+        ],
+    }
+
+
+@app.post("/scan")
+def trigger_scan(provider: str | None = None, limit: int | None = None, storage: Storage = Depends(get_storage)) -> dict:
+    """Runs a real, on-demand market scan from the dashboard — the same
+    logic the CLI's `scan` command uses (`cli._scan_one_provider`), so the
+    normal user never needs PowerShell for day-to-day use. No auto-polling
+    is started by this endpoint; it runs once per call."""
+    from . import cli as cli_module
+    from .providers.base import ProviderError
+
+    settings = Settings.load()
+    provider_names = [provider] if provider else cli_module.list_provider_names()
+    results = []
+    for provider_name in provider_names:
+        try:
+            read, saved, failed, _top_signals, new_shadow = cli_module._scan_one_provider(
+                provider_name, settings, storage, limit or settings.scan_limit
+            )
+            results.append({
+                "provider": provider_name, "markets_read": read, "snapshots_saved": saved,
+                "markets_failed": failed, "new_shadow_setups": new_shadow, "error": None,
+            })
+        except ProviderError as exc:
+            results.append({
+                "provider": provider_name, "markets_read": 0, "snapshots_saved": 0,
+                "markets_failed": 0, "new_shadow_setups": 0, "error": str(exc),
+            })
+    return {
+        "scanned_at": datetime.now(UTC).isoformat(),
+        "providers": results,
+        "total_markets_read": sum(r["markets_read"] for r in results),
+        "total_snapshots_saved": sum(r["snapshots_saved"] for r in results),
+    }
 
 
 @app.exception_handler(Exception)

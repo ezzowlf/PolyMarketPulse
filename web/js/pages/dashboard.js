@@ -1,80 +1,127 @@
-function _isFirstOpenToday() {
-  const today = new Date().toISOString().slice(0, 10);
-  const last = localStorage.getItem("pmp_last_open_date");
-  if (last === today) return false;
-  localStorage.setItem("pmp_last_open_date", today);
-  return true;
-}
-
-function _renderHighlightCard(h) {
-  const preisText = h.aktueller_preis !== null && h.aktueller_preis !== undefined ? fmtPct(h.aktueller_preis) : "–";
-  const veraenderungText =
-    h.veraenderung_seit_erkennung !== null && h.veraenderung_seit_erkennung !== undefined
-      ? `${h.veraenderung_seit_erkennung >= 0 ? "+" : ""}${(h.veraenderung_seit_erkennung * 100).toFixed(1)} Punkte seit Erkennung`
-      : "noch keine Vergleichsbasis";
-  const resolutionText =
-    h.tage_bis_resolution !== null && h.tage_bis_resolution !== undefined
-      ? h.tage_bis_resolution < 1
-        ? "Entscheidung sehr bald"
-        : `noch ca. ${Math.round(h.tage_bis_resolution)} Tag(e) bis zur Entscheidung`
-      : "Entscheidungszeitpunkt unbekannt";
-
+function _opportunityRow(o) {
+  const edge = o.net_yes_edge;
   return `
-    <div class="panel" style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-        <h3 style="margin:0 0 6px"><a href="#/market/${encodeURIComponent(h.market_id)}">${h.frage}</a></h3>
-        <span class="badge green">Shadow-Score ${h.shadow_score.toFixed(0)}</span>
-      </div>
-      <div class="sub">Aktueller Preis: ${preisText} · ${veraenderungText} · ${resolutionText}${h.research_score !== null ? ` · Research-Score ${h.research_score.toFixed(0)}` : ""}</div>
-      <div style="margin-top:8px">
-        <strong>Warum interessant:</strong>
-        <ul>${h.wichtigste_gruende.map((g) => `<li>${g}</li>`).join("") || "<li>–</li>"}</ul>
-      </div>
-      <div>
-        <strong>Zu beachten:</strong>
-        <ul>${h.wichtigste_risiken.map((r) => `<li>${r}</li>`).join("") || "<li>–</li>"}</ul>
-      </div>
-      ${h.letzte_nachricht ? `<div class="sub">Letzte Nachricht: ${h.letzte_nachricht.titel}</div>` : ""}
-      <a href="#/research?market=${encodeURIComponent(h.market_id)}">🧠 KI-Analyse zu diesem Markt ansehen →</a>
-    </div>
+    <tr onclick="location.hash='#/market/${encodeURIComponent(o.market_id)}'" style="cursor:pointer">
+      <td>${o.question}</td>
+      <td>${fmtPct(o.market_yes_probability)}</td>
+      <td>${fmtPct(o.estimated_yes_probability)}</td>
+      <td>${fmtEdgePp(edge)}</td>
+      <td>${fmtNum(o.confidence_score, 0)}</td>
+      <td>${fmtDeadline(o.deadline_hours)}</td>
+      <td>${statusBadge(o.status)}</td>
+    </tr>
   `;
 }
 
-async function renderDashboardPage(container) {
-  container.innerHTML = `<div class="empty-state">Lade Startseite…</div>`;
-  try {
-    const home = await Api.home();
-    const t = home.heute;
-    const firstToday = _isFirstOpenToday();
+function _miniList(items, emptyText) {
+  if (!items.length) return `<div class="empty-state">${emptyText}</div>`;
+  return `<ul>${items
+    .map(
+      (o) =>
+        `<li><a href="#/market/${encodeURIComponent(o.market_id)}">${o.question}</a> — ${statusBadge(o.status)} · Edge ${fmtEdgePp(o.net_yes_edge)} · Deadline ${fmtDeadline(o.deadline_hours)}</li>`
+    )
+    .join("")}</ul>`;
+}
 
-    const morgenbericht = firstToday
-      ? `
-      <div class="panel" style="border-color:var(--accent)">
-        <h3 style="margin-top:0">👋 Guten Morgen</h3>
-        <p>Heute solltest du besonders diese Märkte beobachten${home.besonders_interessant.length ? "" : " – aktuell gibt es aber nichts Auffälliges."}</p>
-      </div>
-    `
-      : "";
+async function _runScan(button) {
+  const original = button.textContent;
+  button.textContent = "Scan läuft…";
+  button.disabled = true;
+  try {
+    const result = await Api.scan();
+    const parts = result.providers
+      .map((p) => (p.error ? `${p.provider}: Fehler (${p.error})` : `${p.provider}: ${p.markets_read} gelesen, ${p.snapshots_saved} gespeichert`))
+      .join(" · ");
+    alert(`Aktualisierung abgeschlossen. ${parts}`);
+    await renderDashboardPage(document.getElementById("content"));
+  } catch (err) {
+    alert(`Aktualisierung fehlgeschlagen: ${err.message}`);
+  } finally {
+    button.textContent = original;
+    button.disabled = false;
+  }
+}
+
+async function renderDashboardPage(container) {
+  container.innerHTML = `<div class="empty-state">Lade Übersicht…</div>`;
+  try {
+    const cc = await Api.commandCenter();
+    const u = cc.uebersicht;
 
     container.innerHTML = `
-      <div class="disclaimer">Research-Hinweis – keine Wettaufforderung. Diese Seite zeigt bewusst nur wenige, sorgfältig ausgewählte Märkte statt einer vollständigen Übersicht.</div>
-      ${morgenbericht}
-      <div class="widget-grid">
-        ${widgetCard({ title: "Märkte mit hoher Aufmerksamkeit", value: t.maerkte_mit_hoher_aufmerksamkeit })}
-        ${widgetCard({ title: "Neue Shadow-Setups (24h)", value: t.neue_shadow_setups })}
-        ${widgetCard({ title: "Wichtige Nachrichten (24h)", value: t.wichtige_nachrichten })}
-        ${widgetCard({ title: "Märkte kurz vor Entscheidung", value: t.maerkte_vor_entscheidung })}
+      <div class="disclaimer">Research-Hinweis – keine Wettaufforderung, kein sicherer Gewinn. Alle Werte werden von der eigenen Prognose-Engine berechnet, nicht von einer KI erfunden.</div>
+
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div class="widget-grid" style="flex:1">
+            ${widgetCard({ title: "Aktive Märkte", value: u.aktive_maerkte })}
+            ${widgetCard({ title: "Märkte mit Preis", value: u.maerkte_mit_preis })}
+            ${widgetCard({ title: "Ausreichende Datenqualität", value: u.maerkte_mit_ausreichender_datenqualitaet })}
+            ${widgetCard({ title: "Watchlist", value: u.watchlist_anzahl })}
+          </div>
+        </div>
+        <div class="sub">Letzter Scan: ${cc.letzter_scan ? fmtDate(cc.letzter_scan) : "noch nie"}</div>
+        <button class="btn" id="scan-btn">Märkte aktualisieren</button>
       </div>
 
-      <h2>Heute besonders interessant</h2>
-      ${
-        home.besonders_interessant.length
-          ? home.besonders_interessant.map(_renderHighlightCard).join("")
-          : `<div class="empty-state">Aktuell gibt es keine Märkte, die mehrere unabhängige Auffälligkeiten gleichzeitig zeigen. Das ist normal — die meisten Märkte sind an den meisten Tagen unauffällig.</div>`
-      }
-      <p class="sub">Vollständige Liste aller Shadow-Setups: <a href="#/signals">Shadow-Setups ansehen →</a></p>
+      <div class="panel">
+        <h3>Interessanteste Märkte jetzt</h3>
+        ${
+          cc.interessanteste_maerkte.length
+            ? `<table><thead><tr><th>Frage</th><th>Markt</th><th>Engine</th><th>Edge</th><th>Confidence</th><th>Deadline</th><th>Status</th></tr></thead>
+              <tbody>${cc.interessanteste_maerkte.map(_opportunityRow).join("")}</tbody></table>`
+            : `<div class="empty-state">Aktuell keine Märkte mit klarer Priorität — meist ein normaler Zustand, kein Fehler.</div>`
+        }
+        <p class="sub"><a href="#/opportunities">Alle Chancen ansehen →</a></p>
+      </div>
+
+      <div class="panel">
+        <h3>Kurz vor Entscheidung</h3>
+        ${_miniList(cc.kurz_vor_entscheidung, "Keine Märkte innerhalb der nächsten 7 Tage.")}
+      </div>
+
+      <div class="widget-grid">
+        <div class="panel">
+          <h3>Größte Preisbewegungen</h3>
+          ${_miniList(cc.groesste_preisbewegungen, "Noch keine Vergleichsdaten — Historie wird gesammelt.")}
+        </div>
+        <div class="panel">
+          <h3>Höchste Liquidität</h3>
+          ${_miniList(cc.hoechste_liquiditaet, "Keine Märkte mit Preis vorhanden.")}
+        </div>
+      </div>
+
+      <div class="widget-grid">
+        <div class="panel">
+          <h3>Größte Modellabweichung</h3>
+          ${_miniList(cc.groesste_modellabweichung, "Keine auffälligen Abweichungen.")}
+        </div>
+        <div class="panel">
+          <h3>Neue Märkte (24h)</h3>
+          ${_miniList(cc.neue_maerkte, "Keine neuen Märkte in den letzten 24 Stunden.")}
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Märkte mit Datenproblemen</h3>
+        ${_miniList(cc.maerkte_mit_datenproblemen, "Keine offensichtlichen Datenprobleme.")}
+      </div>
+
+      <div class="panel">
+        <h3>Letzte KI-Auswertungen</h3>
+        ${
+          cc.letzte_ki_auswertungen.length
+            ? `<table><thead><tr><th>Markt</th><th>Modell</th><th>Status</th><th>Zeitpunkt</th></tr></thead>
+              <tbody>${cc.letzte_ki_auswertungen
+                .map((r) => `<tr><td><a href="#/market/${encodeURIComponent(r.market_id)}">${r.market_id}</a></td><td>${r.model}</td><td>${r.status || "–"}</td><td>${fmtDate(r.created_at)}</td></tr>`)
+                .join("")}</tbody></table>`
+            : `<div class="empty-state">Noch keine KI-Analysen durchgeführt.</div>`
+        }
+      </div>
     `;
+
+    document.getElementById("scan-btn").onclick = (e) => _runScan(e.target);
   } catch (err) {
-    container.innerHTML = `<div class="empty-state">Fehler beim Laden der Startseite: ${err.message}</div>`;
+    container.innerHTML = `<div class="empty-state">Fehler beim Laden der Übersicht: ${err.message}</div>`;
   }
 }
