@@ -139,13 +139,11 @@ def _analyze_resignation(
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     # Check for actual resignation FIRST (before intent/call signals)
     if any(term in lowered for term in actual_resignation):
         # But verify it's not negated
         if any(term in lowered for term in _NEGATION_TERMS):
-            reason_parts.append("resignation denied or negated")
             return 0.10, "resignation denied or negated", tuple(inputs_used)
         # Check for official source
         if any(source in lowered for source in _OFFICIAL_SOURCES):
@@ -157,13 +155,11 @@ def _analyze_resignation(
     # Call for resignation (NOT actual resignation)
     if any(term in lowered for term in call_for_resignation):
         inputs_used.append("call_for_resignation")
-        reason_parts.append("only call for resignation, not actual resignation")
         return 0.10, "only calls for resignation (not actual resignation)", tuple(inputs_used)
 
     # Announced intent (NOT actual resignation yet)
     if any(term in lowered for term in intent_to_resign):
         inputs_used.append("intent_to_resign")
-        reason_parts.append("only intent to resign announced")
         return 0.15, "intent to resign announced (not yet resigned)", tuple(inputs_used)
 
     if proposition_status == "AMBIGUOUS":
@@ -201,7 +197,6 @@ def _analyze_office_status(
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     # Check for departure (YES for office_departure)
     if any(term in lowered for term in departure_signals):
@@ -261,7 +256,6 @@ def _analyze_legislation(
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     # Check for passage
     if any(term in lowered for term in passed_signals):
@@ -314,7 +308,6 @@ def _analyze_election(
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     # Check for official results
     if any(term in lowered for term in election_occurred):
@@ -362,7 +355,6 @@ def _analyze_appointment(
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     if any(term in lowered for term in confirmed_appointment):
         if any(source in lowered for source in _OFFICIAL_SOURCES):
@@ -402,7 +394,6 @@ def _analyze_court_outcome(
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     if any(term in lowered for term in ruling_signals):
         if any(source in lowered for source in _OFFICIAL_SOURCES):

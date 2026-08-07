@@ -104,6 +104,18 @@ _DEADLINE_PATTERN = re.compile(
     r"\s+\d{1,2}(?:,\s*\d{4})?|\d{4}-\d{2}-\d{2})",
     re.IGNORECASE,
 )
+# E5: distinguishes "reach threshold at ANY point before the deadline"
+# (barrier/touch — matched by _DEADLINE_PATTERN's "by <date>" phrasing) from
+# "threshold holds AT the deadline itself" (terminal — "on/at <date>",
+# "as of <date>", "at the close of <date>"). Deliberately narrow/literal
+# like the rest of this module: matches only explicit "on/at/as of" phrasing,
+# never guesses. See MarketProposition.deadline_semantics.
+_AT_DEADLINE_PATTERN = re.compile(
+    r"\b(?:on|at|as of|at the close of)\s+"
+    r"((?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2}(?:,\s*\d{4})?|\d{4}-\d{2}-\d{2})",
+    re.IGNORECASE,
+)
 _THRESHOLD_PATTERN = re.compile(
     r"\b(above|below|over|under|at least|more than|less than|reach|reaches|hit|hits|exceed|exceeds)\s+\$?([\d.,]+)\s*(%|percent|k|thousand|million|m|billion|b)?",
     re.IGNORECASE,
@@ -223,6 +235,13 @@ class MarketProposition:
     # detect_price_asset). None for every other market — this field is
     # additive and never populated for non-price propositions.
     asset: str | None = None
+    # E5: "by_deadline" (barrier/touch — threshold can be crossed at any
+    # point before the deadline) vs "at_deadline" (terminal — threshold
+    # must hold at the deadline itself). None when the phrasing doesn't
+    # confidently indicate either — callers that need this distinction
+    # (e.g. quant.py) must treat None as "ambiguous, do not guess".
+    # Additive-only field; every non-price proposition just carries None.
+    deadline_semantics: Literal["by_deadline", "at_deadline"] | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -232,6 +251,7 @@ class MarketProposition:
             "deadline": self.deadline, "yes_condition": self.yes_condition, "no_condition": self.no_condition,
             "resolution_authority": self.resolution_authority, "ambiguity_flags": list(self.ambiguity_flags),
             "proposition_status": self.proposition_status, "asset": self.asset,
+            "deadline_semantics": self.deadline_semantics,
         }
 
 
@@ -256,6 +276,11 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
 
     deadline_match = _DEADLINE_PATTERN.search(primary_text) or _DEADLINE_PATTERN.search(question)
     deadline = deadline_match.group(1) if deadline_match else None
+    deadline_semantics: Literal["by_deadline", "at_deadline"] | None = None
+    if deadline_match:
+        deadline_semantics = "by_deadline"
+    elif _AT_DEADLINE_PATTERN.search(primary_text) or _AT_DEADLINE_PATTERN.search(question):
+        deadline_semantics = "at_deadline"
 
     threshold_match = _THRESHOLD_PATTERN.search(primary_text)
     threshold: float | None = None
@@ -300,6 +325,14 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
     predicate = event_type
     object_ = None
 
+    # asset was declared on MarketProposition (E4) and detect_price_asset()
+    # exists precisely to populate it, but nothing ever called it here —
+    # quant.py could never receive a real asset id from the live parsing
+    # pipeline. Populate it whenever the event_type is a price threshold.
+    asset: str | None = None
+    if event_type in ("price_above", "price_below"):
+        asset = detect_price_asset(primary_text) or detect_price_asset(question)
+
     proposition_status: Literal["CLEAR", "AMBIGUOUS"] = "CLEAR"
     if subject is None or event_type is None or "yes_condition_not_parsed" in ambiguity_flags:
         proposition_status = "AMBIGUOUS"
@@ -309,6 +342,7 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
         threshold=threshold, unit=unit, location=None, start_time=None, deadline=deadline,
         yes_condition=yes_condition, no_condition=no_condition, resolution_authority=resolution_authority,
         ambiguity_flags=tuple(ambiguity_flags), proposition_status=proposition_status,
+        deadline_semantics=deadline_semantics, asset=asset,
     )
 
 

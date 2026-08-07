@@ -18,6 +18,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 
 from ..price_analytics import PricePoint
+from ..providers.coingecko import fetch_price_and_volatility, resolve_coingecko_id
 from .bayesian import bayesian_update
 from .confidence import compute_confidence
 from .cross_market import compute_cross_market_relations
@@ -335,15 +336,24 @@ def compute_prediction(
 
     # Quant model (price-threshold markets)
     if proposition.event_type in ("price_above", "price_below") and proposition.asset:
+        coingecko_id = resolve_coingecko_id(proposition.asset)
+        quant_current_price = None
+        quant_daily_volatility = None
+        if coingecko_id:
+            price_data = fetch_price_and_volatility(coingecko_id)
+            if price_data is not None:
+                quant_current_price = price_data.current_price
+                quant_daily_volatility = price_data.daily_volatility
         quant_result = analyze_quant(
             text=question,
             event_type=proposition.event_type,
             proposition_status=proposition.proposition_status,
             threshold=proposition.threshold,
             asset=proposition.asset,
-            current_price=None,  # Placeholder — real price would come from price_analytics or external API
-            historical_volatility=None,  # Placeholder — real volatility from historical price data
+            current_price=quant_current_price,  # real price from CoinGecko free tier, or None if unavailable
+            historical_volatility=quant_daily_volatility,  # real realized daily vol from CoinGecko history, or None
             deadline=proposition.deadline,
+            deadline_semantics=proposition.deadline_semantics,
         )
         if quant_result.available and quant_result.probability is not None:
             quant_estimate = SubmodelEstimate(

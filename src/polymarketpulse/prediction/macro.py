@@ -64,6 +64,8 @@ _DECISION_MADE_KEYWORDS = frozenset({
     "announced rate cut", "announced rate hike", "announced rate hold",
     "confirmed rate decision", "decided to cut", "decided to hike",
     "decided to hold", "rate decision confirmed", "policy decision made",
+    "announces rate cut", "announces rate hike", "announces rate hold",
+    "policy decision confirmed", "decision confirmed",
 })
 
 _UPCOMING_KEYWORDS = frozenset({
@@ -117,17 +119,25 @@ def _analyze_rate_decision(
     lowered = text.lower()
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     # First check if negation applies
     if any(kw in lowered for kw in _NEGATION_KEYWORDS):
         # e.g. "not cut" means rate did NOT cut — for a "rate_cut" market, this is NO
         inputs_used.append("negation_detected")
-        reason_parts.append("negation detected (rate change did not occur)")
         return 0.10, "rate change denied or did not occur", tuple(inputs_used)
 
-    # Check for decision already made
-    if any(kw in lowered for kw in _DECISION_MADE_KEYWORDS):
+    # Check for decision already made — either an exact scripted phrase, or
+    # the generic word "confirmed" co-occurring with a rate-move keyword
+    # (natural-language variants like "announces rate cut ... confirmed" or
+    # "tightening confirmed" shouldn't require an exact literal match).
+    decision_made = any(kw in lowered for kw in _DECISION_MADE_KEYWORDS) or (
+        "confirmed" in lowered
+        and any(
+            kw in lowered
+            for kw in _RATE_CUT_KEYWORDS | _RATE_HIKE_KEYWORDS | _RATE_HOLD_KEYWORDS
+        )
+    )
+    if decision_made:
         if any(kw in lowered for kw in _RATE_CUT_KEYWORDS):
             inputs_used.extend(["rate_cut_confirmed", "decision_made"])
             if any(source in lowered for source in _OFFICIAL_CB_SOURCES):
@@ -152,7 +162,6 @@ def _analyze_rate_decision(
     # Check for upcoming decision (not yet made)
     if any(kw in lowered for kw in _UPCOMING_KEYWORDS):
         inputs_used.append("upcoming_decision")
-        reason_parts.append("only upcoming meeting scheduled, decision not yet made")
         return None, "upcoming meeting — decision not yet made", tuple(inputs_used)
 
     # Check for rate cut language without "already made" marker
@@ -198,7 +207,6 @@ def _analyze_monetary_policy(
     lowered = text.lower()
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     # Tightening signals
     tightening_keywords = frozenset({
@@ -210,12 +218,6 @@ def _analyze_monetary_policy(
     easing_keywords = frozenset({
         "easing", "eases policy", "lower rates", "lower interest rates",
         " accommodative policy", "monetary easing", "policy easing",
-    })
-
-    # Decision markers
-    decision_keywords = frozenset({
-        "announced policy change", "policy decision", "confirmed policy",
-        "rate decision", "monetary policy decision", "policy meeting decision",
     })
 
     # Check for tightening

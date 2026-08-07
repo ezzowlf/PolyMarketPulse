@@ -124,16 +124,13 @@ def _analyze_ceasefire(text: str, proposition_status: str) -> tuple[float | None
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     # Direct YES — actual ceasefire in place
     if any(term in lowered for term in direct_yes_terms):
         # Check for negation (e.g. "ceasefire denied" is NO, not YES)
         if any(term in lowered for term in _NEGATION_TERMS):
-            reason_parts.append("ceasefire denied/rejected despite positive phrasing")
             return 0.0, "ceasefire denied or collapsed", tuple(inputs_used)
         inputs_used.extend(["ceasefire_actual", "direct_statement"])
-        reason_parts.append("direct official confirmation of ceasefire in place")
         # High confidence if from official source
         if any(source in lowered for source in _OFFICIAL_SOURCES):
             inputs_used.append("official_source")
@@ -143,15 +140,14 @@ def _analyze_ceasefire(text: str, proposition_status: str) -> tuple[float | None
     # Direct NO — ceasefire denied or collapsed
     if any(term in lowered for term in direct_no_terms):
         inputs_used.append("ceasefire_denied")
-        reason_parts.append("ceasefire denied, collapsed, or rejected")
         return 0.10, "ceasefire denied or collapsed", tuple(inputs_used)
 
-    # Talks only — not yet an agreement (no forecast)
+    # Talks only — not yet an agreement (no forecast). direct_yes_terms was
+    # already checked and returned above, so reaching here already implies
+    # no direct_yes_terms matched — no need to re-check.
     if any(term in lowered for term in talks_terms):
-        if not any(term in lowered for term in direct_yes_terms):
-            inputs_used.append("ceasefire_talks_only")
-            reason_parts.append("only peace talks reported, no agreement yet")
-            return None, "only ceasefire talks reported, no agreement yet", tuple(inputs_used)
+        inputs_used.append("ceasefire_talks_only")
+        return None, "only ceasefire talks reported, no agreement yet", tuple(inputs_used)
 
     # Proposition status AMBIGUOUS — could not parse the question
     if proposition_status == "AMBIGUOUS":
@@ -160,7 +156,6 @@ def _analyze_ceasefire(text: str, proposition_status: str) -> tuple[float | None
 
     # No clear signal found
     inputs_used.append("insufficient_signal")
-    reason_parts.append("no clear ceasefire status in proposition text")
     return None, "insufficient structured evidence for ceasefire determination", tuple(inputs_used)
 
 
@@ -192,7 +187,6 @@ def _analyze_war_escalation(text: str, proposition_status: str) -> tuple[float |
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     # Check for actual escalation
     if any(term in lowered for term in escalation_terms):
@@ -203,11 +197,11 @@ def _analyze_war_escalation(text: str, proposition_status: str) -> tuple[float |
         return 0.65, "reported military escalation", tuple(inputs_used)
 
     # De-escalation counter-signal (means escalation is NOT happening)
-    if any(term in lowered for term in deescalation_terms):
-        if any(term in lowered for term in _DIRECT_VERB_TERMS):
-            inputs_used.append("deescalation_actual")
-            reason_parts.append("de-escalation confirmed (means escalation did not occur)")
-            return 0.15, "de-escalation confirmed — escalation did not occur", tuple(inputs_used)
+    if any(term in lowered for term in deescalation_terms) and any(
+        term in lowered for term in _DIRECT_VERB_TERMS
+    ):
+        inputs_used.append("deescalation_actual")
+        return 0.15, "de-escalation confirmed — escalation did not occur", tuple(inputs_used)
 
     # Proposition status AMBIGUOUS
     if proposition_status == "AMBIGUOUS":
@@ -216,7 +210,6 @@ def _analyze_war_escalation(text: str, proposition_status: str) -> tuple[float |
 
     # No clear signal
     inputs_used.append("insufficient_signal")
-    reason_parts.append("no clear escalation or de-escalation status")
     return None, "insufficient structured evidence for escalation determination", tuple(inputs_used)
 
 
@@ -238,7 +231,6 @@ def _analyze_military_action(text: str, proposition_status: str) -> tuple[float 
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     if any(term in lowered for term in action_terms):
         if any(source in lowered for source in _OFFICIAL_SOURCES):
@@ -279,7 +271,6 @@ def _analyze_sanctions(text: str, proposition_status: str) -> tuple[float | None
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     if any(term in lowered for term in sanction_terms):
         if any(source in lowered for source in _OFFICIAL_SOURCES):
@@ -317,7 +308,6 @@ def _analyze_territorial_control(text: str, proposition_status: str) -> tuple[fl
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     if any(term in lowered for term in control_terms):
         if any(source in lowered for source in _OFFICIAL_SOURCES):
@@ -355,7 +345,6 @@ def _analyze_strategic_waterway(text: str, proposition_status: str) -> tuple[flo
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     if any(term in lowered for term in blockage_terms):
         if any(source in lowered for source in _OFFICIAL_SOURCES):
@@ -393,7 +382,6 @@ def _analyze_diplomatic_agreement(text: str, proposition_status: str) -> tuple[f
     })
 
     inputs_used: list[str] = []
-    reason_parts: list[str] = []
 
     if any(term in lowered for term in agreement_terms):
         if any(source in lowered for source in _OFFICIAL_SOURCES):

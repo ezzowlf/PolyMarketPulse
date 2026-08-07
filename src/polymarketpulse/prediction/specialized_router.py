@@ -17,6 +17,7 @@ Returns structured routing result with:
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 
 from .geopolitics import GeopoliticsResult, analyze_geopolitics
@@ -141,6 +142,21 @@ def _get_eligible_models(event_type: str | None, category: str | None) -> list[s
     return sorted(eligible)
 
 
+def _filter_kwargs_for(func, kwargs: dict) -> dict:
+    """Only forward the kwargs that `func`'s own signature accepts.
+
+    Every analyze_* model has a different, deliberately narrow parameter
+    list (see each module). Previously this router forwarded **kwargs
+    blindly to all of them (plus re-passing subject/location explicitly
+    for politics), which raised TypeError ("unexpected keyword argument" /
+    "got multiple values") for every real proposition that carried a
+    subject/location — i.e. the router crashed on exactly the markets it
+    was supposed to route. Filtering by signature fixes that generically
+    instead of hardcoding a per-model allowlist that would drift again."""
+    accepted = set(inspect.signature(func).parameters)
+    return {k: v for k, v in kwargs.items() if k in accepted}
+
+
 def _run_model_if_available(
     model_name: str,
     text: str,
@@ -156,9 +172,9 @@ def _run_model_if_available(
                 text=text,
                 event_type=event_type,
                 proposition_status=proposition_status,
-                **kwargs,
+                **_filter_kwargs_for(analyze_quant, kwargs),
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - model call is user/data-driven; must never crash the router
             return False, None, f"Quant model error: {e}"
 
         if result and result.available and result.probability is not None:
@@ -172,9 +188,9 @@ def _run_model_if_available(
                 text=text,
                 event_type=event_type,
                 proposition_status=proposition_status,
-                **kwargs,
+                **_filter_kwargs_for(analyze_macro, kwargs),
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - model call is user/data-driven; must never crash the router
             return False, None, f"Macro model error: {e}"
 
         if result and result.available and result.probability is not None:
@@ -182,19 +198,15 @@ def _run_model_if_available(
         return False, None, result.reason if result else "Macro model unavailable"
 
     elif model_name == "politics":
-        subject = kwargs.get("subject")
-        location = kwargs.get("location")
         result: PoliticsResult | None = None
         try:
             result = analyze_politics(
                 text=text,
                 event_type=event_type,
                 proposition_status=proposition_status,
-                subject=subject,
-                location=location,
-                **kwargs,
+                **_filter_kwargs_for(analyze_politics, kwargs),
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - model call is user/data-driven; must never crash the router
             return False, None, f"Politics model error: {e}"
 
         if result and result.available and result.probability is not None:
@@ -211,9 +223,9 @@ def _run_model_if_available(
                 text=text,
                 event_type=event_type,
                 proposition_status=proposition_status,
-                **kwargs,
+                **_filter_kwargs_for(analyze_geopolitics, kwargs),
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - model call is user/data-driven; must never crash the router
             return False, None, f"Geopolitics model error: {e}"
 
         if result and result.available and result.probability is not None:
@@ -227,9 +239,9 @@ def _run_model_if_available(
                 text=text,
                 event_type=event_type,
                 proposition_status=proposition_status,
-                **kwargs,
+                **_filter_kwargs_for(analyze_sports, kwargs),
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - model call is user/data-driven; must never crash the router
             return False, None, f"Sports model error: {e}"
 
         if result and result.available and result.probability is not None:
