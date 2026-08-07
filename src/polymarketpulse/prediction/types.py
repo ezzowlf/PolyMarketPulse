@@ -18,7 +18,11 @@ Recommendation = Literal[
 ]
 
 ForecastStatus = Literal[
-    "NO_FORECAST", "BASELINE_ONLY", "EVIDENCE_ONLY", "LOW_DATA", "INDEPENDENT_FORECAST", "BLENDED_FORECAST"
+    "NO_FORECAST", "BASELINE_ONLY", "EVIDENCE_ONLY", "LOW_DATA", "INDEPENDENT_FORECAST", "BLENDED_FORECAST",
+    # Phase B4: independent estimate diverged sharply from the market price
+    # without evidence strong enough to justify it — suppressed rather than
+    # reported as a fabricated-looking number. See prediction/divergence.py.
+    "FORECAST_SUPPRESSED",
 ]
 
 PREDICTION_VERSION = "v2"
@@ -196,6 +200,9 @@ class PredictionResult:
     calibrated_probability: float | None = None
     forecast_status: ForecastStatus = "NO_FORECAST"
     contribution_breakdown: tuple[ContributionEntry, ...] = field(default_factory=tuple)
+    # Phase B4: human-readable reason when forecast_status == "FORECAST_SUPPRESSED",
+    # None otherwise. See prediction/divergence.py.
+    forecast_suppression_reason: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -243,4 +250,5 @@ class PredictionResult:
             "calibrated_probability": self.calibrated_probability,
             "forecast_status": self.forecast_status,
             "contribution_breakdown": [c.as_dict() for c in self.contribution_breakdown],
+            "forecast_suppression_reason": self.forecast_suppression_reason,
         }

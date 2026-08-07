@@ -22,10 +22,22 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from .base_rates import EXTRAORDINARY_EVENT_TYPES, get_base_rate
 from .bayesian import bayesian_update
 from .news import _trust_for_source, score_sentiment
 from .resolution_rules import parse_resolution_conditions
 from .semantics import classify_evidence_relation, extract_event, parse_market_proposition
+
+# Extraordinary-event guard (Phase B3): below this many DIRECT_YES/DIRECT_NO
+# tier evidence items, an extraordinary event_type's independent estimate is
+# dampened back toward its base rate (or, if no base rate is defined for the
+# type, toward the same neutral 0.5 prior the Bayesian update itself already
+# starts from — see below) rather than being allowed to swing freely off a
+# single weak/ambiguous headline.
+EXTRAORDINARY_DIRECT_EVIDENCE_REQUIRED = 2
+# Maximum allowed distance from the anchor (base rate, or 0.5 if none) when
+# the guard fires, keyed by how many direct-tier items were actually found.
+_EXTRAORDINARY_MAX_SWING_BY_DIRECT_COUNT = {0: 0.03, 1: 0.08}
 
 # Evidence loses relevance faster than the general news submodel's 48h
 # half-life — "early signal" freshness is the whole point of this module.
@@ -90,6 +102,11 @@ class IndependentEvidenceResult:
     evidence_for_no: tuple[EvidenceFactor, ...] = field(default_factory=tuple)
     not_yet_priced_in: tuple[EvidenceFactor, ...] = field(default_factory=tuple)
     detail: str = ""
+    # Phase B3: extraordinary-event guard visibility — whether the dampening
+    # step fired for this market, and why, so the UI/audit trail never has
+    # to guess why a number looks smaller than the raw evidence math implies.
+    extraordinary_guard_applied: bool = False
+    extraordinary_guard_detail: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -106,6 +123,8 @@ class IndependentEvidenceResult:
             "evidence_for_no": [e.as_dict() for e in self.evidence_for_no],
             "not_yet_priced_in": [e.as_dict() for e in self.not_yet_priced_in],
             "detail": self.detail,
+            "extraordinary_guard_applied": self.extraordinary_guard_applied,
+            "extraordinary_guard_detail": self.extraordinary_guard_detail,
         }
 
 
@@ -294,6 +313,32 @@ def compute_independent_evidence(
     )
     independent_yes_probability = bayes.posterior_probability
 
+    # --- Extraordinary-event guard (Phase B3) -----------------------------
+    extraordinary_guard_applied = False
+    extraordinary_guard_detail: str | None = None
+    if proposition.event_type in EXTRAORDINARY_EVENT_TYPES:
+        direct_count = sum(1 for f in scored if f.relation_label in ("DIRECT_YES", "DIRECT_NO"))
+        if direct_count < EXTRAORDINARY_DIRECT_EVIDENCE_REQUIRED:
+            base_rate = get_base_rate(proposition.event_type)
+            # No defensible base rate for this extraordinary type: anchor to
+            # the same neutral 0.5 the Bayesian update above already started
+            # from (not a fresh fallback — just tightening how far that
+            # existing prior is allowed to move on weak evidence).
+            anchor = base_rate if base_rate is not None else 0.5
+            max_swing = _EXTRAORDINARY_MAX_SWING_BY_DIRECT_COUNT.get(direct_count, 0.08)
+            raw = independent_yes_probability
+            dampened = max(anchor - max_swing, min(anchor + max_swing, raw))
+            if abs(dampened - raw) > 1e-9:
+                extraordinary_guard_applied = True
+                extraordinary_guard_detail = (
+                    f"Extraordinary-event guard fired for event_type='{proposition.event_type}': only "
+                    f"{direct_count} DIRECT_YES/DIRECT_NO-tier evidence item(s) found "
+                    f"(< {EXTRAORDINARY_DIRECT_EVIDENCE_REQUIRED} required to move freely). Raw estimate "
+                    f"{raw:.1%} dampened to {dampened:.1%}, clamped within +/-{max_swing:.0%} of anchor "
+                    f"{anchor:.1%} ({'base rate' if base_rate is not None else 'neutral prior, no base rate available'})."
+                )
+                independent_yes_probability = round(dampened, 4)
+
     source_quality_score = round(min(100.0, (weight_sum / len(scored)) * 100), 1)
 
     first_reported = _first_reported_at(rows)
@@ -323,6 +368,8 @@ def compute_independent_evidence(
     )
     if contradiction:
         detail += " Widersprüchliche Quellenlage erkannt (sowohl YES- als auch NO-Evidenz vorhanden)."
+    if extraordinary_guard_detail:
+        detail += " " + extraordinary_guard_detail
 
     return IndependentEvidenceResult(
         available=True,
@@ -338,6 +385,8 @@ def compute_independent_evidence(
         evidence_for_no=evidence_for_no,
         not_yet_priced_in=not_yet_priced_in,
         detail=detail,
+        extraordinary_guard_applied=extraordinary_guard_applied,
+        extraordinary_guard_detail=extraordinary_guard_detail,
     )
 
 

@@ -22,6 +22,7 @@ from .bayesian import bayesian_update
 from .confidence import compute_confidence
 from .cross_market import compute_cross_market_relations
 from .deadline import classify_deadline_phase, deadline_weights_for
+from .divergence import evaluate_divergence_safety
 from .ensemble import combine_submodels
 from .event_relations import collect_event_relation_signals, compute_event_relation_estimate
 from .evidence import compute_independent_evidence
@@ -420,6 +421,35 @@ def compute_prediction(
 
     forecast_status = _forecast_status(estimated_yes, independent_probability, all_submodels, confidence)
 
+    # --- Divergence safety (Phase B4) -------------------------------------
+    # A large gap between the market-blind independent estimate and the
+    # market's own price is only trustworthy if it's backed by real
+    # evidence. "Strong evidence" here means either: a reasonably sized
+    # historical comparable sample (10+, i.e. at least the LIMITED
+    # confidence tier — see history.py), or independent evidence with at
+    # least 2 independently-confirming sources AND at least one
+    # DIRECT_YES/DIRECT_NO-tier (primary-source-strength) item. Anything
+    # weaker than that, combined with a >15pp gap, gets suppressed rather
+    # than reported as a fabricated-looking number.
+    evidence_is_strong = bool(
+        (history_estimate.available and comparable_sample_size >= 10)
+        or (
+            independent_evidence.available
+            and independent_evidence.confirmation_count >= 2
+            and any(
+                f.relation_label in ("DIRECT_YES", "DIRECT_NO")
+                for f in (*independent_evidence.evidence_for_yes, *independent_evidence.evidence_for_no)
+            )
+        )
+    )
+    divergence_safety = evaluate_divergence_safety(independent_probability, market_yes, evidence_is_strong)
+    forecast_suppression_reason: str | None = None
+    if divergence_safety.suppressed:
+        reasoning.append(divergence_safety.reason)
+        forecast_suppression_reason = divergence_safety.reason
+        independent_probability = None
+        forecast_status = "FORECAST_SUPPRESSED"
+
     total_available_weight = sum(s.weight for s in all_submodels if s.available)
     contribution_breakdown = tuple(
         ContributionEntry(
@@ -474,4 +504,5 @@ def compute_prediction(
         calibrated_probability=calibrated_probability,
         forecast_status=forecast_status,
         contribution_breakdown=contribution_breakdown,
+        forecast_suppression_reason=forecast_suppression_reason,
     )
