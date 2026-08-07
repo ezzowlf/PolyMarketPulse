@@ -7,6 +7,8 @@ from pathlib import Path
 
 from .migrations import current_schema_version, run_migrations
 from .models import Market, ResolutionStatus, Signal
+from .prediction.classification import classify_market
+from .prediction.semantics import parse_market_proposition
 from .providers.base import ProviderCapabilities
 from .signals import PreviousSnapshot
 
@@ -195,6 +197,23 @@ class Storage:
         it dropped out of the current scan window."""
         now = datetime.now(UTC).isoformat()
         key = _row_key(market)
+
+        # Phase C: taxonomy classification, computed at write time and
+        # stored alongside (never in place of) the provider's raw
+        # `category` string. `category` itself is left untouched so
+        # history.py's comparability grouping and any historical rows keep
+        # meaning exactly what they always meant.
+        try:
+            proposition = parse_market_proposition(market.question, market.description)
+            classification = classify_market(market.question, market.description, proposition)
+        except Exception:  # noqa: BLE001 - classification must never block a market write
+            # Fall back to "unclassified" rather than losing the scan.
+            classification = None
+
+        classified_category = classification.category if classification else None
+        classification_confidence = classification.confidence if classification else None
+        event_type = classification.event_type if classification else None
+
         self.connection.execute(
             """
             INSERT INTO markets (
@@ -202,8 +221,9 @@ class Storage:
                 category, tags, url, yes_token_id, no_token_id, start_date, end_date,
                 event_id, description, outcomes, outcome_prices, resolved_at,
                 resolution_status, winning_outcome, resolution_source, raw_data_hash,
-                provider_data, first_seen_at, last_seen_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                provider_data, first_seen_at, last_seen_at,
+                classified_category, classification_confidence, event_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(provider, provider_market_id) DO UPDATE SET
                 condition_id = excluded.condition_id,
                 question = excluded.question,
@@ -225,7 +245,10 @@ class Storage:
                 resolution_source = excluded.resolution_source,
                 raw_data_hash = excluded.raw_data_hash,
                 provider_data = excluded.provider_data,
-                last_seen_at = excluded.last_seen_at
+                last_seen_at = excluded.last_seen_at,
+                classified_category = excluded.classified_category,
+                classification_confidence = excluded.classification_confidence,
+                event_type = excluded.event_type
             """,
             (
                 key,
@@ -253,6 +276,9 @@ class Storage:
                 json.dumps(market.provider_data),
                 now,
                 now,
+                classified_category,
+                classification_confidence,
+                event_type,
             ),
         )
         # The stored market_id may differ from `key` for rows that pre-date

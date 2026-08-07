@@ -763,6 +763,24 @@ def _migration_012_event_relationship_graph(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_013_market_classification(conn: sqlite3.Connection) -> None:
+    """Phase C: additive columns for the new fixed-taxonomy classifier
+    (prediction/classification.py). Deliberately does NOT touch the
+    existing `category` column — that column keeps holding whatever the
+    provider's raw event/category label was (e.g. Polymarket's
+    `events[0].title`), exactly as before, so `history.py`'s
+    category-grouping SQL and any existing rows/comparisons stay valid
+    unmodified. The new taxonomy category lives in `classified_category`,
+    with `classification_confidence` and the event_type detected by
+    `semantics.parse_market_proposition` (needed by base_rates.py and
+    future comparable-matching) in their own new columns. All nullable,
+    all backfilled lazily (only set as markets get (re-)classified) —
+    safe on both a fresh DB and an existing populated one."""
+    _add_column(conn, "markets", "classified_category", "TEXT")
+    _add_column(conn, "markets", "classification_confidence", "REAL")
+    _add_column(conn, "markets", "event_type", "TEXT")
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -776,6 +794,7 @@ MIGRATIONS: list[Migration] = [
     (10, "market_flow_intelligence", _migration_010_market_flow_intelligence),
     (11, "shadow_trading", _migration_011_shadow_trading),
     (12, "event_relationship_graph", _migration_012_event_relationship_graph),
+    (13, "market_classification", _migration_013_market_classification),
 ]
 
 
