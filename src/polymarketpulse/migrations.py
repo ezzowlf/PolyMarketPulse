@@ -675,6 +675,94 @@ def _migration_011_shadow_trading(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_012_event_relationship_graph(conn: sqlite3.Connection) -> None:
+    """Foundation for Event/Entity/Relation causal-reasoning: canonical
+    entities with aliases (entity resolution), events, links from events to
+    entities and to Polymarket markets (with a relevance score), and
+    directed event/metric relations with an explicit evidence tier. Purely
+    additive, deliberately minimal — this is the data model the spec's
+    long-term "Event Graph" vision needs, not the graph traversal/
+    probability-propagation logic itself, which stays future work."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS entities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            canonical_name TEXT NOT NULL UNIQUE,
+            entity_type TEXT NOT NULL,
+            geographic_scope TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS entity_aliases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_id INTEGER NOT NULL REFERENCES entities(id),
+            alias TEXT NOT NULL,
+            UNIQUE(alias)
+        );
+        CREATE INDEX IF NOT EXISTS idx_entity_aliases_alias ON entity_aliases(alias);
+
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            occurred_at TEXT,
+            geographic_scope TEXT,
+            source TEXT,
+            source_url TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_events_occurred ON events(occurred_at);
+
+        CREATE TABLE IF NOT EXISTS event_entity_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id INTEGER NOT NULL REFERENCES events(id),
+            entity_id INTEGER NOT NULL REFERENCES entities(id),
+            role TEXT,
+            UNIQUE(event_id, entity_id, role)
+        );
+
+        CREATE TABLE IF NOT EXISTS event_market_relevance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id INTEGER NOT NULL REFERENCES events(id),
+            provider TEXT NOT NULL,
+            provider_market_id TEXT NOT NULL,
+            relevance_score REAL NOT NULL,
+            entity_overlap REAL,
+            geographic_relevance REAL,
+            temporal_relevance REAL,
+            detail TEXT NOT NULL,
+            computed_at TEXT NOT NULL,
+            UNIQUE(event_id, provider, provider_market_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_event_market_relevance_market
+        ON event_market_relevance(provider, provider_market_id);
+
+        CREATE TABLE IF NOT EXISTS event_relations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_event_id INTEGER REFERENCES events(id),
+            source_entity_id INTEGER REFERENCES entities(id),
+            target_entity_id INTEGER REFERENCES entities(id),
+            target_provider TEXT,
+            target_provider_market_id TEXT,
+            relation_type TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            strength REAL,
+            evidence_tier TEXT NOT NULL,
+            confidence REAL,
+            time_lag_hours REAL,
+            geographic_scope TEXT,
+            evidence_count INTEGER NOT NULL DEFAULT 0,
+            source_quality TEXT,
+            valid_from TEXT,
+            valid_until TEXT,
+            detail TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_event_relations_target_market
+        ON event_relations(target_provider, target_provider_market_id);
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -687,6 +775,7 @@ MIGRATIONS: list[Migration] = [
     (9, "ai_attempt_tracking", _migration_009_ai_attempt_tracking),
     (10, "market_flow_intelligence", _migration_010_market_flow_intelligence),
     (11, "shadow_trading", _migration_011_shadow_trading),
+    (12, "event_relationship_graph", _migration_012_event_relationship_graph),
 ]
 
 

@@ -40,6 +40,12 @@ STATUS_TABLES = (
     "market_reliability_snapshots",
     "manipulation_risk_events",
     "shadow_trades",
+    "entities",
+    "entity_aliases",
+    "events",
+    "event_entity_links",
+    "event_market_relevance",
+    "event_relations",
 )
 
 

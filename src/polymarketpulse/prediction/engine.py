@@ -23,6 +23,7 @@ from .confidence import compute_confidence
 from .cross_market import compute_cross_market_relations
 from .deadline import classify_deadline_phase, deadline_weights_for
 from .ensemble import combine_submodels
+from .event_relations import collect_event_relation_signals, compute_event_relation_estimate
 from .evidence import compute_independent_evidence
 from .history import compute_history_estimate
 from .manipulation import compute_manipulation_risk
@@ -206,6 +207,14 @@ def compute_prediction(
         deadline_hours=(resolution_date - now).total_seconds() / 3600 if resolution_date else None,
     )
 
+    # --- Event-Relations (causal-reasoning foundation) --------------------
+    # Only KNOWN/STRONG_EVIDENCE/SUPPORTED relations ever get nonzero
+    # weight here (see events.py); PLAUSIBLE/SPECULATIVE ones are still
+    # returned on the result for explainability but never move the number.
+    event_relation_signals = collect_event_relation_signals(conn, provider, provider_market_id)
+    event_relation_estimate = compute_event_relation_estimate(event_relation_signals, market_yes_price)
+    reasoning.append(event_relation_estimate.detail)
+
     # --- Ensemble: history + momentum + independent evidence -> prior ----
     # No market-price fallback here: if none of the independent submodels
     # produced an estimate, `prior_estimate` stays None, which flows through
@@ -214,7 +223,9 @@ def compute_prediction(
     # market's own price would make the engine echo the market whenever it
     # actually has nothing independent to say — exactly the bug this
     # comment now prevents from being reintroduced.
-    prior_estimate, _ = combine_submodels([history_estimate, momentum_estimate, independent_evidence_estimate])
+    prior_estimate, _ = combine_submodels(
+        [history_estimate, momentum_estimate, independent_evidence_estimate, event_relation_estimate]
+    )
 
     # --- News submodel + Bayesian update ---------------------------------
     news_evidence = collect_news_evidence(conn, provider, provider_market_id, now=now)
@@ -271,7 +282,9 @@ def compute_prediction(
     )
 
     # --- Confidence (new: ensemble-aware, separate from probability) -----
-    all_submodels = [history_estimate, momentum_estimate, news_estimate, independent_evidence_estimate]
+    all_submodels = [
+        history_estimate, momentum_estimate, news_estimate, independent_evidence_estimate, event_relation_estimate,
+    ]
     market_stability = 1.0
     if price_analytics is not None and price_analytics.volatility is not None:
         market_stability = max(0.0, 1 - min(1.0, price_analytics.volatility * 10))
@@ -324,4 +337,5 @@ def compute_prediction(
         wallet_concentration=wallet_concentration,
         market_reliability=market_reliability,
         manipulation_risk=manipulation_risk,
+        event_relation_signals=tuple(event_relation_signals),
     )

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from .cross_market import CrossMarketResult
+    from .event_relations import RelationSignal
     from .evidence import IndependentEvidenceResult
     from .manipulation import ManipulationRiskResult
     from .market_flow import OrderBookMetrics, TradeFlowMetrics, WalletConcentrationMetrics
@@ -143,6 +144,9 @@ class PredictionResult:
     market_reliability: MarketReliabilityResult | None = None
     manipulation_risk: ManipulationRiskResult | None = None
 
+    # --- Event-Relation causal-reasoning foundation (additive) ---------
+    event_relation_signals: tuple[RelationSignal, ...] = field(default_factory=tuple)
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -182,4 +186,5 @@ class PredictionResult:
             "wallet_concentration": self.wallet_concentration.as_dict() if self.wallet_concentration else None,
             "market_reliability": self.market_reliability.as_dict() if self.market_reliability else None,
             "manipulation_risk": self.manipulation_risk.as_dict() if self.manipulation_risk else None,
+            "event_relation_signals": [s.as_dict() for s in self.event_relation_signals],
         }
