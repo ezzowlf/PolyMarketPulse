@@ -165,5 +165,9 @@ def test_classification_reports_event_type_field() -> None:
     question = "Will there be a major escalation in the conflict this month?"
     proposition = parse_market_proposition(question, None)
     result = classify_market(question, None, proposition)
-    assert result.event_type == "conflict_escalation"
+    # E9: semantics.py's _detect_event_type now emits "war_escalation" (the
+    # exact event_type string geopolitics.py's _EVENT_TYPES checks for)
+    # instead of the old placeholder "conflict_escalation", which was never
+    # wired to any downstream model.
+    assert result.event_type == "war_escalation"
     assert result.category == "WAR_PEACE"

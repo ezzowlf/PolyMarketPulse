@@ -182,18 +182,34 @@ _SPORT_LEAGUES = {
 }
 
 # event_type (from semantics.py) -> category, when the event_type alone is a
-# near-decisive signal regardless of surface keywords. Deliberately covers
-# only the event_types semantics.py can actually produce today
-# ("office_departure", "conflict_escalation", "conflict_deescalation");
-# extending semantics.py's vocabulary should extend this table too.
+# near-decisive signal regardless of surface keywords. Extended (E9) to
+# cover the fuller event_type vocabulary semantics.py's _detect_event_type
+# can now produce (see semantics.py's E9 comments for the full rationale);
+# extending semantics.py's vocabulary further should extend this table too.
 _EVENT_TYPE_CATEGORY: dict[str, tuple[str, float]] = {
     # An office-departure proposition is POLITICS-shaped almost regardless
     # of phrasing; if the subject is a foreign head of state the caller may
     # prefer GEOPOLITICS, but POLITICS is the defensible default and is
     # documented as a boundary call below.
     "office_departure": ("POLITICS", 3.0),
-    "conflict_escalation": ("WAR_PEACE", 3.0),
-    "conflict_deescalation": ("WAR_PEACE", 3.0),
+    "war_escalation": ("WAR_PEACE", 3.0),
+    "ceasefire": ("WAR_PEACE", 3.0),
+    "military_action": ("WAR_PEACE", 3.0),
+    "sanctions": ("WAR_PEACE", 2.5),
+    "territorial_control": ("WAR_PEACE", 3.0),
+    "strategic_waterway": ("WAR_PEACE", 2.5),
+    "diplomatic_agreement": ("WAR_PEACE", 2.5),
+    "legislation": ("LEGISLATION", 3.0),
+    "election": ("ELECTIONS", 3.0),
+    "appointment": ("POLITICS", 2.5),
+    "court_outcome": ("POLITICS", 2.5),
+    "rate_cut": ("CENTRAL_BANKS", 3.0),
+    "rate_hike": ("CENTRAL_BANKS", 3.0),
+    "rate_hold": ("CENTRAL_BANKS", 3.0),
+    "sport_match": ("SPORT_OTHER", 2.5),
+    "sport_tournament": ("SPORT_OTHER", 2.5),
+    "sport_winner": ("SPORT_OTHER", 2.5),
+    "sport_qualification": ("SPORT_OTHER", 2.5),
 }
 
 # Geopolitics override: if the office_departure subject/text also strongly

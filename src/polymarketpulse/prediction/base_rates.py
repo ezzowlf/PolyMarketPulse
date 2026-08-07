@@ -20,8 +20,8 @@ fabricated 50/50.
 
 event_type keys reuse/extend the vocabulary produced by
 `semantics.parse_market_proposition` / `semantics._detect_event_type`
-(currently: "office_departure", "conflict_escalation",
-"conflict_deescalation"). A few additional, not-yet-detected event types from
+(currently: "office_departure", "war_escalation",
+"ceasefire"). A few additional, not-yet-detected event types from
 the product spec's broader vocabulary (elections, rate decisions, sports,
 legislation, product launches, etc.) are listed further below purely as
 documented placeholders for when semantics.py's detector is extended to
@@ -60,13 +60,18 @@ BASE_RATES: dict[str, float] = {
     # (Russia-Ukraine, Israel-Gaza, etc.), where escalatory incidents are
     # common but a *major* escalation in any given month is still the
     # minority case. Treated as a starting anchor only.
-    "conflict_escalation": 0.20,
+    # E9: renamed from the old placeholder "conflict_escalation" to
+    # "war_escalation" — the exact event_type string geopolitics.py checks
+    # for. Same number/reasoning as before, just aligned to the vocabulary
+    # semantics.py now actually emits.
+    "war_escalation": 0.20,
     # Base rate that an active conflict reaches a ceasefire/de-escalation
     # milestone within a ~1 month window. Historically, confirmed
     # ceasefires/peace agreements are rarer than escalatory incidents for
     # any given still-active conflict in any given month — set lower than
-    # conflict_escalation for that reason.
-    "conflict_deescalation": 0.10,
+    # war_escalation for that reason. Renamed from "conflict_deescalation"
+    # to "ceasefire" (see war_escalation note above).
+    "ceasefire": 0.10,
 }
 
 # ---------------------------------------------------------------------------
@@ -76,10 +81,9 @@ BASE_RATES: dict[str, float] = {
 # field size, bill's committee status, etc.) — get_base_rate() intentionally
 # returns None for all of these, and always will unless a real, defensible,
 # sourced number is added above.
-#   ELECTION_WINNER, RATE_CUT, RATE_HIKE, PRICE_ABOVE, PRICE_BELOW,
-#   TOURNAMENT_WINNER, MATCH_WINNER, QUALIFICATION, LEGISLATION_PASS,
-#   PRODUCT_LAUNCH, CEASEFIRE (see conflict_deescalation above for the
-#   closest populated proxy), WAR_ESCALATION (see conflict_escalation above)
+#   ELECTION, RATE_CUT, RATE_HIKE, RATE_HOLD, PRICE_ABOVE, PRICE_BELOW,
+#   SPORT_TOURNAMENT, SPORT_MATCH, SPORT_QUALIFICATION, LEGISLATION,
+#   PRODUCT_LAUNCH. (war_escalation and ceasefire are now populated above.)
 # ---------------------------------------------------------------------------
 
 # Extraordinary event types: rare, high-consequence events where a single

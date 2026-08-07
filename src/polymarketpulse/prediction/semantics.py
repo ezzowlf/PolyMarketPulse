@@ -86,12 +86,113 @@ _ROUTINE_ACTIVITY_TERMS = (
 )
 _ESCALATION_TERMS = (
     "escalate", "escalates", "escalation", "intensifies", "intensify", "offensive", "attack", "strikes",
-    "invasion", "mobilizes", "mobilize", "airstrike", "shelling",
+    "invasion", "mobilizes", "mobilize", "airstrike", "shelling", "fighting resume", "fighting resumes",
+    "fighting resumed", "fighting continues", "war breaks out", "war begins", "war erupts",
+    "combat intensifies",
 )
 _DEESCALATION_TERMS = (
     "ceasefire", "cease-fire", "truce", "peace talks", "peace deal", "de-escalate", "de-escalation",
     "withdrawal", "withdraws troops", "agreement reached", "negotiated settlement", "armistice",
 )
+
+# E9: specific geopolitics sub-types that geopolitics.py's `_EVENT_TYPES`
+# actually checks for (ceasefire/war_escalation/military_action/sanctions/
+# territorial_control/strategic_waterway/diplomatic_agreement). These are
+# deliberately checked BEFORE the generic escalation/deescalation terms
+# above so that a more specific, on-topic phrasing ("sanctions imposed",
+# "military strike") routes to the specialized sub-analysis instead of
+# falling into the generic escalation/deescalation bucket. The generic
+# terms remain as the fallback for text that only uses broad war/peace
+# language without a more specific hook.
+_SANCTIONS_TERMS = (
+    "sanctions", "sanction", "travel ban", "asset freeze", "economic sanctions",
+)
+_STRATEGIC_WATERWAY_TERMS = (
+    "strait", "canal", "waterway", "blockade", "blockades", "navigation closed",
+    "navigation open", "shipping lane",
+)
+_TERRITORIAL_CONTROL_TERMS = (
+    "territorial control", "controls territory", "control of territory", "captures territory",
+    "seizes territory", "territory under", "cedes territory", "territory lost", "territory ceded",
+    "annexes", "annexation",
+)
+_DIPLOMATIC_AGREEMENT_TERMS = (
+    "diplomatic agreement", "diplomatic deal", "diplomatic accord", "treaty signed", "treaty reached",
+    "pact reached", "accord reached", "bilateral agreement", "multilateral agreement",
+)
+_MILITARY_ACTION_TERMS = (
+    "military strike", "military intervention", "military operation", "troops deployed",
+    "troops entered", "ground invasion", "artillery shelling", "missile strike", "combat operation",
+    "bombardment",
+)
+
+# E9: rate-decision, legislation, election, appointment, court and sports
+# sub-vocabularies. Kept as narrow literal phrase lists like the rest of
+# this module — each maps directly onto an event_type string the matching
+# specialized model (macro.py / politics.py / sports.py) already checks
+# for verbatim, so this is purely closing a detection gap, not inventing
+# new downstream vocabulary.
+_CENTRAL_BANK_TERMS = (
+    "fed", "federal reserve", "ecb", "european central bank", "boj", "bank of japan",
+    "boe", "bank of england", "snb", "swiss national bank", "central bank", "fomc",
+    "rate decision", "policy meeting",
+)
+_RATE_CUT_QUESTION_TERMS = (
+    "cut rates", "cut interest rates", "lower rates", "lowers rates", "rate cut",
+    "reduce rates", "reduces rates", "reduce interest rates", "decrease rates",
+    "decreases rates", "decrease interest rates", "lower policy rate", "lower the rate",
+)
+_RATE_HIKE_QUESTION_TERMS = (
+    "hike rates", "hikes rates", "raise rates", "raises rates", "raise interest rates",
+    "rate hike", "increase rates", "increases rates", "increase interest rates",
+    "raise policy rate", "raise the rate",
+)
+_RATE_HOLD_QUESTION_TERMS = (
+    "hold rates", "holds rates", "keep rates", "keeps rates", "maintain rates",
+    "maintains rates", "rates unchanged", "rate unchanged", "no change in rates",
+    "no change in", "pause rate", "stay unchanged", "stays unchanged", "rates steady",
+    "keep rates steady",
+)
+_LEGISLATION_SUBJECT_TERMS = ("bill", "act", "legislation", "law", "amendment")
+_LEGISLATION_ACTION_TERMS = (
+    "pass", "passes", "passed", "signed into law", "becomes law", "enacted", "enact",
+    "signed by the president", "sign into law",
+)
+_ELECTION_TERMS = (
+    "win the election", "wins the election", "win the presidency", "wins the presidency",
+    "who will win", "election winner", "elected president", "wins re-election",
+    "win re-election", "wins the primary", "win the primary", "wins the race", "win the race",
+)
+_APPOINTMENT_TERMS = (
+    "nominate", "nominated", "nomination", "nominee", "sworn in", "confirmed by senate",
+    "confirmed by congress", "appoint", "appointed", "appointment confirmed",
+)
+_COURT_OUTCOME_TERMS = (
+    "supreme court rule", "supreme court rules", "court rules", "judge rules",
+    "court ruling", "court decision", "verdict", "court upholds", "court strikes down",
+)
+_SPORT_CONTEXT_TERMS = (
+    "match", "game", "team", "tournament", "championship", "final", "playoff", "playoffs",
+    "league", "cup", "series", "season", "coach", "roster", "vs", "vs.", "versus",
+)
+_SPORT_TOURNAMENT_TERMS = (
+    "win the tournament", "wins the tournament", "tournament winner", "win the championship",
+    "wins the championship", "champion of the tournament",
+)
+# "win the" ... "championship"/"tournament" often has intervening words in
+# real questions ("win the 2026-27 UEFA Champions League Championship") —
+# these looser co-occurrence markers catch that without requiring an exact
+# contiguous phrase.
+_SPORT_WIN_VERB_TERMS = ("win the", "wins the", "champion of")
+_SPORT_TOURNAMENT_NOUN_TERMS = ("championship", "tournament")
+_SPORT_WINNER_TERMS = (
+    "win the final", "wins the final", "championship winner", "wins the title", "win the title",
+)
+_SPORT_QUALIFICATION_TERMS = (
+    "qualify for", "qualifies for", "qualification for", "advance to the", "advances to the",
+    "make the playoffs", "makes the playoffs", "fails to qualify", "does not qualify",
+)
+_SPORT_MATCH_PATTERN = re.compile(r"\b[A-Za-z][\w.'-]*(?:\s+[A-Za-z][\w.'-]*){0,2}\s+vs\.?\s+[A-Za-z]", re.IGNORECASE)
 
 _YES_PATTERN = re.compile(
     r"resolves?\s+(?:to\s+)?[\"']?yes[\"']?\s+(?:if|when)\s+(.+?)(?:[.\n]|$)", re.IGNORECASE
@@ -188,14 +289,72 @@ def _detect_event_type(text: str) -> tuple[str | None, str]:
     """Returns (event_type, direction) where direction is "yes_if_occurs"
     (the described event happening makes the proposition true) or
     "no_if_occurs" (the described event happening makes the proposition
-    false / continues the status quo)."""
+    false / continues the status quo).
+
+    E9: extended, in priority order, to cover the vocabulary the
+    specialized models (geopolitics.py, macro.py, politics.py, sports.py)
+    already expect verbatim. More specific sub-types are checked before
+    their generic parent bucket so on-topic specific phrasing ("sanctions
+    imposed", "military strike", "rate cut") wins over a generic
+    war/peace or resignation match."""
     lowered = text.lower()
+
+    # --- Politics: office departure (existing, unchanged priority) --------
     if any(t in lowered for t in _RESIGNATION_TERMS) or "out as president" in lowered:
         return "office_departure", "yes_if_occurs"
-    if any(t in lowered for t in _ESCALATION_TERMS):
-        return "conflict_escalation", "yes_if_occurs"
+
+    # --- Politics: legislation, election, appointment, court outcome ------
+    if any(subj in lowered for subj in _LEGISLATION_SUBJECT_TERMS) and any(
+        act in lowered for act in _LEGISLATION_ACTION_TERMS
+    ):
+        return "legislation", "yes_if_occurs"
+    if any(t in lowered for t in _ELECTION_TERMS):
+        return "election", "yes_if_occurs"
+    if any(t in lowered for t in _COURT_OUTCOME_TERMS):
+        return "court_outcome", "yes_if_occurs"
+    if any(t in lowered for t in _APPOINTMENT_TERMS):
+        return "appointment", "yes_if_occurs"
+
+    # --- Macro: central-bank rate decisions --------------------------------
+    if any(cb in lowered for cb in _CENTRAL_BANK_TERMS):
+        if any(t in lowered for t in _RATE_CUT_QUESTION_TERMS):
+            return "rate_cut", "yes_if_occurs"
+        if any(t in lowered for t in _RATE_HIKE_QUESTION_TERMS):
+            return "rate_hike", "yes_if_occurs"
+        if any(t in lowered for t in _RATE_HOLD_QUESTION_TERMS):
+            return "rate_hold", "yes_if_occurs"
+
+    # --- Geopolitics: specific sub-types before the generic bucket --------
+    if any(t in lowered for t in _SANCTIONS_TERMS):
+        return "sanctions", "yes_if_occurs"
+    if any(t in lowered for t in _STRATEGIC_WATERWAY_TERMS):
+        return "strategic_waterway", "yes_if_occurs"
+    if any(t in lowered for t in _TERRITORIAL_CONTROL_TERMS):
+        return "territorial_control", "yes_if_occurs"
+    if any(t in lowered for t in _DIPLOMATIC_AGREEMENT_TERMS):
+        return "diplomatic_agreement", "yes_if_occurs"
+    if any(t in lowered for t in _MILITARY_ACTION_TERMS):
+        return "military_action", "yes_if_occurs"
     if any(t in lowered for t in _DEESCALATION_TERMS):
-        return "conflict_deescalation", "yes_if_occurs"
+        return "ceasefire", "yes_if_occurs"
+    if any(t in lowered for t in _ESCALATION_TERMS):
+        return "war_escalation", "yes_if_occurs"
+
+    # --- Sports -------------------------------------------------------------
+    if any(t in lowered for t in _SPORT_QUALIFICATION_TERMS) and any(
+        s in lowered for s in _SPORT_CONTEXT_TERMS
+    ):
+        return "sport_qualification", "yes_if_occurs"
+    if any(t in lowered for t in _SPORT_TOURNAMENT_TERMS) or (
+        any(v in lowered for v in _SPORT_WIN_VERB_TERMS)
+        and any(n in lowered for n in _SPORT_TOURNAMENT_NOUN_TERMS)
+    ):
+        return "sport_tournament", "yes_if_occurs"
+    if any(t in lowered for t in _SPORT_WINNER_TERMS):
+        return "sport_winner", "yes_if_occurs"
+    if _SPORT_MATCH_PATTERN.search(text) and any(s in lowered for s in _SPORT_CONTEXT_TERMS):
+        return "sport_match", "yes_if_occurs"
+
     price_event_type, price_direction = _detect_price_direction(text)
     if price_event_type is not None:
         return price_event_type, price_direction
@@ -370,9 +529,16 @@ _NEGATION_TERMS = (
 # situation (e.g. a conflict either escalates or de-escalates). Declared
 # here (used by both extract_event's negation handling and
 # classify_evidence_relation's topic gate).
+#
+# E9: renamed from the old placeholder "conflict_escalation" /
+# "conflict_deescalation" strings to "war_escalation" / "ceasefire" — the
+# exact event_type vocabulary geopolitics.py's _EVENT_TYPES actually
+# checks for. The old strings were never in specialized_router.py's
+# _EVENT_TYPE_TO_MODEL mapping at all, so nothing downstream depended on
+# them; this closes the wiring gap instead of just relocating it.
 _OPPOSITE_EVENT_TYPES: dict[str, str] = {
-    "conflict_escalation": "conflict_deescalation",
-    "conflict_deescalation": "conflict_escalation",
+    "war_escalation": "ceasefire",
+    "ceasefire": "war_escalation",
 }
 
 # Ordered so that more-specific / status-distinguishing phrasings (a call
@@ -484,9 +650,9 @@ def extract_event(title: str, body: str | None = None) -> ExtractedEvent:
         # off-predicate context.
         event_type = "office_departure"
     elif action == "escalation":
-        event_type = "conflict_escalation"
+        event_type = "war_escalation"
     elif action == "deescalation":
-        event_type = "conflict_deescalation"
+        event_type = "ceasefire"
 
     # Negation handling: "Ceasefire denied, talks collapse" contains the
     # keyword "ceasefire" but reports the OPPOSITE of a ceasefire actually
