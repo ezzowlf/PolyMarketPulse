@@ -207,9 +207,14 @@ def compute_prediction(
     )
 
     # --- Ensemble: history + momentum + independent evidence -> prior ----
+    # No market-price fallback here: if none of the independent submodels
+    # produced an estimate, `prior_estimate` stays None, which flows through
+    # to `estimated_yes = None` below and `_recommendation()` correctly
+    # reports INSUFFICIENT_DATA. Silently defaulting the prior to the
+    # market's own price would make the engine echo the market whenever it
+    # actually has nothing independent to say — exactly the bug this
+    # comment now prevents from being reintroduced.
     prior_estimate, _ = combine_submodels([history_estimate, momentum_estimate, independent_evidence_estimate])
-    if prior_estimate is None:
-        prior_estimate = market_yes_price  # last resort: no submodel had enough to say anything
 
     # --- News submodel + Bayesian update ---------------------------------
     news_evidence = collect_news_evidence(conn, provider, provider_market_id, now=now)
@@ -236,14 +241,28 @@ def compute_prediction(
     if estimated_yes is not None and market_yes is not None:
         gross_edge = round(estimated_yes - market_yes, 4)
         cost_haircut = 0.02
-        net_edge = gross_edge - cost_haircut if gross_edge > 0 else gross_edge + cost_haircut
-        if abs(net_edge) < 1e-9:
+        # Shrinks the edge's *magnitude* toward zero by the assumed cost/
+        # spread drag — it must never manufacture an edge that isn't there.
+        # A zero gross edge always yields a zero net edge; a small edge
+        # smaller than the haircut correctly rounds down to zero rather
+        # than flipping sign or getting pushed further from zero.
+        if gross_edge > 0:
+            net_edge = round(max(0.0, gross_edge - cost_haircut), 4)
+        elif gross_edge < 0:
+            net_edge = round(min(0.0, gross_edge + cost_haircut), 4)
+        else:
             net_edge = 0.0
         reasoning.append(f"Netto-Edge nach pauschalem Kosten-/Spread-Abschlag von {cost_haircut:.0%}: {net_edge:+.1%}.")
 
     # --- Data quality (unchanged shape from V1) ---------------------------
     dq = DataQualityBreakdown(
         vollstaendigkeit=90.0 if data_quality_report_score and data_quality_report_score >= 90 else 60.0,
+        # KNOWN LIMITATION: not yet computed from the actual last-scan
+        # timestamp — compute_prediction() has no snapshot-age input to
+        # work with today. A fixed 85 means "Aktualität" cannot currently
+        # drag an otherwise-poor market's data quality down. Wiring a real
+        # snapshot-age input through is out of scope for this fix; see the
+        # audit report's "offene Einschränkungen" section.
         aktualitaet=85.0,
         quellenuebereinstimmung=round(min(100.0, (news_agreement or 0.5) * 100), 1) if news_count else 50.0,
         historische_fallzahl=round(min(100.0, comparable_sample_size * 8.0), 1),

@@ -47,11 +47,18 @@ def test_deadline_weights_increase_news_weight_near_resolution():
 # --- Momentum submodel ---------------------------------------------------
 
 
-def test_momentum_returns_bare_market_price_with_thin_history():
+def test_momentum_is_unavailable_with_thin_history():
+    # Corrected: with too little price history to compute a real momentum/
+    # mean-reversion adjustment, this submodel must report itself
+    # unavailable rather than silently returning the bare market price as
+    # if it were an independent estimate — that pattern (still `available`,
+    # still weighted, but contributing nothing but a copy of the market
+    # price) is exactly the market-price-copy bug fixed in engine.py/
+    # momentum.py after it was found live in the deployed app.
     estimate, analytics, detail = compute_momentum_estimate([], 0.42)
-    assert estimate == 0.42
+    assert estimate is None
     assert analytics is None
-    assert "Marktpreis unangepasst" in detail
+    assert "kein eigenständiges" in detail
 
 
 def test_momentum_none_without_market_price():

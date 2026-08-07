@@ -24,25 +24,26 @@ def compute_momentum_estimate(
 ) -> tuple[float | None, PriceAnalytics | None, str]:
     """Returns (estimated_yes_probability, analytics, detail).
 
-    The current market price itself is always the anchor when available —
-    prediction markets are usually reasonably well-calibrated, so losing
-    that signal entirely just because snapshot history is thin would be
-    worse than including it unadjusted. Momentum/mean-reversion only ever
-    *adjust* that anchor, and only once enough history exists (>= 3
-    snapshots) to compute them meaningfully; with less history the
-    submodel still reports the bare market price with a note explaining
-    why no adjustment was applied."""
+    This submodel's whole job is to *adjust* the market price using real
+    price-history analysis (momentum continuation / mean reversion) — it
+    must never report itself `available` while contributing nothing but
+    the unadjusted market price itself. Doing so would make this submodel
+    a disguised "engine_probability = market_probability" fallback (it
+    previously did exactly this, at the ensemble's single largest weight,
+    which is why the engine so often echoed the market price outright).
+    With too little history to compute a real adjustment, this correctly
+    reports itself unavailable instead."""
     if market_yes_price is None:
         return None, None, "Kein aktueller Marktpreis vorhanden — kein Momentum-Signal möglich."
     if len(points) < 3:
         return (
-            round(market_yes_price, 4), None,
-            "Zu wenige Preis-Snapshots für Momentum-/Reversion-Anpassung (< 3) — Marktpreis unangepasst übernommen.",
+            None, None,
+            "Zu wenige Preis-Snapshots für Momentum-/Reversion-Analyse (< 3) — kein eigenständiges Signal möglich.",
         )
 
     analytics = compute_price_analytics(points)
     if analytics.price_change is None or analytics.volatility is None:
-        return round(market_yes_price, 4), analytics, "Preisverlauf unvollständig — Marktpreis unangepasst übernommen."
+        return None, analytics, "Preisverlauf unvollständig — kein eigenständiges Momentum-Signal möglich."
 
     adjustment = 0.0
     notes: list[str] = []
