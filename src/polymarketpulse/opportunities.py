@@ -123,8 +123,8 @@ def _opportunity_score(prediction, liquidity: float | None, spread: float | None
 
 def _change_since_last(conn: sqlite3.Connection, market_id: str) -> dict | None:
     rows = conn.execute(
-        "SELECT created_at, market_yes_probability, estimated_yes_probability, net_yes_edge, confidence_score "
-        "FROM prediction_snapshots WHERE market_id = ? ORDER BY created_at DESC LIMIT 2",
+        "SELECT created_at, market_yes_probability, estimated_yes_probability, net_yes_edge, confidence_score, "
+        "independent_probability FROM prediction_snapshots WHERE market_id = ? ORDER BY created_at DESC LIMIT 2",
         (market_id,),
     ).fetchall()
     if len(rows) < 2:
@@ -136,6 +136,7 @@ def _change_since_last(conn: sqlite3.Connection, market_id: str) -> dict | None:
         "estimated_yes_probability": {"from": previous[2], "to": current[2]},
         "net_yes_edge": {"from": previous[3], "to": current[3]},
         "confidence_score": {"from": previous[4], "to": current[4]},
+        "independent_probability": {"from": previous[5], "to": current[5]},
     }
 
 
@@ -164,6 +165,12 @@ def compute_opportunity(storage: Storage, market_row: dict) -> dict | None:
         "url": market_row["url"],
         "market_yes_probability": prediction.market_yes_probability,
         "estimated_yes_probability": prediction.estimated_yes_probability,
+        "independent_probability": prediction.independent_probability,
+        "market_consensus_probability": prediction.market_consensus_probability,
+        "blended_probability": prediction.blended_probability,
+        "calibrated_probability": prediction.calibrated_probability,
+        "forecast_status": prediction.forecast_status,
+        "contribution_breakdown": [c.as_dict() for c in prediction.contribution_breakdown],
         "net_yes_edge": prediction.net_yes_edge,
         "confidence_score": prediction.confidence_score,
         "data_quality_score": prediction.data_quality.total,

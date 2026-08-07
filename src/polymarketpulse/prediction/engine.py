@@ -112,16 +112,38 @@ def _load_price_points(conn: sqlite3.Connection, market_id: str, limit: int = 60
 
 
 def _forecast_status(
-    estimated_yes: float | None, submodel_estimates: list[SubmodelEstimate], confidence: float
+    estimated_yes: float | None, independent_probability: float | None,
+    submodel_estimates: list[SubmodelEstimate], confidence: float,
 ) -> ForecastStatus:
+    """Six distinguishable states, per the product requirement that the UI
+    never show a bare probability without saying what kind of forecast it
+    is:
+      NO_FORECAST         nothing at all contributed
+      BASELINE_ONLY        only the historical baseline (no news/evidence)
+      EVIDENCE_ONLY         only independent evidence (no historical baseline)
+      INDEPENDENT_FORECAST  a real market-blind combination of the two
+      BLENDED_FORECAST      the above, further mixed with market-price-
+                             anchored submodels (momentum/news/event-relations)
+      LOW_DATA              something combined, but confidence is too low to trust it
+    """
     if estimated_yes is None:
         return "NO_FORECAST"
     available_names = {s.name for s in submodel_estimates if s.available}
-    if available_names <= {"history"}:
+    independent_names = available_names & {"history", "independent_evidence"}
+    price_anchored_names = available_names & {"momentum", "news", "event_relations"}
+
+    if independent_probability is None or not independent_names:
+        return "BLENDED_FORECAST" if price_anchored_names else "NO_FORECAST"
+
+    if independent_names == {"history"} and not price_anchored_names:
         return "BASELINE_ONLY"
+    if independent_names == {"independent_evidence"} and not price_anchored_names:
+        return "EVIDENCE_ONLY"
+
+    base_status: ForecastStatus = "BLENDED_FORECAST" if price_anchored_names else "INDEPENDENT_FORECAST"
     if confidence < 45.0:
         return "LOW_DATA"
-    return "FULL_FORECAST"
+    return base_status
 
 
 def market_blind_forecast(
@@ -396,7 +418,7 @@ def compute_prediction(
         trust = max(0.3, min(1.0, confidence / 100))
         calibrated_probability = round(0.5 + (blended_probability - 0.5) * trust, 4)
 
-    forecast_status = _forecast_status(estimated_yes, all_submodels, confidence)
+    forecast_status = _forecast_status(estimated_yes, independent_probability, all_submodels, confidence)
 
     total_available_weight = sum(s.weight for s in all_submodels if s.available)
     contribution_breakdown = tuple(

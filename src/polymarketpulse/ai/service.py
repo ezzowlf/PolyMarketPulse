@@ -458,7 +458,7 @@ def _persist_prediction_snapshot(storage: Storage, market: dict, prediction: Pre
         estimated_yes_probability=prediction.estimated_yes_probability, net_yes_edge=prediction.net_yes_edge,
         confidence_score=prediction.confidence_score, recommendation=prediction.recommendation,
         comparable_sample_size=prediction.comparable_sample_size,
-        independent_probability=ie.independent_yes_probability if ie else None,
+        independent_probability=prediction.independent_probability,
         resolution_clarity=re.resolution_edge_score if re else None,
         market_reliability_score=rel.score if rel else None,
         market_reliability_level=rel.level if rel else None,

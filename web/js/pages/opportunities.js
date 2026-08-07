@@ -1,18 +1,28 @@
 let _oppState = { sort: "opportunity_score", minEdge: "", minConfidence: "", requirePrice: true, category: "" };
 
+const FORECAST_STATUS_LABEL_DE = {
+  NO_FORECAST: "Keine unabhängigen Daten",
+  BASELINE_ONLY: "Nur historische Basisrate",
+  EVIDENCE_ONLY: "Nur Evidenz",
+  LOW_DATA: "Geringe Datenlage",
+  INDEPENDENT_FORECAST: "Unabhängige Prognose",
+  BLENDED_FORECAST: "Kombinierte Prognose",
+};
+
 function _oppRow(o) {
   return `
     <tr onclick="location.hash='#/market/${encodeURIComponent(o.market_id)}'" style="cursor:pointer">
       <td>${o.question}</td>
       <td>${o.category || "–"}</td>
       <td>${fmtPct(o.market_yes_probability)}</td>
+      <td>${o.independent_probability !== null && o.independent_probability !== undefined ? fmtPct(o.independent_probability) : "—"}</td>
       <td>${fmtPct(o.estimated_yes_probability)}</td>
       <td>${fmtEdgePp(o.net_yes_edge)}</td>
       <td>${fmtNum(o.confidence_score, 0)}</td>
       <td>${fmtNum(o.data_quality_score, 0)}</td>
       <td>${fmtDeadline(o.deadline_hours)}</td>
       <td title="Opportunity Score: kombiniert Edge, Confidence, Datenqualität, Liquidität, Spread und Deadline — nicht nur die reine Edge.">${o.opportunity_score.toFixed(1)}</td>
-      <td>${statusBadge(o.status)}</td>
+      <td>${FORECAST_STATUS_LABEL_DE[o.forecast_status] || o.forecast_status}</td>
     </tr>
   `;
 }
@@ -27,7 +37,7 @@ async function _loadOpportunities(container) {
     if (_oppState.category) params.category = _oppState.category;
     const items = await Api.opportunities(params);
     list.innerHTML = items.length
-      ? `<table><thead><tr><th>Frage</th><th>Kategorie</th><th>Markt</th><th>Engine</th><th>Edge</th><th>Confidence</th><th>Datenqualität</th><th>Deadline</th><th title="Kombinierter Score aus Edge, Confidence, Datenqualität, Liquidität, Spread, Deadline">Opportunity Score</th><th>Status</th></tr></thead>
+      ? `<table><thead><tr><th>Frage</th><th>Kategorie</th><th>Markt</th><th title="Unabhängige Prognose ohne Marktpreis als Input — aus historischer Basisrate und/oder Nachrichtenevidenz">Unabhängig</th><th>Final</th><th>Edge</th><th>Confidence</th><th>Datenqualität</th><th>Deadline</th><th title="Kombinierter Score aus Edge, Confidence, Datenqualität, Liquidität, Spread, Deadline">Opportunity Score</th><th>Status</th></tr></thead>
         <tbody>${items.map(_oppRow).join("")}</tbody></table>`
       : `<div class="empty-state">Keine Märkte erfüllen die aktuellen Filter.</div>`;
   } catch (err) {

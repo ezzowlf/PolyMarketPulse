@@ -16,11 +16,20 @@ from .base import NewsEvent
 DEFAULT_FEEDS: dict[str, str] = {
     "federal_reserve": "https://www.federalreserve.gov/feeds/press_all.xml",
     "ecb": "https://www.ecb.europa.eu/rss/press.html",
-    "whitehouse": "https://www.whitehouse.gov/feed/",
+    # Verified live 2026-08 (the old "/feed/" URL now 404s): whitehouse.gov
+    # restructured its RSS paths under /news/.
+    "whitehouse": "https://www.whitehouse.gov/news/feed/",
     "un_news": "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
     "state_department": "https://www.state.gov/rss-feed/press-releases/feed/",
-    "nato": "https://www.nato.int/cps/en/natohq/news.rss",
     "sec": "https://www.sec.gov/news/pressreleases.rss",
+    # NATO's RSS feed (previously "nato": ".../news.rss") could not be
+    # relocated as of 2026-08 — every URL pattern tried 404s and no current
+    # feed link could be found on nato.int's own news pages. Removed rather
+    # than left pointing at a guaranteed-dead endpoint; re-add once a real
+    # current feed URL is confirmed (see news-fetch's per-feed error
+    # handling, which already tolerates a dead entry gracefully in the
+    # meantime — this is about not shipping a known-broken default, not a
+    # crash risk).
 }
 
 

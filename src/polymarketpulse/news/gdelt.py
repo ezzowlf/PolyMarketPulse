@@ -30,7 +30,7 @@ def _parse_gdelt_date(value: str | None) -> datetime | None:
 
 
 def fetch_gdelt(
-    query: str, timespan: str = "3d", max_records: int = 25, timeout: float = 20.0
+    query: str, timespan: str = "3d", max_records: int = 25, timeout: float = 10.0
 ) -> list[NewsEvent]:
     """Query the free GDELT DOC 2.1 API for recent articles matching `query`.
     Never raises on network/parse failure — returns [] so a missing/rate-

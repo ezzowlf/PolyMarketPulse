@@ -12,6 +12,12 @@ def _isolated_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("POLYMARKETPULSE_TELEGRAM_ENABLED", "false")
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    # Never let the local .env's real setting (news is enabled in
+    # production now) leak into tests — this must stay deterministic and
+    # network-free regardless of ambient environment/.env state. Tests that
+    # specifically exercise the enabled path mock the network layer and
+    # override this explicitly.
+    monkeypatch.setenv("POLYMARKETPULSE_NEWS_ENABLED", "false")
     # Never let automated tests make a real OpenAI call — a real key may be
     # present in the local .env from a previous manual live-smoke-test.
     monkeypatch.setenv("POLYMARKETPULSE_AI_ENABLED", "false")

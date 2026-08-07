@@ -51,6 +51,7 @@ async function renderMarketDetailPage(container, marketId) {
 
       <div class="panel" id="headline-panel"><div class="empty-state">Lade Hauptaussage…</div></div>
       <div class="panel" id="summary-panel"></div>
+      <div class="panel" id="breakdown-panel"></div>
 
       <div class="panel">
         <p style="color:var(--text-dim)">${market.description || ""}</p>
@@ -160,17 +161,56 @@ function _renderChangesPanel(opp) {
 
 function _headlinePanelHtml(market, opp, pred) {
   const p = pred || {};
-  const status = opp ? opp.status : "Datenlage unzureichend";
+  const statusLabel = FORECAST_STATUS_LABEL_DE[p.forecast_status] || p.forecast_status || "Datenlage unzureichend";
+  const hasIndependent = p.independent_probability !== null && p.independent_probability !== undefined;
   return `
     <h2 style="margin:0 0 4px">${market.question}</h2>
     <div class="widget-grid">
-      ${widgetCard({ title: "Markt glaubt", value: fmtPct(p.market_yes_probability) })}
-      ${widgetCard({ title: "Unsere Engine", value: fmtPct(p.estimated_yes_probability) })}
-      ${widgetCard({ title: "Differenz (Edge)", value: fmtEdgePp(p.net_yes_edge) })}
-      ${widgetCard({ title: "Confidence", value: p.confidence_score !== undefined ? `${fmtNum(p.confidence_score, 1)} / 100` : "–" })}
-      ${widgetCard({ title: "Status", value: statusBadge(status) })}
+      ${widgetCard({ title: "MARKT", value: fmtPct(p.market_yes_probability) })}
+      ${widgetCard({ title: "UNABHÄNGIG", value: hasIndependent ? fmtPct(p.independent_probability) : "—" })}
+      ${widgetCard({ title: "FINAL", value: fmtPct(p.calibrated_probability !== undefined ? p.calibrated_probability : p.estimated_yes_probability) })}
+      ${widgetCard({ title: "EDGE", value: fmtEdgePp(p.net_yes_edge) })}
+      ${widgetCard({ title: "CONFIDENCE", value: p.confidence_score !== undefined ? `${fmtNum(p.confidence_score, 1)} / 100` : "–" })}
+      ${widgetCard({ title: "DATA QUALITY", value: p.data_quality_score !== undefined ? `${fmtNum(p.data_quality_score, 0)} / 100` : "–" })}
+      ${widgetCard({ title: "STATUS", value: statusLabel })}
       ${widgetCard({ title: "Deadline", value: opp ? fmtDeadline(opp.deadline_hours) : "–" })}
     </div>
+    ${!hasIndependent ? `<p class="sub">Keine unabhängigen Daten — Prognose basiert derzeit nicht auf einer eigenständigen Analyse.</p>` : ""}
+  `;
+}
+
+// FORECAST_STATUS_LABEL_DE is defined once in opportunities.js (loaded
+// earlier in index.html) and reused here as a plain global — avoids a
+// duplicate `const` redeclaration, which is a fatal SyntaxError when both
+// files load as global (non-module) scripts on the same page.
+
+function _independentBreakdownHtml(p) {
+  if (!p || !p.contribution_breakdown || !p.contribution_breakdown.length) return "";
+  const SOURCE_LABEL_DE = {
+    history: "Historische Basisrate", momentum: "Marktbewegung", news: "News",
+    independent_evidence: "Unabhängige Evidenz", event_relations: "Event-Beziehungen",
+  };
+  const rows = p.contribution_breakdown.map((c) => `
+    <tr>
+      <td>${SOURCE_LABEL_DE[c.source] || c.source}</td>
+      <td>${c.available ? "verfügbar" : "nicht verfügbar"}</td>
+      <td>${c.available && c.estimated_yes_probability !== null ? fmtPct(c.estimated_yes_probability) : "—"}</td>
+      <td>${c.available && c.weight_share !== null ? (c.weight_share * 100).toFixed(0) + "%" : "—"}</td>
+      <td class="sub">${c.detail}</td>
+    </tr>
+  `).join("");
+  return `
+    <h3>Independent Forecast Breakdown</h3>
+    <table>
+      <thead><tr><th>Quelle</th><th>Status</th><th>Schätzung</th><th>Gewichtsanteil</th><th>Details</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="sub">
+      Markt: ${fmtPct(p.market_consensus_probability)} |
+      Unabhängig: ${p.independent_probability !== null && p.independent_probability !== undefined ? fmtPct(p.independent_probability) : "—"} |
+      Kombiniert: ${p.blended_probability !== null && p.blended_probability !== undefined ? fmtPct(p.blended_probability) : "—"} |
+      Final (kalibriert): ${p.calibrated_probability !== null && p.calibrated_probability !== undefined ? fmtPct(p.calibrated_probability) : "—"}
+    </p>
   `;
 }
 
@@ -451,11 +491,13 @@ async function renderPredictionPanel(marketId, market) {
   const submodelsPanel = document.getElementById("submodels-panel");
   const dqPanel = document.getElementById("data-quality-panel");
   const evidencePanel = document.getElementById("evidence-panel");
+  const breakdownPanel = document.getElementById("breakdown-panel");
   if (!panel) return;
 
   const paint = (response) => {
     headlinePanel.innerHTML = _headlinePanelHtml(market, market.opportunity, response.prediction);
     summaryPanel.innerHTML = _summaryPanelHtml(response.prediction);
+    if (breakdownPanel) breakdownPanel.innerHTML = _independentBreakdownHtml(response.prediction);
     if (evidencePanel) evidencePanel.innerHTML = _evidenceSectionHtml(response.prediction);
     panel.innerHTML = _aiCardHtml(response);
     scenariosPanel.innerHTML = _scenarioSectionHtml(response.prediction.scenarios);

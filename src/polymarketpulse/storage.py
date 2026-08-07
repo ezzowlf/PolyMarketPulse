@@ -185,6 +185,86 @@ class Storage:
 
     # --- save a scan batch --------------------------------------------------
 
+    def _upsert_market_row(self, market: Market) -> str:
+        """Insert-or-update the `markets` row for one market and return its
+        canonical `market_id`. Shared by `save()` (active scans) and
+        `record_resolution()` (resolved-market ingestion) so a market's
+        historical record survives independently of whether it's still
+        returned by the provider's *active* market feed — a resolved market
+        must never vanish from the historical knowledge base just because
+        it dropped out of the current scan window."""
+        now = datetime.now(UTC).isoformat()
+        key = _row_key(market)
+        self.connection.execute(
+            """
+            INSERT INTO markets (
+                market_id, provider, provider_market_id, condition_id, question, slug,
+                category, tags, url, yes_token_id, no_token_id, start_date, end_date,
+                event_id, description, outcomes, outcome_prices, resolved_at,
+                resolution_status, winning_outcome, resolution_source, raw_data_hash,
+                provider_data, first_seen_at, last_seen_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(provider, provider_market_id) DO UPDATE SET
+                condition_id = excluded.condition_id,
+                question = excluded.question,
+                slug = excluded.slug,
+                category = excluded.category,
+                tags = excluded.tags,
+                url = excluded.url,
+                yes_token_id = excluded.yes_token_id,
+                no_token_id = excluded.no_token_id,
+                start_date = excluded.start_date,
+                end_date = excluded.end_date,
+                event_id = excluded.event_id,
+                description = excluded.description,
+                outcomes = excluded.outcomes,
+                outcome_prices = excluded.outcome_prices,
+                resolved_at = excluded.resolved_at,
+                resolution_status = excluded.resolution_status,
+                winning_outcome = excluded.winning_outcome,
+                resolution_source = excluded.resolution_source,
+                raw_data_hash = excluded.raw_data_hash,
+                provider_data = excluded.provider_data,
+                last_seen_at = excluded.last_seen_at
+            """,
+            (
+                key,
+                market.provider,
+                market.provider_market_id,
+                market.condition_id,
+                market.question,
+                market.slug,
+                market.category,
+                ", ".join(market.tags),
+                market.url,
+                market.yes_token_id,
+                market.no_token_id,
+                market.start_at.isoformat() if market.start_at else None,
+                market.end_at.isoformat() if market.end_at else None,
+                market.event_id,
+                market.description,
+                json.dumps(list(market.outcomes)),
+                json.dumps(list(market.outcome_prices)),
+                market.resolved_at.isoformat() if market.resolved_at else None,
+                market.resolution_status.value,
+                market.winning_outcome,
+                market.resolution_source,
+                market.raw_data_hash,
+                json.dumps(market.provider_data),
+                now,
+                now,
+            ),
+        )
+        # The stored market_id may differ from `key` for rows that pre-date
+        # the provider-prefixed key format (migrated Phase-1 data); always
+        # use the canonical value actually on the row so child-table
+        # foreign keys stay consistent and no duplicate `markets` row is
+        # created.
+        return self.connection.execute(
+            "SELECT market_id FROM markets WHERE provider = ? AND provider_market_id = ?",
+            (market.provider, market.provider_market_id),
+        ).fetchone()[0]
+
     def save(self, run_id: int, market_signals: list[tuple[Market, list[Signal]]]) -> int:
         """Persist markets, snapshots, price history and research signals for
         one scan batch. Returns the number of snapshots actually written
@@ -193,78 +273,7 @@ class Storage:
         snapshots_written = 0
 
         for market, signals in market_signals:
-            key = _row_key(market)
-            self.connection.execute(
-                """
-                INSERT INTO markets (
-                    market_id, provider, provider_market_id, condition_id, question, slug,
-                    category, tags, url, yes_token_id, no_token_id, start_date, end_date,
-                    event_id, description, outcomes, outcome_prices, resolved_at,
-                    resolution_status, winning_outcome, resolution_source, raw_data_hash,
-                    provider_data, first_seen_at, last_seen_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(provider, provider_market_id) DO UPDATE SET
-                    condition_id = excluded.condition_id,
-                    question = excluded.question,
-                    slug = excluded.slug,
-                    category = excluded.category,
-                    tags = excluded.tags,
-                    url = excluded.url,
-                    yes_token_id = excluded.yes_token_id,
-                    no_token_id = excluded.no_token_id,
-                    start_date = excluded.start_date,
-                    end_date = excluded.end_date,
-                    event_id = excluded.event_id,
-                    description = excluded.description,
-                    outcomes = excluded.outcomes,
-                    outcome_prices = excluded.outcome_prices,
-                    resolved_at = excluded.resolved_at,
-                    resolution_status = excluded.resolution_status,
-                    winning_outcome = excluded.winning_outcome,
-                    resolution_source = excluded.resolution_source,
-                    raw_data_hash = excluded.raw_data_hash,
-                    provider_data = excluded.provider_data,
-                    last_seen_at = excluded.last_seen_at
-                """,
-                (
-                    key,
-                    market.provider,
-                    market.provider_market_id,
-                    market.condition_id,
-                    market.question,
-                    market.slug,
-                    market.category,
-                    ", ".join(market.tags),
-                    market.url,
-                    market.yes_token_id,
-                    market.no_token_id,
-                    market.start_at.isoformat() if market.start_at else None,
-                    market.end_at.isoformat() if market.end_at else None,
-                    market.event_id,
-                    market.description,
-                    json.dumps(list(market.outcomes)),
-                    json.dumps(list(market.outcome_prices)),
-                    market.resolved_at.isoformat() if market.resolved_at else None,
-                    market.resolution_status.value,
-                    market.winning_outcome,
-                    market.resolution_source,
-                    market.raw_data_hash,
-                    json.dumps(market.provider_data),
-                    now,
-                    now,
-                ),
-            )
-
-            # The stored market_id may differ from `key` for rows that
-            # pre-date the provider-prefixed key format (migrated Phase-1
-            # data); always use the canonical value actually on the row so
-            # child-table foreign keys stay consistent and no duplicate
-            # `markets` row is created.
-            key = self.connection.execute(
-                "SELECT market_id FROM markets WHERE provider = ? AND provider_market_id = ?",
-                (market.provider, market.provider_market_id),
-            ).fetchone()[0]
-
+            key = self._upsert_market_row(market)
             base_score = signals[0].score if signals else 0.0
             fingerprint = _snapshot_fingerprint(market, base_score)
             previous_fp = self.connection.execute(
@@ -374,6 +383,13 @@ class Storage:
         if market.resolution_status not in self.TERMINAL_RESOLUTION_STATUSES:
             return False
         now = datetime.now(UTC).isoformat()
+
+        # Always upsert the `markets` row first — a resolved market must be
+        # preserved in the historical knowledge base even if it was never
+        # captured by a normal active-market scan, and even on a no-op
+        # resolution update below (the markets upsert is itself idempotent).
+        self._upsert_market_row(market)
+
         existing = self.connection.execute(
             "SELECT winning_outcome, status FROM market_resolutions WHERE provider = ? AND provider_market_id = ?",
             (market.provider, market.provider_market_id),
