@@ -596,6 +596,85 @@ def _migration_010_market_flow_intelligence(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_011_shadow_trading(conn: sqlite3.Connection) -> None:
+    """Adds the shadow-trading simulation layer: qualified (and blocked)
+    shadow decisions, their full lifecycle, and the richer per-snapshot
+    fields (independent probability, reliability, manipulation risk,
+    opportunity score, submodel breakdown, engine/config version) needed to
+    evaluate them later. No real orders, no wallet operations — purely
+    additive persistence for a simulation. `shadow_trades` is intentionally
+    a new table, separate from the pre-existing `shadow_setups` (an older,
+    simpler "research highlight" scorer from migration 6) — the two serve
+    different purposes and neither is removed."""
+    _add_column(conn, "prediction_snapshots", "independent_probability", "REAL")
+    _add_column(conn, "prediction_snapshots", "resolution_clarity", "REAL")
+    _add_column(conn, "prediction_snapshots", "market_reliability_score", "REAL")
+    _add_column(conn, "prediction_snapshots", "market_reliability_level", "TEXT")
+    _add_column(conn, "prediction_snapshots", "manipulation_risk_score", "REAL")
+    _add_column(conn, "prediction_snapshots", "opportunity_score", "REAL")
+    _add_column(conn, "prediction_snapshots", "deadline_phase", "TEXT")
+    _add_column(conn, "prediction_snapshots", "evidence_count", "INTEGER")
+    _add_column(conn, "prediction_snapshots", "independent_confirmation_count", "INTEGER")
+    _add_column(conn, "prediction_snapshots", "contradiction_present", "INTEGER")
+    _add_column(conn, "prediction_snapshots", "orderbook_imbalance", "REAL")
+    _add_column(conn, "prediction_snapshots", "net_flow", "REAL")
+    _add_column(conn, "prediction_snapshots", "wallet_concentration_score", "REAL")
+    _add_column(conn, "prediction_snapshots", "reaction_lag_hours", "REAL")
+    _add_column(conn, "prediction_snapshots", "submodel_estimates_json", "TEXT")
+    _add_column(conn, "prediction_snapshots", "warnings_json", "TEXT")
+    _add_column(conn, "prediction_snapshots", "engine_version", "TEXT")
+    _add_column(conn, "prediction_snapshots", "config_hash", "TEXT")
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS shadow_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_id TEXT NOT NULL REFERENCES markets(market_id),
+            provider TEXT NOT NULL,
+            provider_market_id TEXT NOT NULL,
+            source_snapshot_id INTEGER REFERENCES prediction_snapshots(id),
+            created_at TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            entry_market_price REAL,
+            independent_probability REAL,
+            expected_edge REAL,
+            confidence REAL,
+            opportunity_score REAL,
+            reliability_score REAL,
+            manipulation_risk REAL,
+            deadline_phase TEXT,
+            assumed_stake REAL NOT NULL DEFAULT 1.0,
+            simulated_fee REAL NOT NULL DEFAULT 0.0,
+            simulated_slippage REAL NOT NULL DEFAULT 0.0,
+            reasons_json TEXT NOT NULL,
+            blockers_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'candidate',
+            max_favorable_move REAL,
+            max_adverse_move REAL,
+            max_drawdown REAL,
+            price_after_5m REAL,
+            price_after_15m REAL,
+            price_after_1h REAL,
+            price_after_6h REAL,
+            price_after_24h REAL,
+            price_at_deadline REAL,
+            final_resolution_status TEXT,
+            final_outcome TEXT,
+            simulated_pnl REAL,
+            roi REAL,
+            holding_hours REAL,
+            exit_reason TEXT,
+            exit_at TEXT,
+            closed_at TEXT,
+            engine_version TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_shadow_trades_market ON shadow_trades(market_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_shadow_trades_status ON shadow_trades(status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_shadow_trades_run ON shadow_trades(created_at);
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -607,6 +686,7 @@ MIGRATIONS: list[Migration] = [
     (8, "prediction_snapshots", _migration_008_prediction_snapshots),
     (9, "ai_attempt_tracking", _migration_009_ai_attempt_tracking),
     (10, "market_flow_intelligence", _migration_010_market_flow_intelligence),
+    (11, "shadow_trading", _migration_011_shadow_trading),
 ]
 
 

@@ -39,6 +39,7 @@ STATUS_TABLES = (
     "market_flow_signals",
     "market_reliability_snapshots",
     "manipulation_risk_events",
+    "shadow_trades",
 )
 
 
@@ -706,6 +707,74 @@ class Storage:
         cols = ("wallet_address", "outcome_index", "amount")
         return [dict(zip(cols, r, strict=True)) for r in rows]
 
+    # --- shadow trading (simulation only — no real orders) ---------------------
+
+    def save_shadow_trade(self, decision, market_id: str, source_snapshot_id: int | None, engine_version: str) -> int:
+        now = datetime.now(UTC).isoformat()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO shadow_trades (
+                market_id, provider, provider_market_id, source_snapshot_id, created_at, direction,
+                entry_market_price, independent_probability, expected_edge, confidence, opportunity_score,
+                reliability_score, manipulation_risk, deadline_phase, assumed_stake, simulated_fee,
+                simulated_slippage, reasons_json, blockers_json, status, engine_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                market_id, decision.provider, decision.provider_market_id, source_snapshot_id, now,
+                decision.direction, decision.entry_market_price, decision.independent_probability,
+                decision.expected_edge, decision.confidence, decision.opportunity_score,
+                decision.reliability_score, decision.manipulation_risk, decision.deadline_phase,
+                decision.assumed_stake, decision.simulated_fee, decision.simulated_slippage,
+                json.dumps(list(decision.reasons)), json.dumps(list(decision.blockers)),
+                decision.status, engine_version,
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def activate_shadow_trade(self, shadow_trade_id: int) -> None:
+        self.connection.execute("UPDATE shadow_trades SET status = 'active' WHERE id = ?", (shadow_trade_id,))
+        self.connection.commit()
+
+    def update_shadow_trade_lifecycle(self, shadow_trade_id: int, fields: dict) -> None:
+        if not fields:
+            return
+        columns = ", ".join(f"{k} = ?" for k in fields)
+        self.connection.execute(
+            f"UPDATE shadow_trades SET {columns} WHERE id = ?", (*fields.values(), shadow_trade_id)
+        )
+        self.connection.commit()
+
+    def close_shadow_trade(
+        self, shadow_trade_id: int, final_resolution_status: str | None, final_outcome: str | None,
+        simulated_pnl: float | None, roi: float | None, holding_hours: float | None, exit_reason: str,
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        self.connection.execute(
+            """
+            UPDATE shadow_trades SET status = 'closed', final_resolution_status = ?, final_outcome = ?,
+                simulated_pnl = ?, roi = ?, holding_hours = ?, exit_reason = ?, exit_at = ?, closed_at = ?
+            WHERE id = ?
+            """,
+            (final_resolution_status, final_outcome, simulated_pnl, roi, holding_hours, exit_reason, now, now, shadow_trade_id),
+        )
+        self.connection.commit()
+
+    def active_shadow_trades(self) -> list[dict]:
+        rows = self.connection.execute(
+            "SELECT * FROM shadow_trades WHERE status IN ('candidate', 'active') ORDER BY created_at DESC"
+        ).fetchall()
+        cols = [d[0] for d in self.connection.execute("SELECT * FROM shadow_trades LIMIT 0").description]
+        return [dict(zip(cols, r, strict=True)) for r in rows]
+
+    def all_shadow_trades(self, limit: int = 500) -> list[dict]:
+        rows = self.connection.execute(
+            "SELECT * FROM shadow_trades ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        cols = [d[0] for d in self.connection.execute("SELECT * FROM shadow_trades LIMIT 0").description]
+        return [dict(zip(cols, r, strict=True)) for r in rows]
+
     # --- cross-provider matching -----------------------------------------------
 
     def save_market_match(self, candidate) -> None:
@@ -1061,6 +1130,15 @@ class Storage:
         self, market_id: str, provider: str, provider_market_id: str, category: str | None,
         prediction_version: str, market_yes_probability: float | None, estimated_yes_probability: float | None,
         net_yes_edge: float | None, confidence_score: float, recommendation: str, comparable_sample_size: int,
+        independent_probability: float | None = None, resolution_clarity: float | None = None,
+        market_reliability_score: float | None = None, market_reliability_level: str | None = None,
+        manipulation_risk_score: float | None = None, opportunity_score: float | None = None,
+        deadline_phase: str | None = None, evidence_count: int | None = None,
+        independent_confirmation_count: int | None = None, contradiction_present: bool | None = None,
+        orderbook_imbalance: float | None = None, net_flow: float | None = None,
+        wallet_concentration_score: float | None = None, reaction_lag_hours: float | None = None,
+        submodel_estimates_json: str | None = None, warnings_json: str | None = None,
+        engine_version: str | None = None, config_hash: str | None = None,
     ) -> int:
         now = datetime.now(UTC).isoformat()
         cursor = self.connection.execute(
@@ -1068,13 +1146,22 @@ class Storage:
             INSERT INTO prediction_snapshots (
                 market_id, provider, provider_market_id, category, prediction_version, created_at,
                 market_yes_probability, estimated_yes_probability, net_yes_edge, confidence_score,
-                recommendation, comparable_sample_size
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                recommendation, comparable_sample_size, independent_probability, resolution_clarity,
+                market_reliability_score, market_reliability_level, manipulation_risk_score, opportunity_score,
+                deadline_phase, evidence_count, independent_confirmation_count, contradiction_present,
+                orderbook_imbalance, net_flow, wallet_concentration_score, reaction_lag_hours,
+                submodel_estimates_json, warnings_json, engine_version, config_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 market_id, provider, provider_market_id, category, prediction_version, now,
                 market_yes_probability, estimated_yes_probability, net_yes_edge, confidence_score,
-                recommendation, comparable_sample_size,
+                recommendation, comparable_sample_size, independent_probability, resolution_clarity,
+                market_reliability_score, market_reliability_level, manipulation_risk_score, opportunity_score,
+                deadline_phase, evidence_count, independent_confirmation_count,
+                int(contradiction_present) if contradiction_present is not None else None,
+                orderbook_imbalance, net_flow, wallet_concentration_score, reaction_lag_hours,
+                submodel_estimates_json, warnings_json, engine_version, config_hash,
             ),
         )
         self.connection.commit()

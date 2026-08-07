@@ -2,6 +2,7 @@ const MAIN_NAV_ITEMS = [
   { hash: "#/dashboard", icon: "🏠", label: "Übersicht" },
   { hash: "#/markets", icon: "📈", label: "Märkte" },
   { hash: "#/opportunities", icon: "⭐", label: "Chancen" },
+  { hash: "#/shadow", icon: "🌓", label: "Shadow & Lernen" },
   { hash: "#/watchlist", icon: "👁", label: "Watchlist" },
   { hash: "#/news", icon: "📰", label: "News" },
   { hash: "#/auswertung", icon: "📊", label: "Auswertung" },

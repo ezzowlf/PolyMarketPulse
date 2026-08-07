@@ -1103,6 +1103,77 @@ def opportunities(
     return items
 
 
+@app.get("/shadow/positions")
+def shadow_positions(status: str | None = None, limit: int = 300, storage: Storage = Depends(get_storage)) -> list[dict]:
+    """All simulated shadow positions (candidate/active/closed/skipped) — a
+    fully simulated research layer, never a real order. `status` filters to
+    one of those four values; omit to see everything."""
+    rows = storage.all_shadow_trades(limit=limit)
+    if status:
+        rows = [r for r in rows if r["status"] == status]
+    for r in rows:
+        r["reasons"] = json.loads(r.pop("reasons_json") or "[]")
+        r["blockers"] = json.loads(r.pop("blockers_json") or "[]")
+    return rows
+
+
+@app.get("/shadow/performance")
+def shadow_performance_endpoint(storage: Storage = Depends(get_storage)) -> dict:
+    from .shadow_performance import compute_shadow_performance, compute_submodel_comparison
+
+    report = compute_shadow_performance(storage.connection)
+    submodels = compute_submodel_comparison(storage.connection)
+    return {"performance": report.as_dict(), "submodels": [s.as_dict() for s in submodels]}
+
+
+@app.post("/shadow/scan")
+def shadow_scan_endpoint(limit: int = 50, storage: Storage = Depends(get_storage)) -> dict:
+    """Triggers the same qualification pass as `polymarketpulse shadow-scan`
+    from the dashboard — still pure simulation, no orders."""
+    from .ai import service as ai_service
+    from .opportunities import compute_opportunity
+    from .shadow_trading import ShadowThresholds, evaluate_shadow_qualification
+
+    rows = storage.connection.execute(
+        """
+        SELECT m.market_id, m.provider, m.provider_market_id, m.question, m.category, m.url,
+               m.end_date, m.first_seen_at, m.last_seen_at, s.yes_price, s.liquidity, s.volume_24h, s.spread
+        FROM markets m
+        LEFT JOIN (
+            SELECT market_id, yes_price, liquidity, volume_24h, spread, captured_at,
+                   ROW_NUMBER() OVER (PARTITION BY market_id ORDER BY captured_at DESC) AS rn
+            FROM market_snapshots
+        ) s ON s.market_id = m.market_id AND s.rn = 1
+        WHERE m.resolution_status = 'unresolved'
+        ORDER BY m.last_seen_at DESC LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    cols = ("market_id", "provider", "provider_market_id", "question", "category", "url", "end_date",
+            "first_seen_at", "last_seen_at", "yes_price", "liquidity", "volume_24h", "spread")
+    thresholds = ShadowThresholds()
+    n_candidates = 0
+    for r in rows:
+        market_row = dict(zip(cols, r, strict=True))
+        try:
+            prediction = ai_service.get_prediction(storage, market_row["market_id"])
+        except AIContextError:
+            continue
+        opportunity = compute_opportunity(storage, market_row)
+        decision = evaluate_shadow_qualification(
+            market_row["market_id"], market_row["provider"], market_row["provider_market_id"],
+            prediction, opportunity, market_row.get("spread"), market_row.get("liquidity"), thresholds,
+        )
+        snapshot_id_row = storage.connection.execute(
+            "SELECT id FROM prediction_snapshots WHERE market_id = ? ORDER BY created_at DESC LIMIT 1",
+            (market_row["market_id"],),
+        ).fetchone()
+        storage.save_shadow_trade(decision, market_row["market_id"], snapshot_id_row[0] if snapshot_id_row else None, engine_version="v2")
+        if decision.status == "candidate":
+            n_candidates += 1
+    return {"markets_checked": len(rows), "candidates_created": n_candidates}
+
+
 @app.get("/command-center")
 def command_center(storage: Storage = Depends(get_storage)) -> dict:
     """The new Startseite's data source: counts + a handful of curated,

@@ -6,6 +6,7 @@ const ROUTES = {
   news: { title: "News", render: renderNewsPage },
   auswertung: { title: "Auswertung", render: renderBacktestPage },
   settings: { title: "Einstellungen", render: renderSettingsPage },
+  shadow: { title: "Shadow & Lernen", render: renderShadowLearningPage },
   // Erweitert (technische Zusatzseiten)
   signals: { title: "Shadow-Setups", render: renderSignalsPage },
   calendar: { title: "Kalender", render: renderCalendarPage },

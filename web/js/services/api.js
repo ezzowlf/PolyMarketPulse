@@ -103,4 +103,7 @@ const Api = {
     return Api._get(`/opportunities?${qs.toString()}`);
   },
   scan: (provider) => Api._send(`/scan${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`, "POST"),
+  shadowPositions: (status) => Api._get(`/shadow/positions${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  shadowPerformance: () => Api._get("/shadow/performance"),
+  shadowScan: () => Api._send("/shadow/scan", "POST"),
 };

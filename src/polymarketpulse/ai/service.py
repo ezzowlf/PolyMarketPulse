@@ -425,18 +425,55 @@ def _persist_and_wrap(
     )
 
 
-def _persist_prediction_snapshot(storage: Storage, market: dict, prediction: PredictionResult) -> None:
+def _persist_prediction_snapshot(storage: Storage, market: dict, prediction: PredictionResult) -> int:
     """Every computed prediction is stored for later evaluation
     (evaluation.py), independent of whether GPT was ever called — this is
     what lets accuracy/precision/recall/Brier/log-loss/calibration/edge/ROI
-    be measured against the engine alone, not just AI-explained runs."""
-    storage.save_prediction_snapshot(
+    be measured against the engine alone, not just AI-explained runs. Also
+    the reproducibility record for the shadow-trading layer: returns the
+    snapshot id so a shadow_trades row can reference exactly which snapshot
+    it was decided from."""
+    import json
+
+    ie = prediction.independent_evidence
+    re = prediction.resolution_edge
+    rel = prediction.market_reliability
+    risk = prediction.manipulation_risk
+    ob = prediction.orderbook_metrics
+    flow = prediction.trade_flow_metrics
+    wallet = prediction.wallet_concentration
+    lag = prediction.reaction_lag
+
+    submodel_json = json.dumps([
+        {"name": s.name, "estimated_yes_probability": s.estimated_yes_probability, "weight": s.weight, "available": s.available}
+        for s in prediction.submodel_estimates
+    ])
+    warnings_json = json.dumps(list(prediction.reasoning_notes[:10]))
+    config_hash = hash_payload(PREDICTION_VERSION, "v1-config")
+
+    return storage.save_prediction_snapshot(
         market_id=prediction.market_id, provider=market["provider"],
         provider_market_id=market["provider_market_id"], category=market["category"],
         prediction_version=PREDICTION_VERSION, market_yes_probability=prediction.market_yes_probability,
         estimated_yes_probability=prediction.estimated_yes_probability, net_yes_edge=prediction.net_yes_edge,
         confidence_score=prediction.confidence_score, recommendation=prediction.recommendation,
         comparable_sample_size=prediction.comparable_sample_size,
+        independent_probability=ie.independent_yes_probability if ie else None,
+        resolution_clarity=re.resolution_edge_score if re else None,
+        market_reliability_score=rel.score if rel else None,
+        market_reliability_level=rel.level if rel else None,
+        manipulation_risk_score=risk.risk_score if risk else None,
+        opportunity_score=None,  # opportunity score is computed one layer up (opportunities.py); not duplicated here
+        deadline_phase=prediction.deadline_phase,
+        evidence_count=(len(ie.evidence_for_yes) + len(ie.evidence_for_no)) if ie and ie.available else None,
+        independent_confirmation_count=ie.confirmation_count if ie else None,
+        contradiction_present=ie.contradiction_detected if ie else None,
+        orderbook_imbalance=ob.imbalance if ob and ob.available else None,
+        net_flow=flow.net_flow_usd if flow and flow.available else None,
+        wallet_concentration_score=wallet.concentration_score if wallet and wallet.available else None,
+        reaction_lag_hours=lag.reaction_detected_at_hours if lag else None,
+        submodel_estimates_json=submodel_json, warnings_json=warnings_json,
+        engine_version=PREDICTION_VERSION, config_hash=config_hash,
     )
 
 

@@ -538,6 +538,169 @@ def cmd_flow_fetch(args: argparse.Namespace) -> int:
         storage.close()
 
 
+def cmd_shadow_scan(args: argparse.Namespace) -> int:
+    """Evaluates shadow-trade qualification for open markets and persists
+    the decision either way (candidate or skipped-with-blockers). Pure
+    simulation — never places a real order."""
+    from .ai import service as ai_service
+    from .ai.client import AIContextError
+    from .opportunities import compute_opportunity
+    from .shadow_trading import ShadowThresholds, evaluate_shadow_qualification
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        rows = storage.connection.execute(
+            """
+            SELECT m.market_id, m.provider, m.provider_market_id, m.question, m.category, m.url,
+                   m.end_date, m.first_seen_at, m.last_seen_at, s.yes_price, s.liquidity, s.volume_24h, s.spread
+            FROM markets m
+            LEFT JOIN (
+                SELECT market_id, yes_price, liquidity, volume_24h, spread, captured_at,
+                       ROW_NUMBER() OVER (PARTITION BY market_id ORDER BY captured_at DESC) AS rn
+                FROM market_snapshots
+            ) s ON s.market_id = m.market_id AND s.rn = 1
+            WHERE m.resolution_status = 'unresolved'
+            ORDER BY m.last_seen_at DESC LIMIT ?
+            """,
+            (args.limit,),
+        ).fetchall()
+        cols = ("market_id", "provider", "provider_market_id", "question", "category", "url", "end_date",
+                "first_seen_at", "last_seen_at", "yes_price", "liquidity", "volume_24h", "spread")
+
+        thresholds = ShadowThresholds()
+        results = []
+        for r in rows:
+            market_row = dict(zip(cols, r, strict=True))
+            try:
+                prediction = ai_service.get_prediction(storage, market_row["market_id"])
+            except AIContextError:
+                continue
+            opportunity = compute_opportunity(storage, market_row)
+            decision = evaluate_shadow_qualification(
+                market_row["market_id"], market_row["provider"], market_row["provider_market_id"],
+                prediction, opportunity, market_row.get("spread"), market_row.get("liquidity"), thresholds,
+            )
+            snapshot_id_row = storage.connection.execute(
+                "SELECT id FROM prediction_snapshots WHERE market_id = ? ORDER BY created_at DESC LIMIT 1",
+                (market_row["market_id"],),
+            ).fetchone()
+            snapshot_id = snapshot_id_row[0] if snapshot_id_row else None
+            trade_id = storage.save_shadow_trade(decision, market_row["market_id"], snapshot_id, engine_version="v2")
+            results.append({"market_id": market_row["market_id"], "status": decision.status, "direction": decision.direction, "shadow_trade_id": trade_id})
+
+        if args.json:
+            print(json.dumps(results, indent=2, ensure_ascii=False))
+        else:
+            n_candidates = sum(1 for r in results if r["status"] == "candidate")
+            print(f"{len(results)} Markt/Märkte geprüft, {n_candidates} Shadow-Kandidat(en) erzeugt.")
+        return 0
+    finally:
+        storage.close()
+
+
+def cmd_shadow_update(args: argparse.Namespace) -> int:
+    """Updates the lifecycle of every open (candidate/active) shadow trade
+    against the current market price/prediction, applying exit rules and
+    closing trades whose market has resolved."""
+    from .ai import service as ai_service
+    from .ai.client import AIContextError
+    from .shadow_trading import compute_lifecycle_update, compute_shadow_pnl
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        open_trades = storage.active_shadow_trades()
+        updated, closed = 0, 0
+        for trade in open_trades:
+            if trade["status"] == "candidate":
+                storage.activate_shadow_trade(trade["id"])
+                trade["status"] = "active"
+
+            market_row = storage.connection.execute(
+                "SELECT end_date, resolution_status FROM markets WHERE market_id = ?", (trade["market_id"],)
+            ).fetchone()
+            end_date, _resolution_status = market_row if market_row else (None, None)
+            deadline_hours = None
+            if end_date:
+                try:
+                    end = datetime.fromisoformat(end_date)
+                    if end.tzinfo is None:
+                        end = end.replace(tzinfo=UTC)
+                    deadline_hours = (end - datetime.now(UTC)).total_seconds() / 3600
+                except ValueError:
+                    pass
+
+            snapshot = storage.connection.execute(
+                "SELECT yes_price FROM market_snapshots WHERE market_id = ? ORDER BY captured_at DESC LIMIT 1",
+                (trade["market_id"],),
+            ).fetchone()
+            current_price = snapshot[0] if snapshot else None
+
+            prediction = None
+            try:
+                prediction = ai_service.get_prediction(storage, trade["market_id"])
+            except AIContextError:
+                pass
+
+            resolution_row = storage.connection.execute(
+                "SELECT status, winning_outcome FROM market_resolutions WHERE provider = ? AND provider_market_id = ?",
+                (trade["provider"], trade["provider_market_id"]),
+            ).fetchone()
+            res_status, winning_outcome = resolution_row if resolution_row else (None, None)
+
+            update = compute_lifecycle_update(trade, current_price, prediction, deadline_hours, res_status, winning_outcome)
+            if update.fields:
+                storage.update_shadow_trade_lifecycle(trade["id"], update.fields)
+                updated += 1
+
+            if update.exit_reason:
+                final_outcome = None
+                pnl = roi = None
+                if update.exit_reason == "Resolution" and winning_outcome:
+                    final_outcome = "YES" if winning_outcome.lower() == "yes" else "NO"
+                    won = final_outcome == trade["direction"]
+                    pnl, roi = compute_shadow_pnl(
+                        trade["direction"], trade["entry_market_price"], trade["assumed_stake"],
+                        trade["simulated_fee"], trade["simulated_slippage"], won,
+                    )
+                created_at = datetime.fromisoformat(trade["created_at"])
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=UTC)
+                holding_hours = (datetime.now(UTC) - created_at).total_seconds() / 3600
+                storage.close_shadow_trade(trade["id"], res_status, final_outcome, pnl, roi, holding_hours, update.exit_reason)
+                closed += 1
+
+        result = {"open_trades_checked": len(open_trades), "updated": updated, "closed": closed}
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(f"{len(open_trades)} offene Shadow-Trades geprüft, {updated} aktualisiert, {closed} geschlossen.")
+        return 0
+    finally:
+        storage.close()
+
+
+def cmd_shadow_performance(args: argparse.Namespace) -> int:
+    from .shadow_performance import compute_shadow_performance, compute_submodel_comparison
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        report = compute_shadow_performance(storage.connection)
+        submodels = compute_submodel_comparison(storage.connection)
+        if args.json:
+            print(json.dumps({"performance": report.as_dict(), "submodels": [s.as_dict() for s in submodels]}, indent=2, ensure_ascii=False))
+        else:
+            d = report.as_dict()
+            print(f"Kandidaten: {d['n_candidates']} | Übersprungen: {d['n_skipped']} | Aktiv: {d['n_active']} | Geschlossen: {d['n_closed']}")
+            print(f"Trefferquote: {d['hit_rate']} | Brier: {d['brier_score']} | Gesamt-P&L: {d['total_pnl']} | Ø ROI: {d['average_roi']}")
+            print(f"Häufigste Blocker: {d['most_common_blockers']}")
+        return 0
+    finally:
+        storage.close()
+
+
 def cmd_db_migrate(args: argparse.Namespace) -> int:
     settings = Settings.load()
     storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
@@ -1230,6 +1393,19 @@ def build_parser() -> argparse.ArgumentParser:
     flow_parser.add_argument("--limit", type=int, default=20)
     flow_parser.add_argument("--json", action="store_true")
     flow_parser.set_defaults(func=cmd_flow_fetch)
+
+    shadow_scan_parser = subparsers.add_parser("shadow-scan", help="Shadow-Trade-Qualifikation prüfen (nur Simulation)")
+    shadow_scan_parser.add_argument("--limit", type=int, default=50)
+    shadow_scan_parser.add_argument("--json", action="store_true")
+    shadow_scan_parser.set_defaults(func=cmd_shadow_scan)
+
+    shadow_update_parser = subparsers.add_parser("shadow-update", help="Lifecycle offener Shadow-Trades aktualisieren")
+    shadow_update_parser.add_argument("--json", action="store_true")
+    shadow_update_parser.set_defaults(func=cmd_shadow_update)
+
+    shadow_perf_parser = subparsers.add_parser("shadow-performance", help="Shadow-Trading-Performance auswerten")
+    shadow_perf_parser.add_argument("--json", action="store_true")
+    shadow_perf_parser.set_defaults(func=cmd_shadow_performance)
 
     db_migrate_parser = subparsers.add_parser("db-migrate", help="Datenbankmigrationen ausführen")
     db_migrate_parser.add_argument("--json", action="store_true")
