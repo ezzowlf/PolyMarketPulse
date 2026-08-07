@@ -17,7 +17,30 @@ Recommendation = Literal[
     "STRONG_YES", "YES", "WATCH_YES", "NO_BET", "WATCH_NO", "NO", "STRONG_NO", "INSUFFICIENT_DATA"
 ]
 
+ForecastStatus = Literal["NO_FORECAST", "BASELINE_ONLY", "LOW_DATA", "FULL_FORECAST"]
+
 PREDICTION_VERSION = "v2"
+
+
+@dataclass(frozen=True)
+class ContributionEntry:
+    """One line of the forecast's contribution breakdown — every submodel
+    that could have contributed, whether it did or not. `available=False`
+    means exactly that: this source had nothing to say, never silently
+    treated as a zero-effect contribution."""
+
+    source: str
+    available: bool
+    estimated_yes_probability: float | None
+    weight_share: float | None  # this submodel's share of the ensemble's total weight, 0..1
+    detail: str
+
+    def as_dict(self) -> dict:
+        return {
+            "source": self.source, "available": self.available,
+            "estimated_yes_probability": self.estimated_yes_probability,
+            "weight_share": self.weight_share, "detail": self.detail,
+        }
 
 
 @dataclass(frozen=True)
@@ -147,6 +170,31 @@ class PredictionResult:
     # --- Event-Relation causal-reasoning foundation (additive) ---------
     event_relation_signals: tuple[RelationSignal, ...] = field(default_factory=tuple)
 
+    # --- Independent vs. market vs. blended vs. calibrated (additive) ---
+    # This is the architectural core the product needs to be able to answer
+    # "did we build a forecasting machine or just an intelligent Polymarket
+    # post-processor?": four DISTINCT numbers, never conflated.
+    #   independent_probability: computed from ONLY the submodels that never
+    #     take the market price as an input at all (history + independent
+    #     evidence) — this is "what do we think without looking at the
+    #     market?"
+    #   market_consensus_probability: the market's own price (alias of
+    #     market_yes_probability, kept alongside the other three so a caller
+    #     never has to reach into a different field to compare all four).
+    #   blended_probability: the full ensemble estimate (same value as
+    #     estimated_yes_probability today) — includes the market-price-
+    #     anchored submodels (momentum, news, event-relations adjustments).
+    #   calibrated_probability: blended_probability shrunk toward the
+    #     uninformative 0.5 prior in proportion to (100 - confidence) — a
+    #     real, computed calibration step, not a placeholder equal to
+    #     blended_probability. See engine.py for the exact formula.
+    independent_probability: float | None = None
+    market_consensus_probability: float | None = None
+    blended_probability: float | None = None
+    calibrated_probability: float | None = None
+    forecast_status: ForecastStatus = "NO_FORECAST"
+    contribution_breakdown: tuple[ContributionEntry, ...] = field(default_factory=tuple)
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -187,4 +235,10 @@ class PredictionResult:
             "market_reliability": self.market_reliability.as_dict() if self.market_reliability else None,
             "manipulation_risk": self.manipulation_risk.as_dict() if self.manipulation_risk else None,
             "event_relation_signals": [s.as_dict() for s in self.event_relation_signals],
+            "independent_probability": self.independent_probability,
+            "market_consensus_probability": self.market_consensus_probability,
+            "blended_probability": self.blended_probability,
+            "calibrated_probability": self.calibrated_probability,
+            "forecast_status": self.forecast_status,
+            "contribution_breakdown": [c.as_dict() for c in self.contribution_breakdown],
         }

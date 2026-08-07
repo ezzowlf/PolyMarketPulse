@@ -34,7 +34,14 @@ from .reaction_lag import STATUS_REACTED, compute_market_reaction_lag
 from .reliability import compute_market_reliability
 from .resolution_edge import compute_resolution_edge
 from .scenarios import build_scenarios
-from .types import DataQualityBreakdown, PredictionResult, Recommendation, SubmodelEstimate
+from .types import (
+    ContributionEntry,
+    DataQualityBreakdown,
+    ForecastStatus,
+    PredictionResult,
+    Recommendation,
+    SubmodelEstimate,
+)
 
 PREDICTION_VERSION = "v2"
 
@@ -102,6 +109,65 @@ def _load_price_points(conn: sqlite3.Connection, market_id: str, limit: int = 60
     ]
     points.reverse()  # chronological order, as price_analytics expects
     return points
+
+
+def _forecast_status(
+    estimated_yes: float | None, submodel_estimates: list[SubmodelEstimate], confidence: float
+) -> ForecastStatus:
+    if estimated_yes is None:
+        return "NO_FORECAST"
+    available_names = {s.name for s in submodel_estimates if s.available}
+    if available_names <= {"history"}:
+        return "BASELINE_ONLY"
+    if confidence < 45.0:
+        return "LOW_DATA"
+    return "FULL_FORECAST"
+
+
+def market_blind_forecast(
+    conn: sqlite3.Connection,
+    provider: str,
+    provider_market_id: str,
+    category: str | None,
+    question: str = "",
+    resolution_text: str | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """Diagnostic entrypoint (spec requirement: 'market_blind_forecast').
+    Computes an independent probability WITHOUT the current market price
+    ever being passed in as an argument to anything in this call chain —
+    not "ignored after being read", genuinely never received. Only the two
+    submodels that don't take a market price parameter at all (history,
+    independent evidence) are used; `market_yes_price` is hardcoded to
+    `None` in both calls below, so there is nothing for the market price to
+    leak in through.
+
+    Returns a plain dict (not PredictionResult) since this is a standalone
+    diagnostic/audit tool, not part of the production forecast path."""
+    now = now or datetime.now(UTC)
+    history_estimate, comparable_sample_size, observed_yes_rate = compute_history_estimate(conn, category, provider)
+    independent_evidence = compute_independent_evidence(
+        conn, provider=provider, provider_market_id=provider_market_id,
+        question=question, resolution_text=resolution_text,
+        market_yes_price=None, now=now,  # <- hardcoded None: the market price cannot reach this call
+    )
+    independent_evidence_estimate = SubmodelEstimate(
+        name="independent_evidence", estimated_yes_probability=independent_evidence.independent_yes_probability,
+        weight=0.45 if independent_evidence.available else 0.0, available=independent_evidence.available,
+        detail=independent_evidence.detail,
+    )
+    blind_probability, _ = combine_submodels([history_estimate, independent_evidence_estimate])
+    return {
+        "blind_independent_probability": blind_probability,
+        "comparable_sample_size": comparable_sample_size,
+        "observed_historical_yes_rate": observed_yes_rate,
+        "independent_evidence_available": independent_evidence.available,
+        "history_available": history_estimate.available,
+        "detail": (
+            f"history={'verfügbar' if history_estimate.available else 'nicht verfügbar'}, "
+            f"independent_evidence={'verfügbar' if independent_evidence.available else 'nicht verfügbar'}"
+        ),
+    }
 
 
 def compute_prediction(
@@ -215,6 +281,17 @@ def compute_prediction(
     event_relation_estimate = compute_event_relation_estimate(event_relation_signals, market_yes_price)
     reasoning.append(event_relation_estimate.detail)
 
+    # --- Independent probability (market-price-blind by construction) ----
+    # Reuses the already-computed history_estimate/independent_evidence_estimate
+    # objects — neither of those two submodels ever received market_yes_price
+    # as an input to their own probability computation (see history.py's
+    # signature and evidence.py's 0.5 prior), so this combine is genuinely
+    # market-blind, not just "close to it". This is the number the product
+    # needs to answer "what does the system believe without looking at the
+    # market at all?" — see market_blind_forecast() for the fully standalone
+    # version of the same computation, used for auditing this claim.
+    independent_probability, _ = combine_submodels([history_estimate, independent_evidence_estimate])
+
     # --- Ensemble: history + momentum + independent evidence -> prior ----
     # No market-price fallback here: if none of the independent submodels
     # produced an estimate, `prior_estimate` stays None, which flows through
@@ -300,6 +377,37 @@ def compute_prediction(
 
     recommendation = _recommendation(net_edge, confidence, comparable_sample_size)
 
+    # --- Blended vs. calibrated -------------------------------------------
+    # blended_probability is the full-ensemble number (identical value to
+    # estimated_yes_probability — kept as a separate, explicitly named
+    # field so callers never have to guess which of the four numbers
+    # "estimated_yes_probability" actually is).
+    #
+    # calibrated_probability: a real, computed shrinkage toward the
+    # uninformative 0.5 prior, scaled by how little we trust the estimate
+    # (1 - confidence/100). This is deliberately simple (linear shrinkage,
+    # not a fitted calibration curve from historical Brier/reliability data
+    # — that requires enough resolved-market history to fit against, which
+    # doesn't exist yet) but it is a real transformation of the blended
+    # number, not a pass-through pretending to be calibration.
+    blended_probability = estimated_yes
+    calibrated_probability = None
+    if blended_probability is not None:
+        trust = max(0.3, min(1.0, confidence / 100))
+        calibrated_probability = round(0.5 + (blended_probability - 0.5) * trust, 4)
+
+    forecast_status = _forecast_status(estimated_yes, all_submodels, confidence)
+
+    total_available_weight = sum(s.weight for s in all_submodels if s.available)
+    contribution_breakdown = tuple(
+        ContributionEntry(
+            source=s.name, available=s.available, estimated_yes_probability=s.estimated_yes_probability,
+            weight_share=(round(s.weight / total_available_weight, 4) if s.available and total_available_weight > 0 else None),
+            detail=s.detail,
+        )
+        for s in all_submodels
+    )
+
     scenarios = build_scenarios(
         estimated_yes_probability=estimated_yes, submodel_estimates=all_submodels,
         news_evidence=news_evidence, comparable_sample_size=comparable_sample_size,
@@ -338,4 +446,10 @@ def compute_prediction(
         market_reliability=market_reliability,
         manipulation_risk=manipulation_risk,
         event_relation_signals=tuple(event_relation_signals),
+        independent_probability=independent_probability,
+        market_consensus_probability=market_yes,
+        blended_probability=blended_probability,
+        calibrated_probability=calibrated_probability,
+        forecast_status=forecast_status,
+        contribution_breakdown=contribution_breakdown,
     )

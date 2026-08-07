@@ -24,9 +24,12 @@ from .engine import (
     PREDICTION_VERSION,
     _recommendation,
     compute_prediction,
+    market_blind_forecast,
 )
 from .types import (
+    ContributionEntry,
     DataQualityBreakdown,
+    ForecastStatus,
     PredictionResult,
     Recommendation,
     ScenarioSet,
@@ -42,8 +45,10 @@ __all__ = [
     "MIN_CONFIDENCE_FOR_ACTION",
     "PHASE_LABEL_DE",
     "PREDICTION_VERSION",
+    "ContributionEntry",
     "DataQualityBreakdown",
     "DeadlineWeights",
+    "ForecastStatus",
     "PredictionResult",
     "Recommendation",
     "ScenarioSet",
@@ -53,4 +58,5 @@ __all__ = [
     "compute_deadline_weights",
     "compute_prediction",
     "deadline_weights_for",
+    "market_blind_forecast",
 ]
