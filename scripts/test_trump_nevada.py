@@ -1,7 +1,7 @@
 """Test Trump/Nevada regression protection specifically."""
 
+
 import httpx
-import json
 
 API_BASE = "http://127.0.0.1:8000"
 

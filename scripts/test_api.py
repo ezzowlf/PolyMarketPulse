@@ -1,5 +1,5 @@
+
 import httpx
-import json
 
 # Get 20 active markets
 r = httpx.get('http://127.0.0.1:8000/opportunities?limit=5')

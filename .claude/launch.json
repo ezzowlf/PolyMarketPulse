@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "polymarketpulse-serve",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "polymarketpulse.cli", "serve", "--host", "127.0.0.1", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}
