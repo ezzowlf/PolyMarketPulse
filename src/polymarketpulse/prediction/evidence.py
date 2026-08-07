@@ -84,6 +84,9 @@ class EvidenceFactor:
             "tone": self.tone, "matched_condition": self.matched_condition,
             "recency_weight": self.recency_weight, "relation_label": self.relation_label,
             "entailment": self.entailment, "relation_weight": self.relation_weight,
+            # I2 (additive): topical-match relevance, previously computed but
+            # never surfaced past the internal scoring math.
+            "link_confidence": self.link_confidence,
         }
 
 
@@ -101,6 +104,13 @@ class IndependentEvidenceResult:
     evidence_for_yes: tuple[EvidenceFactor, ...] = field(default_factory=tuple)
     evidence_for_no: tuple[EvidenceFactor, ...] = field(default_factory=tuple)
     not_yet_priced_in: tuple[EvidenceFactor, ...] = field(default_factory=tuple)
+    # I2 (additive): evidence items that WERE seen (linked, scored) but
+    # classified CONTEXT/IRRELEVANT/AMBIGUOUS (matched_condition is None,
+    # relation_weight 0) — never blended into the estimate. Kept visible,
+    # separately, rather than silently dropped, so the UI can show a
+    # "verworfen / nicht relevant" section instead of pretending these
+    # articles were never considered.
+    discarded_evidence: tuple[EvidenceFactor, ...] = field(default_factory=tuple)
     detail: str = ""
     # Phase B3: extraordinary-event guard visibility — whether the dampening
     # step fired for this market, and why, so the UI/audit trail never has
@@ -122,6 +132,7 @@ class IndependentEvidenceResult:
             "evidence_for_yes": [e.as_dict() for e in self.evidence_for_yes],
             "evidence_for_no": [e.as_dict() for e in self.evidence_for_no],
             "not_yet_priced_in": [e.as_dict() for e in self.not_yet_priced_in],
+            "discarded_evidence": [e.as_dict() for e in self.discarded_evidence],
             "detail": self.detail,
             "extraordinary_guard_applied": self.extraordinary_guard_applied,
             "extraordinary_guard_detail": self.extraordinary_guard_detail,
@@ -308,6 +319,10 @@ def compute_independent_evidence(
 
     evidence_for_yes = tuple(f for f in factors if f.matched_condition == "yes")
     evidence_for_no = tuple(f for f in factors if f.matched_condition == "no")
+    # I2 (additive): items seen but not matched to either condition
+    # (CONTEXT/IRRELEVANT/AMBIGUOUS/gated-WEAK, relation_weight 0) — never
+    # fed into the estimate, but kept visible for transparency.
+    discarded_evidence = tuple(f for f in factors if f.matched_condition is None)
 
     yes_domains = {f.source_domain or f.source for f in evidence_for_yes}
     no_domains = {f.source_domain or f.source for f in evidence_for_no}
@@ -431,6 +446,7 @@ def compute_independent_evidence(
         evidence_for_yes=evidence_for_yes,
         evidence_for_no=evidence_for_no,
         not_yet_priced_in=not_yet_priced_in,
+        discarded_evidence=discarded_evidence,
         detail=detail,
         extraordinary_guard_applied=extraordinary_guard_applied,
         extraordinary_guard_detail=extraordinary_guard_detail,

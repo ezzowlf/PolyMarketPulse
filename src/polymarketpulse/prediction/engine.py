@@ -750,4 +750,7 @@ def compute_prediction(
         contribution_breakdown=contribution_breakdown,
         forecast_suppression_reason=forecast_suppression_reason,
         divergence_audit=divergence_audit,
+        historical_comparables=(
+            tuple(history_uncertainty.top_comparable_cases) if history_uncertainty is not None else ()
+        ),
     )

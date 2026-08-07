@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .classification import MarketClassification, classify_market
 from .semantics import MarketProposition, parse_market_proposition
@@ -325,6 +325,13 @@ class WeightedBaselineResult:
     lower_bound: float | None = None
     upper_bound: float | None = None
     uncertainty_width: float | None = None
+    # I3 (additive): the actual comparable cases that fed the weighted
+    # baseline above (resolved, binary YES/NO, positive similarity weight),
+    # sorted by descending similarity — so the UI can show real
+    # question/similarity/outcome/weight rows instead of only the
+    # aggregate number. Empty on the legacy category-equality path (which
+    # has no per-case similarity score at all).
+    top_comparable_cases: tuple[dict, ...] = field(default_factory=tuple)
 
     @property
     def historical_probability(self) -> float | None:
@@ -346,6 +353,7 @@ def compute_weighted_baseline(
     (resolution_status != 'resolved') are never counted as YES/NO training
     labels — they're skipped and counted in `excluded_non_binary_count`."""
     usable: list[tuple[float, float]] = []  # (weight, outcome)
+    usable_cases: list[dict] = []  # I3: same rows, with display fields, for top_comparable_cases
     excluded = 0
     for candidate, weight in comparable_cases_with_scores:
         if candidate.resolution_status != "resolved":
@@ -358,6 +366,13 @@ def compute_weighted_baseline(
             continue
         outcome = 1.0 if candidate.winning_outcome.lower() == "yes" else 0.0
         usable.append((weight, outcome))
+        usable_cases.append(
+            {
+                "market_id": candidate.market_id, "question": candidate.question,
+                "similarity_score": weight, "outcome": candidate.winning_outcome,
+                "resolution_status": candidate.resolution_status,
+            }
+        )
 
     if not usable:
         return WeightedBaselineResult(
@@ -389,6 +404,11 @@ def compute_weighted_baseline(
     lower, upper = _wilson_score_interval(baseline, ess)
     width = round(upper - lower, 4)
 
+    for case in usable_cases:
+        case["weight_share"] = round(case["similarity_score"] / total_weight, 4) if total_weight > 0 else None
+    usable_cases.sort(key=lambda c: c["similarity_score"], reverse=True)
+    top_cases = tuple(usable_cases[:10])
+
     return WeightedBaselineResult(
         baseline_yes_probability=round(baseline, 4) if baseline is not None else None,
         total_weight=round(total_weight, 4),
@@ -405,6 +425,7 @@ def compute_weighted_baseline(
         lower_bound=lower,
         upper_bound=upper,
         uncertainty_width=width,
+        top_comparable_cases=top_cases,
     )
 
 

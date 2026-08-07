@@ -313,6 +313,14 @@ class PredictionResult:
     # relevance tiers, source independence, structured-data availability,
     # model agreement, provider health). See confidence.py for the formula.
     data_quality_composite: QualityComposite | None = None
+    # --- I3: real historical comparable cases (additive) -------------------
+    # The actual (question, similarity_score, outcome, weight_share) rows
+    # that fed the history submodel's weighted baseline (Phase D's
+    # find_comparable_cases / history.compute_weighted_baseline), top 10 by
+    # similarity. Empty when the history submodel ran on the legacy
+    # category-equality path (no per-case similarity score exists there) or
+    # had zero usable comparable cases.
+    historical_comparables: tuple[dict, ...] = field(default_factory=tuple)
     # confidence_score above is now fed by this same composite approach
     # (see confidence.compute_confidence) — confidence_composite is the
     # full per-dimension breakdown, proving confidence is a function of
@@ -371,4 +379,5 @@ class PredictionResult:
             "divergence_audit": self.divergence_audit.as_dict() if self.divergence_audit else None,
             "data_quality_composite": self.data_quality_composite.as_dict() if self.data_quality_composite else None,
             "confidence_composite": self.confidence_composite.as_dict() if self.confidence_composite else None,
+            "historical_comparables": list(self.historical_comparables),
         }

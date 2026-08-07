@@ -170,7 +170,7 @@ function _headlinePanelHtml(market, opp, pred) {
       ${widgetCard({ title: "UNABHÄNGIG", value: hasIndependent ? fmtPct(p.independent_probability) : "—" })}
       ${widgetCard({ title: "FINAL", value: fmtPct(p.calibrated_probability !== undefined ? p.calibrated_probability : p.estimated_yes_probability) })}
       ${widgetCard({ title: "EDGE", value: fmtEdgePp(p.net_yes_edge) })}
-      ${widgetCard({ title: "CONFIDENCE", value: p.confidence_score !== undefined ? `${fmtNum(p.confidence_score, 1)} / 100` : "–" })}
+      ${widgetCard({ title: "CONFIDENCE", value: p.confidence_score !== undefined ? `${fmtNum(p.confidence_score, 1)} / 100 <span class="sub">(${p.confidence_calibration_status || "UNCALIBRATED"})</span>` : "–" })}
       ${widgetCard({ title: "DATA QUALITY", value: p.data_quality_score !== undefined ? `${fmtNum(p.data_quality_score, 0)} / 100` : "–" })}
       ${widgetCard({ title: "STATUS", value: statusLabel })}
       ${widgetCard({ title: "Deadline", value: opp ? fmtDeadline(opp.deadline_hours) : "–" })}
@@ -184,25 +184,47 @@ function _headlinePanelHtml(market, opp, pred) {
 // duplicate `const` redeclaration, which is a fatal SyntaxError when both
 // files load as global (non-module) scripts on the same page.
 
+const SOURCE_LABEL_DE = {
+  history: "Historische Basisrate", momentum: "Marktbewegung", news: "News",
+  independent_evidence: "Unabhängige Evidenz", event_relations: "Event-Beziehungen",
+  politics: "Politik", geopolitics: "Geopolitik", macro: "Makro", quant: "Quant", sports: "Sport",
+};
+
+// I1: sources whose independent forecast doesn't take the market price as
+// input at all — used to build the plain-language "independent model type"
+// label from whichever of these actually contributed this time.
+const INDEPENDENT_SOURCE_NAMES = new Set(["history", "independent_evidence"]);
+
+function _independentModelTypeLabel(p) {
+  const contributing = (p.contribution_breakdown || []).filter(
+    (c) => INDEPENDENT_SOURCE_NAMES.has(c.source) && c.available && c.estimated_yes_probability !== null
+  );
+  if (!contributing.length) return "keine (keine unabhängigen Quellen verfügbar)";
+  return contributing.map((c) => SOURCE_LABEL_DE[c.source] || c.source).join(" + ");
+}
+
 function _independentBreakdownHtml(p) {
   if (!p || !p.contribution_breakdown || !p.contribution_breakdown.length) return "";
-  const SOURCE_LABEL_DE = {
-    history: "Historische Basisrate", momentum: "Marktbewegung", news: "News",
-    independent_evidence: "Unabhängige Evidenz", event_relations: "Event-Beziehungen",
-  };
-  const rows = p.contribution_breakdown.map((c) => `
+  const rows = p.contribution_breakdown.map((c) => {
+    const eligibility = c.eligible === false ? "nicht in Frage kommend" : c.eligible === true ? "in Frage kommend" : "generisch (immer in Frage kommend)";
+    const used = c.available ? "verwendet" : "nicht verwendet";
+    return `
     <tr>
       <td>${SOURCE_LABEL_DE[c.source] || c.source}</td>
-      <td>${c.available ? "verfügbar" : "nicht verfügbar"}</td>
+      <td class="sub">${eligibility}</td>
+      <td>${used}</td>
       <td>${c.available && c.estimated_yes_probability !== null ? fmtPct(c.estimated_yes_probability) : "—"}</td>
       <td>${c.available && c.weight_share !== null ? (c.weight_share * 100).toFixed(0) + "%" : "—"}</td>
+      <td>${c.prior_provenance || "—"}</td>
       <td class="sub">${c.detail}</td>
     </tr>
-  `).join("");
+  `;
+  }).join("");
   return `
-    <h3>Independent Forecast Breakdown</h3>
+    <h3>Forecast Sources</h3>
+    <p class="sub">Unabhängiges Modell: <strong>${_independentModelTypeLabel(p)}</strong></p>
     <table>
-      <thead><tr><th>Quelle</th><th>Status</th><th>Schätzung</th><th>Gewichtsanteil</th><th>Details</th></tr></thead>
+      <thead><tr><th>Quelle</th><th>Eligibility</th><th>Status</th><th>Schätzung</th><th>Gewichtsanteil</th><th>Prior-Herkunft</th><th>Details</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <p class="sub">
@@ -211,6 +233,53 @@ function _independentBreakdownHtml(p) {
       Kombiniert: ${p.blended_probability !== null && p.blended_probability !== undefined ? fmtPct(p.blended_probability) : "—"} |
       Final (kalibriert): ${p.calibrated_probability !== null && p.calibrated_probability !== undefined ? fmtPct(p.calibrated_probability) : "—"}
     </p>
+  `;
+}
+
+// I4: divergence red-team audit panel — only rendered when the audit
+// actually ran (divergence_audit present).
+function _divergenceAuditHtml(p) {
+  const audit = p && p.divergence_audit;
+  if (!audit) return "";
+  const VERDICT_BADGE = { PASS: "green", WARN: "yellow", REJECT: "red" };
+  const rows = (audit.checks || []).map((c) => `
+    <tr>
+      <td>${c.name}</td>
+      <td><span class="badge ${VERDICT_BADGE[c.verdict] || ""}">${c.verdict}</span></td>
+      <td>${c.hard_fail ? "ja" : "nein"}</td>
+      <td class="sub">${c.detail}</td>
+    </tr>
+  `).join("");
+  return `
+    <h3>Divergenz-Audit</h3>
+    <div class="widget-grid">
+      ${widgetCard({ title: "Verdikt", value: `<span class="badge ${VERDICT_BADGE[audit.verdict] || ""}">${audit.verdict || "—"}</span>` })}
+      ${widgetCard({ title: "Divergenz (Gap)", value: audit.gap !== null && audit.gap !== undefined ? fmtEdgePp(audit.gap) : "—" })}
+    </div>
+    <p class="sub">${audit.summary}</p>
+    ${rows ? `<table><thead><tr><th>Prüfung</th><th>Verdikt</th><th>Hard Fail</th><th>Begründung</th></tr></thead><tbody>${rows}</tbody></table>` : ""}
+  `;
+}
+
+// I3: real historical comparable cases behind the history submodel's
+// weighted baseline (question / similarity / outcome / weight).
+function _historicalComparablesHtml(p) {
+  const cases = p && p.historical_comparables;
+  if (!cases || !cases.length) return "";
+  const rows = cases.map((c) => `
+    <tr>
+      <td>${c.question}</td>
+      <td>${(c.similarity_score * 100).toFixed(0)}%</td>
+      <td>${c.outcome}</td>
+      <td>${c.weight_share !== null && c.weight_share !== undefined ? (c.weight_share * 100).toFixed(0) + "%" : "—"}</td>
+    </tr>
+  `).join("");
+  return `
+    <h3>Historische Vergleichsfälle</h3>
+    <table>
+      <thead><tr><th>Frage</th><th>Ähnlichkeit</th><th>Ausgang</th><th>Gewichtsanteil</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
   `;
 }
 
@@ -295,11 +364,38 @@ function _dataQualityPanelHtml(p) {
   if (dq.quellenuebereinstimmung !== undefined) reasons.push(dq.quellenuebereinstimmung >= 60 ? "gute News-Abdeckung" : "keine ausreichende News-Historie");
   if (dq.aktualitaet !== undefined) reasons.push(dq.aktualitaet >= 70 ? "aktuell beobachtet" : "Markt erst kurz beobachtet");
 
+  // I6: J2/K1 composite breakdowns (per-dimension raw/normalized/
+  // availability), shown as expandable detail alongside the existing
+  // single-number legacy display (kept unchanged above).
+  const compositeTable = (composite, label) => {
+    if (!composite) return "";
+    const rows = composite.dimensions.map((d) => `
+      <tr>
+        <td>${d.name}</td>
+        <td>${d.available ? "ja" : "nein"}</td>
+        <td>${d.raw_value !== null && d.raw_value !== undefined ? fmtNum(d.raw_value, 2) : "—"}</td>
+        <td>${d.normalized_score !== null && d.normalized_score !== undefined ? fmtNum(d.normalized_score, 0) : "—"}</td>
+        <td class="sub">${d.reason}</td>
+      </tr>
+    `).join("");
+    return `
+      <details>
+        <summary>${label}: ${fmtNum(composite.score, 0)} / 100 — Komposit-Aufschlüsselung</summary>
+        <table>
+          <thead><tr><th>Dimension</th><th>Verfügbar</th><th>Rohwert</th><th>Normiert (0-100)</th><th>Begründung</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <p class="sub">${composite.formula_detail}</p>
+      </details>
+    `;
+  };
+
   return `
     <h3>Datenqualität: ${level}</h3>
     <ul>${reasons.map((r) => `<li>${r}</li>`).join("")}</ul>
+    <p class="sub">Confidence-Kalibrierung: <strong>${p.confidence_calibration_status || "UNCALIBRATED"}</strong> — noch nicht anhand realer aufgelöster Prognosen validiert.</p>
     <details>
-      <summary>Details (technische Aufschlüsselung)</summary>
+      <summary>Details (technische Aufschlüsselung, Legacy)</summary>
       <table>
         <thead><tr><th>Vollständigkeit</th><th>Aktualität</th><th>Quellenübereinstimmung</th><th>Historische Fallzahl</th><th>Resolution-Klarheit</th><th>Liquidität</th></tr></thead>
         <tbody><tr>
@@ -308,24 +404,46 @@ function _dataQualityPanelHtml(p) {
         </tr></tbody>
       </table>
     </details>
+    ${compositeTable(p.data_quality_composite, "Datenqualität (J2-Komposit)")}
+    ${compositeTable(p.confidence_composite, "Confidence (K1-Komposit)")}
   `;
 }
 
 function _evidenceSectionHtml(p) {
   const ie = p && p.independent_evidence;
+  // I3/I4 (historical comparables, divergence audit) are independent of
+  // whether independent-evidence itself was available — always append them
+  // so they're never silently hidden just because news evidence was thin.
+  const extras = `${_historicalComparablesHtml(p)}${_divergenceAuditHtml(p)}`;
   if (!ie) {
-    return `<h3>Unabhängige Evidenz</h3><div class="empty-state">Keine unabhängige Schätzung möglich — keine unabhängige Evidenz-Infrastruktur verfügbar.</div>`;
+    return `<h3>Unabhängige Evidenz</h3><div class="empty-state">Keine unabhängige Schätzung möglich — keine unabhängige Evidenz-Infrastruktur verfügbar.</div>${extras}`;
   }
   if (!ie.available) {
-    return `<h3>Unabhängige Evidenz</h3><div class="empty-state">keine unabhängige Schätzung möglich — ${ie.detail}</div>`;
+    return `<h3>Unabhängige Evidenz</h3><div class="empty-state">keine unabhängige Schätzung möglich — ${ie.detail}</div>${extras}`;
   }
   const marketPct = fmtPct(p.market_yes_probability);
   const independentPct = fmtPct(ie.independent_yes_probability);
   const divergenceStr = ie.divergence !== null ? fmtEdgePp(ie.divergence) : "–";
-  const evidenceList = (items) =>
-    items && items.length
-      ? `<ul>${items.map((e) => `<li>${fmtDate(e.published_at)} — <a href="${e.url}" target="_blank" rel="noopener">${e.title}</a> <span class="sub">(${e.source_domain || e.source})</span></li>`).join("")}</ul>`
-      : `<p class="sub">keine</p>`;
+
+  // I2: per-item evidence table — source / relation / relevance / source
+  // quality / freshness / direction / impact, not a generic bullet list.
+  const evidenceTable = (items) => {
+    if (!items || !items.length) return `<p class="sub">keine</p>`;
+    const rows = items.map((e) => `
+      <tr>
+        <td><a href="${e.url}" target="_blank" rel="noopener">${e.title}</a><div class="sub">${e.source_domain || e.source} — ${fmtDate(e.published_at)}</div></td>
+        <td>${e.relation_label}</td>
+        <td>${e.entailment}</td>
+        <td>${(e.link_confidence * 100).toFixed(0)}%</td>
+        <td>${(e.reliability * 100).toFixed(0)}%</td>
+        <td>${(e.recency_weight * 100).toFixed(0)}%</td>
+        <td>${(e.relation_weight * 100).toFixed(0)}%</td>
+      </tr>
+    `).join("");
+    return `<table><thead><tr><th>Quelle / Ereignis</th><th>Relation</th><th>Richtung</th><th>Relevanz</th><th>Quellqualität</th><th>Aktualität</th><th>Impact/Gewicht</th></tr></thead><tbody>${rows}</tbody></table>`;
+  };
+
+  const discarded = ie.discarded_evidence || [];
 
   return `
     <h3>Unabhängige Evidenz</h3>
@@ -340,12 +458,17 @@ function _evidenceSectionHtml(p) {
     ${ie.breaking ? `<div class="badge yellow">Breaking (unter 48h)</div>` : ""}
     ${ie.contradiction_detected ? `<div class="badge yellow">Widersprüchliche Quellenlage</div>` : ""}
     <p><strong>Spricht für YES (${ie.evidence_for_yes.length}):</strong></p>
-    ${evidenceList(ie.evidence_for_yes)}
+    ${evidenceTable(ie.evidence_for_yes)}
     <p><strong>Spricht für NO (${ie.evidence_for_no.length}):</strong></p>
-    ${evidenceList(ie.evidence_for_no)}
+    ${evidenceTable(ie.evidence_for_no)}
     ${
       ie.not_yet_priced_in.length
-        ? `<p><strong>Noch nicht eingepreist:</strong></p>${evidenceList(ie.not_yet_priced_in)}`
+        ? `<p><strong>Noch nicht eingepreist:</strong></p>${evidenceTable(ie.not_yet_priced_in)}`
+        : ""
+    }
+    ${
+      discarded.length
+        ? `<details><summary>Verworfen / nicht relevant (${discarded.length}) — gesehen, aber nicht in die Schätzung eingeflossen</summary>${evidenceTable(discarded)}</details>`
         : ""
     }
     <p class="sub">${ie.detail}</p>
@@ -353,6 +476,8 @@ function _evidenceSectionHtml(p) {
     ${_crossMarketHtml(p.cross_market)}
     ${_reactionLagHtml(p.reaction_lag)}
     ${_marketFlowHtml(p)}
+    ${_historicalComparablesHtml(p)}
+    ${_divergenceAuditHtml(p)}
   `;
 }
 

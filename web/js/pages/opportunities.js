@@ -7,6 +7,10 @@ const FORECAST_STATUS_LABEL_DE = {
   LOW_DATA: "Geringe Datenlage",
   INDEPENDENT_FORECAST: "Unabhängige Prognose",
   BLENDED_FORECAST: "Kombinierte Prognose",
+  // Phase B4: independent estimate diverged sharply from the market price
+  // without strong enough evidence — suppressed instead of shown. Was
+  // missing here, so it fell back to the raw enum string in the UI.
+  FORECAST_SUPPRESSED: "Prognose unterdrückt (Divergenz-Schutz)",
 };
 
 function _oppRow(o) {

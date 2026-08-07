@@ -1,0 +1,69 @@
+PolymarketPulse startet…
+  Arbeitsverzeichnis: C:\Users\djaez\Documents\PolymarketPulse\PolymarketPulse-MVP\polymarketpulse
+  Datenbank: data\polymarketpulse.db (Schema-Version 16, 0 Migration(en) angewendet)
+  KI aktiviert: True | API-Key vorhanden: True
+  Modell: gpt-5-nano | Kostenlimit/Analyse: $0.01 | Tagesbudget: $0.01 | Eskalation aktiv: False
+Dashboard/API auf http://127.0.0.1:8899 (Strg+C zum Beenden)
+INFO:     Started server process [28428]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8899 (Press CTRL+C to quit)
+INFO:     127.0.0.1:57820 - "GET /markets?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57827 - "GET /prediction/polymarket%3A3231771 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50707 - "GET /prediction/polymarket%3A3231771 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50708 - "GET /prediction/polymarket%3A3231771 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58612 - "GET /explain/polymarket%3A3231771 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58613 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64503 - "GET /ai/explain-recommendation/polymarket%3A3231771 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51687 - "GET /ai/explain-recommendation/polymarket%3A3241070 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64787 - "GET /ai/explain-recommendation/polymarket%3A601829 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59050 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59050 - "GET /css/theme.css?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61539 - "GET /js/services/api.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51515 - "GET /js/charts/linechart.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59050 - "GET /js/components/sidebar.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51515 - "GET /js/components/widget.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61539 - "GET /js/pages/dashboard.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59050 - "GET /js/pages/markets.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51515 - "GET /js/pages/opportunities.js?v=18 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61539 - "GET /js/pages/shadowLearning.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59050 - "GET /js/pages/marketDetail.js?v=18 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51515 - "GET /js/pages/watchlist.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61539 - "GET /js/pages/signals.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59050 - "GET /js/pages/calendar.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51515 - "GET /js/pages/news.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61539 - "GET /js/pages/stats.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51515 - "GET /js/pages/settings.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59050 - "GET /js/pages/heatmap.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61539 - "GET /js/pages/quality.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51515 - "GET /js/pages/performance.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59050 - "GET /js/pages/compare.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61539 - "GET /js/pages/resolutions.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59050 - "GET /js/pages/monitoring.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51515 - "GET /js/pages/research.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61539 - "GET /js/pages/providerStatus.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51515 - "GET /js/pages/search.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61539 - "GET /js/pages/backtest.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59050 - "GET /js/pages/analytics.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59050 - "GET /js/app.js?v=17 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59050 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61539 - "GET /history/full/polymarket%3A3231771 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51515 - "GET /market/polymarket%3A3231771 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51515 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61539 - "GET /ai/explain-recommendation/polymarket%3A3231771 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57525 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63109 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50825 - "GET / HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:50825 - "GET /js/pages/opportunities.js?v=18 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63452 - "GET /js/pages/marketDetail.js?v=18 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63452 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50133 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50825 - "GET /command-center HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50133 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:63452 - "GET /history/full/polymarket%3A3231771 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50825 - "GET /market/polymarket%3A3231771 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50825 - "GET /ai/explain-recommendation/polymarket%3A3231771 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62296 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60013 - "GET /history/full/polymarket%3A3241070 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61135 - "GET /market/polymarket%3A3241070 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61135 - "GET /ai/explain-recommendation/polymarket%3A3241070 HTTP/1.1" 200 OK
