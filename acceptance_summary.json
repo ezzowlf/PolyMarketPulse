@@ -1,0 +1,182 @@
+[
+  {
+    "question": "Will the Iranian regime fall before 2027?",
+    "id": "polymarket:663583",
+    "status": "BASELINE_ONLY",
+    "independent_prob": 0.3977,
+    "final_prob": 0.3977,
+    "edge": 0.3127,
+    "confidence": 67.7
+  },
+  {
+    "question": "Trump out as President by August 31?",
+    "id": "polymarket:3231771",
+    "status": "BLENDED_FORECAST",
+    "independent_prob": 0.3255,
+    "final_prob": 0.3535,
+    "edge": 0.327,
+    "confidence": 46.6
+  },
+  {
+    "question": "Will the Fed decrease interest rates by 25 bps after the September 2026 meeting?",
+    "id": "polymarket:2252243",
+    "status": "BASELINE_ONLY",
+    "independent_prob": 0.3981,
+    "final_prob": 0.3981,
+    "edge": 0.3606,
+    "confidence": 72.6
+  },
+  {
+    "question": "Will the Fed decrease interest rates by 50+ bps after the September 2026 meeting?",
+    "id": "polymarket:2252242",
+    "status": "BASELINE_ONLY",
+    "independent_prob": 0.3981,
+    "final_prob": 0.3981,
+    "edge": 0.3676,
+    "confidence": 72.6
+  },
+  {
+    "question": "Will the U.S. invade Iran before 2027?",
+    "id": "665374",
+    "status": "BLENDED_FORECAST",
+    "independent_prob": 0.3977,
+    "final_prob": 0.3487,
+    "edge": 0.1537,
+    "confidence": 69.1
+  },
+  {
+    "question": "Will the price of Bitcoin be above $68,000 on August 7?",
+    "id": "polymarket:3241080",
+    "status": "BASELINE_ONLY",
+    "independent_prob": 0.4309,
+    "final_prob": 0.4309,
+    "edge": 0.4104,
+    "confidence": 67.7
+  },
+  {
+    "question": "Will the price of Bitcoin be above $60,000 on August 7?",
+    "id": "polymarket:3241070",
+    "status": "FORECAST_SUPPRESSED",
+    "independent_prob": null,
+    "final_prob": 0.4309,
+    "edge": -0.5486,
+    "confidence": 68.0
+  },
+  {
+    "question": "Will Bayern Munich win on 2026-08-07?",
+    "id": "polymarket:3296879",
+    "status": "BASELINE_ONLY",
+    "independent_prob": 0.3977,
+    "final_prob": 0.3977,
+    "edge": -0.0873,
+    "confidence": 66.9
+  },
+  {
+    "question": "Will there be no change in Fed interest rates after the September 2026 meeting?",
+    "id": "polymarket:2252244",
+    "status": "BASELINE_ONLY",
+    "independent_prob": 0.4408,
+    "final_prob": 0.3981,
+    "edge": -0.0669,
+    "confidence": 72.4
+  },
+  {
+    "question": "Will the Fed increase interest rates by 25 bps after the September 2026 meeting?",
+    "id": "polymarket:2252245",
+    "status": "BASELINE_ONLY",
+    "independent_prob": 0.3981,
+    "final_prob": 0.3981,
+    "edge": -0.0669,
+    "confidence": 72.6
+  },
+  {
+    "question": "Will J.D. Vance win the 2028 Republican presidential nomination?",
+    "id": "polymarket:561974",
+    "status": "BASELINE_ONLY",
+    "independent_prob": 0.3406,
+    "final_prob": 0.3857,
+    "edge": -0.0258,
+    "confidence": 69.1
+  },
+  {
+    "question": "Will Tucker Carlson win the 2028 Republican presidential nomination?",
+    "id": "561996",
+    "status": "FORECAST_SUPPRESSED",
+    "independent_prob": null,
+    "final_prob": 0.111,
+    "edge": 0.061,
+    "confidence": 46.2
+  },
+  {
+    "question": "Israel x Iran ceasefire continues through August 9?",
+    "id": "polymarket:3128786",
+    "status": "BLENDED_FORECAST",
+    "independent_prob": null,
+    "final_prob": 0.9705,
+    "edge": 0.0,
+    "confidence": 30.7
+  },
+  {
+    "question": "US x Iran Effective Ceasefire by July 31?",
+    "id": "polymarket:2937525",
+    "status": "BLENDED_FORECAST",
+    "independent_prob": null,
+    "final_prob": 0.825,
+    "edge": 0.0,
+    "confidence": 29.8
+  },
+  {
+    "question": "Strait of Hormuz traffic returns to normal by August 31?",
+    "id": "2774056",
+    "status": "BLENDED_FORECAST",
+    "independent_prob": null,
+    "final_prob": 0.1369,
+    "edge": 0.0,
+    "confidence": 32.0
+  },
+  {
+    "question": "Strait of Hormuz traffic returns to normal by August 15?",
+    "id": "polymarket:3128885",
+    "status": "BLENDED_FORECAST",
+    "independent_prob": null,
+    "final_prob": 0.0085,
+    "edge": 0.0,
+    "confidence": 32.0
+  },
+  {
+    "question": "US announces end of Iranian blockade by August 7, 2026?",
+    "id": "polymarket:3128889",
+    "status": "FORECAST_SUPPRESSED",
+    "independent_prob": null,
+    "final_prob": null,
+    "edge": null,
+    "confidence": 34.4
+  },
+  {
+    "question": "Will Shakhtar Donetsk win the 2026-27 UEFA Champions League Championship?",
+    "id": "polymarket:2772194",
+    "status": "NO_FORECAST",
+    "independent_prob": null,
+    "final_prob": null,
+    "edge": null,
+    "confidence": 32.9
+  },
+  {
+    "question": "Clarity Act (H.R.3633) signed into law in 2026?",
+    "id": "polymarket:1163699",
+    "status": "FORECAST_SUPPRESSED",
+    "independent_prob": null,
+    "final_prob": null,
+    "edge": null,
+    "confidence": 36.4
+  },
+  {
+    "question": "Strait of Hormuz traffic returns to normal by September 30?",
+    "id": "polymarket:2774057",
+    "status": "NO_FORECAST",
+    "independent_prob": null,
+    "final_prob": null,
+    "edge": null,
+    "confidence": 32.0
+  }
+]

@@ -1,0 +1,365 @@
+[
+  {
+    "question": "Will the Iranian regime fall before 2027?",
+    "market_id": "polymarket:663583",
+    "category": "Will the Iranian regime fall before 2027?",
+    "market_prob": 0.065,
+    "independent_prob": 0.3977,
+    "blended_prob": 0.3977,
+    "final_prob": 0.3977,
+    "edge": 0.3127,
+    "confidence": 67.7,
+    "data_quality": 70.0,
+    "status": "BASELINE_ONLY",
+    "recommendation": "STRONG_YES",
+    "models_used": [
+      "history"
+    ],
+    "divergence": "WARN"
+  },
+  {
+    "question": "Trump out as President by August 31?",
+    "market_id": "polymarket:3231771",
+    "category": "Trump out as President by August 31?",
+    "market_prob": 0.0065,
+    "independent_prob": 0.3255,
+    "blended_prob": 0.3535,
+    "final_prob": 0.3535,
+    "edge": 0.327,
+    "confidence": 46.6,
+    "data_quality": 61.8,
+    "status": "BLENDED_FORECAST",
+    "recommendation": "STRONG_YES",
+    "models_used": [
+      "history",
+      "news"
+    ],
+    "divergence": "WARN"
+  },
+  {
+    "question": "Will the Fed decrease interest rates by 25 bps after the September 2026 meeting?",
+    "market_id": "polymarket:2252243",
+    "category": "Fed Decision in September?",
+    "market_prob": 0.0175,
+    "independent_prob": 0.3981,
+    "blended_prob": 0.3981,
+    "final_prob": 0.3981,
+    "edge": 0.3606,
+    "confidence": 72.6,
+    "data_quality": 65.1,
+    "status": "BASELINE_ONLY",
+    "recommendation": "STRONG_YES",
+    "models_used": [
+      "history"
+    ],
+    "divergence": "WARN"
+  },
+  {
+    "question": "Will the Fed decrease interest rates by 50+ bps after the September 2026 meeting?",
+    "market_id": "polymarket:2252242",
+    "category": "Fed Decision in September?",
+    "market_prob": 0.0105,
+    "independent_prob": 0.3981,
+    "blended_prob": 0.3981,
+    "final_prob": 0.3981,
+    "edge": 0.3676,
+    "confidence": 72.6,
+    "data_quality": 65.1,
+    "status": "BASELINE_ONLY",
+    "recommendation": "STRONG_YES",
+    "models_used": [
+      "history"
+    ],
+    "divergence": "WARN"
+  },
+  {
+    "question": "Will the U.S. invade Iran before 2027?",
+    "market_id": "665374",
+    "category": "Will the U.S. invade Iran before 2027?",
+    "market_prob": 0.175,
+    "independent_prob": 0.3977,
+    "blended_prob": 0.3487,
+    "final_prob": 0.3487,
+    "edge": 0.1537,
+    "confidence": 69.1,
+    "data_quality": 64.4,
+    "status": "BLENDED_FORECAST",
+    "recommendation": "YES",
+    "models_used": [
+      "history",
+      "momentum"
+    ],
+    "divergence": "WARN"
+  },
+  {
+    "question": "Will the price of Bitcoin be above $68,000 on August 7?",
+    "market_id": "polymarket:3241080",
+    "category": "Bitcoin above ___ on August 7?",
+    "market_prob": 0.0005,
+    "independent_prob": 0.4309,
+    "blended_prob": 0.4309,
+    "final_prob": 0.4309,
+    "edge": 0.4104,
+    "confidence": 67.7,
+    "data_quality": 56.3,
+    "status": "BASELINE_ONLY",
+    "recommendation": "STRONG_YES",
+    "models_used": [
+      "history"
+    ],
+    "divergence": "WARN"
+  },
+  {
+    "question": "Will the price of Bitcoin be above $60,000 on August 7?",
+    "market_id": "polymarket:3241070",
+    "category": "Bitcoin above ___ on August 7?",
+    "market_prob": 0.9995,
+    "independent_prob": null,
+    "blended_prob": 0.4309,
+    "final_prob": 0.4309,
+    "edge": -0.5486,
+    "confidence": 68.0,
+    "data_quality": 55.5,
+    "status": "FORECAST_SUPPRESSED",
+    "recommendation": "STRONG_NO",
+    "models_used": [
+      "history",
+      "quant"
+    ],
+    "divergence": "REJECT"
+  },
+  {
+    "question": "Will Bayern Munich win on 2026-08-07?",
+    "market_id": "polymarket:3296879",
+    "category": "Aston Villa vs. Bayern Munich",
+    "market_prob": 0.505,
+    "independent_prob": 0.3977,
+    "blended_prob": 0.3977,
+    "final_prob": 0.3977,
+    "edge": -0.0873,
+    "confidence": 66.9,
+    "data_quality": 65.8,
+    "status": "BASELINE_ONLY",
+    "recommendation": "NO",
+    "models_used": [
+      "history"
+    ],
+    "divergence": null
+  },
+  {
+    "question": "Will there be no change in Fed interest rates after the September 2026 meeting?",
+    "market_id": "polymarket:2252244",
+    "category": "Fed Decision in September?",
+    "market_prob": 0.485,
+    "independent_prob": 0.4408,
+    "blended_prob": 0.3981,
+    "final_prob": 0.3981,
+    "edge": -0.0669,
+    "confidence": 72.4,
+    "data_quality": 65.1,
+    "status": "BASELINE_ONLY",
+    "recommendation": "WATCH_NO",
+    "models_used": [
+      "history",
+      "macro"
+    ],
+    "divergence": null
+  },
+  {
+    "question": "Will the Fed increase interest rates by 25 bps after the September 2026 meeting?",
+    "market_id": "polymarket:2252245",
+    "category": "Fed Decision in September?",
+    "market_prob": 0.485,
+    "independent_prob": 0.3981,
+    "blended_prob": 0.3981,
+    "final_prob": 0.3981,
+    "edge": -0.0669,
+    "confidence": 72.6,
+    "data_quality": 65.1,
+    "status": "BASELINE_ONLY",
+    "recommendation": "WATCH_NO",
+    "models_used": [
+      "history"
+    ],
+    "divergence": null
+  },
+  {
+    "question": "Will J.D. Vance win the 2028 Republican presidential nomination?",
+    "market_id": "polymarket:561974",
+    "category": "Republican Presidential Nominee 2028",
+    "market_prob": 0.4315,
+    "independent_prob": 0.3406,
+    "blended_prob": 0.3857,
+    "final_prob": 0.3857,
+    "edge": -0.0258,
+    "confidence": 69.1,
+    "data_quality": 64.7,
+    "status": "BASELINE_ONLY",
+    "recommendation": "NO_BET",
+    "models_used": [
+      "history",
+      "politics"
+    ],
+    "divergence": null
+  },
+  {
+    "question": "Will Tucker Carlson win the 2028 Republican presidential nomination?",
+    "market_id": "561996",
+    "category": "Republican Presidential Nominee 2028",
+    "market_prob": 0.03,
+    "independent_prob": null,
+    "blended_prob": 0.111,
+    "final_prob": 0.111,
+    "edge": 0.061,
+    "confidence": 46.2,
+    "data_quality": 53.4,
+    "status": "FORECAST_SUPPRESSED",
+    "recommendation": "INSUFFICIENT_DATA",
+    "models_used": [
+      "history",
+      "momentum",
+      "politics"
+    ],
+    "divergence": "REJECT"
+  },
+  {
+    "question": "Israel x Iran ceasefire continues through August 9?",
+    "market_id": "polymarket:3128786",
+    "category": "Israel x Iran ceasefire continues through...?",
+    "market_prob": 0.9705,
+    "independent_prob": null,
+    "blended_prob": 0.9705,
+    "final_prob": 0.9705,
+    "edge": 0.0,
+    "confidence": 30.7,
+    "data_quality": 43.1,
+    "status": "BLENDED_FORECAST",
+    "recommendation": "INSUFFICIENT_DATA",
+    "models_used": [
+      "momentum"
+    ],
+    "divergence": null
+  },
+  {
+    "question": "US x Iran Effective Ceasefire by July 31?",
+    "market_id": "polymarket:2937525",
+    "category": "US x Iran Effective Ceasefire by...? (2 week pause)",
+    "market_prob": 0.825,
+    "independent_prob": null,
+    "blended_prob": 0.825,
+    "final_prob": 0.825,
+    "edge": 0.0,
+    "confidence": 29.8,
+    "data_quality": 38.2,
+    "status": "BLENDED_FORECAST",
+    "recommendation": "INSUFFICIENT_DATA",
+    "models_used": [
+      "momentum"
+    ],
+    "divergence": null
+  },
+  {
+    "question": "Strait of Hormuz traffic returns to normal by August 31?",
+    "market_id": "2774056",
+    "category": "Strait of Hormuz traffic returns to normal by...?",
+    "market_prob": 0.135,
+    "independent_prob": null,
+    "blended_prob": 0.1369,
+    "final_prob": 0.1369,
+    "edge": 0.0,
+    "confidence": 32.0,
+    "data_quality": 50.4,
+    "status": "BLENDED_FORECAST",
+    "recommendation": "INSUFFICIENT_DATA",
+    "models_used": [
+      "momentum"
+    ],
+    "divergence": null
+  },
+  {
+    "question": "Strait of Hormuz traffic returns to normal by August 15?",
+    "market_id": "polymarket:3128885",
+    "category": "Strait of Hormuz traffic returns to normal by...?",
+    "market_prob": 0.0085,
+    "independent_prob": null,
+    "blended_prob": 0.0085,
+    "final_prob": 0.0085,
+    "edge": 0.0,
+    "confidence": 32.0,
+    "data_quality": 50.4,
+    "status": "BLENDED_FORECAST",
+    "recommendation": "INSUFFICIENT_DATA",
+    "models_used": [
+      "momentum"
+    ],
+    "divergence": null
+  },
+  {
+    "question": "US announces end of Iranian blockade by August 7, 2026?",
+    "market_id": "polymarket:3128889",
+    "category": "US announces end of Iranian blockade by...?",
+    "market_prob": 0.119,
+    "independent_prob": null,
+    "blended_prob": null,
+    "final_prob": null,
+    "edge": null,
+    "confidence": 34.4,
+    "data_quality": 38.0,
+    "status": "FORECAST_SUPPRESSED",
+    "recommendation": "INSUFFICIENT_DATA",
+    "models_used": [
+      "geopolitics"
+    ],
+    "divergence": "REJECT"
+  },
+  {
+    "question": "Will Shakhtar Donetsk win the 2026-27 UEFA Champions League Championship?",
+    "market_id": "polymarket:2772194",
+    "category": "UEFA Champions League: 2027 Champion",
+    "market_prob": 0.0015,
+    "independent_prob": null,
+    "blended_prob": null,
+    "final_prob": null,
+    "edge": null,
+    "confidence": 32.9,
+    "data_quality": 55.0,
+    "status": "NO_FORECAST",
+    "recommendation": "INSUFFICIENT_DATA",
+    "models_used": [],
+    "divergence": null
+  },
+  {
+    "question": "Clarity Act (H.R.3633) signed into law in 2026?",
+    "market_id": "polymarket:1163699",
+    "category": "Clarity Act (H.R.3633) signed into law in 2026?",
+    "market_prob": 0.135,
+    "independent_prob": null,
+    "blended_prob": null,
+    "final_prob": null,
+    "edge": null,
+    "confidence": 36.4,
+    "data_quality": 50.9,
+    "status": "FORECAST_SUPPRESSED",
+    "recommendation": "INSUFFICIENT_DATA",
+    "models_used": [
+      "politics"
+    ],
+    "divergence": "REJECT"
+  },
+  {
+    "question": "Strait of Hormuz traffic returns to normal by September 30?",
+    "market_id": "polymarket:2774057",
+    "category": "Strait of Hormuz traffic returns to normal by September 30?",
+    "market_prob": 0.265,
+    "independent_prob": null,
+    "blended_prob": null,
+    "final_prob": null,
+    "edge": null,
+    "confidence": 32.0,
+    "data_quality": 50.4,
+    "status": "NO_FORECAST",
+    "recommendation": "INSUFFICIENT_DATA",
+    "models_used": [],
+    "divergence": null
+  }
+]
