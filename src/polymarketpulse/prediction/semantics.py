@@ -104,7 +104,60 @@ _DEADLINE_PATTERN = re.compile(
     r"\s+\d{1,2}(?:,\s*\d{4})?|\d{4}-\d{2}-\d{2})",
     re.IGNORECASE,
 )
-_THRESHOLD_PATTERN = re.compile(r"\b(above|below|over|under|at least|more than|less than)\s+([\d.,]+)\s*(%|percent)?", re.IGNORECASE)
+_THRESHOLD_PATTERN = re.compile(
+    r"\b(above|below|over|under|at least|more than|less than|reach|reaches|hit|hits|exceed|exceeds)\s+\$?([\d.,]+)\s*(%|percent|k|thousand|million|m|billion|b)?",
+    re.IGNORECASE,
+)
+
+# E4: quantitative price-threshold markets ("Will BTC be above $200,000 by
+# Dec 31?"). Kept intentionally small/literal like the rest of this module —
+# maps a handful of recognizable surface forms to a CoinGecko coin id, which
+# is the one thing quant.py actually needs to go fetch a real price. Not
+# meant to be an exhaustive asset list, just the assets this app can
+# realistically get real, free, keyless price data for today.
+_ASSET_ALIASES: dict[str, str] = {
+    "bitcoin": "bitcoin", "btc": "bitcoin",
+    "ethereum": "ethereum", "eth": "ethereum", "ether": "ethereum",
+    "solana": "solana", "sol": "solana",
+    "dogecoin": "dogecoin", "doge": "dogecoin",
+    "xrp": "ripple", "ripple": "ripple",
+    "cardano": "cardano", "ada": "cardano",
+}
+_ASSET_PATTERN = re.compile(
+    r"\b(" + "|".join(sorted(_ASSET_ALIASES, key=len, reverse=True)) + r")\b", re.IGNORECASE
+)
+_ABOVE_DIRECTION_WORDS = frozenset({"above", "over", "at least", "more than", "reach", "reaches", "hit", "hits", "exceed", "exceeds"})
+_BELOW_DIRECTION_WORDS = frozenset({"below", "under", "less than"})
+
+
+def detect_price_asset(text: str) -> str | None:
+    """Returns the CoinGecko coin id for the first recognized asset alias
+    found in `text`, or None. Public so quant.py can reuse the exact same
+    detection logic used during proposition parsing."""
+    match = _ASSET_PATTERN.search(text)
+    if not match:
+        return None
+    return _ASSET_ALIASES[match.group(1).lower()]
+
+
+def _detect_price_direction(text: str) -> tuple[str | None, str]:
+    """Returns (event_type, direction) for a numeric price/threshold claim:
+    'price_above' when the question asks whether some quantity will be
+    at/above a threshold, 'price_below' for at/below. Only fires when an
+    asset alias is also present, so a generic "above 50%" polling question
+    (no recognized asset) is correctly left alone for the existing
+    keyword-based classifiers rather than being misread as a price bet."""
+    if detect_price_asset(text) is None:
+        return None, "unknown"
+    threshold_match = _THRESHOLD_PATTERN.search(text)
+    if not threshold_match:
+        return None, "unknown"
+    direction_word = threshold_match.group(1).lower()
+    if direction_word in _ABOVE_DIRECTION_WORDS:
+        return "price_above", "yes_if_occurs"
+    if direction_word in _BELOW_DIRECTION_WORDS:
+        return "price_below", "yes_if_occurs"
+    return None, "unknown"
 
 
 def _significant_terms(text: str, max_terms: int = 16) -> tuple[str, ...]:
@@ -131,6 +184,9 @@ def _detect_event_type(text: str) -> tuple[str | None, str]:
         return "conflict_escalation", "yes_if_occurs"
     if any(t in lowered for t in _DEESCALATION_TERMS):
         return "conflict_deescalation", "yes_if_occurs"
+    price_event_type, price_direction = _detect_price_direction(text)
+    if price_event_type is not None:
+        return price_event_type, price_direction
     return None, "unknown"
 
 
@@ -162,6 +218,11 @@ class MarketProposition:
     resolution_authority: str | None
     ambiguity_flags: tuple[str, ...] = field(default_factory=tuple)
     proposition_status: Literal["CLEAR", "AMBIGUOUS"] = "AMBIGUOUS"
+    # E4: CoinGecko coin id when event_type is price_above/price_below and a
+    # recognized asset alias was found in the question text (see
+    # detect_price_asset). None for every other market — this field is
+    # additive and never populated for non-price propositions.
+    asset: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -170,7 +231,7 @@ class MarketProposition:
             "unit": self.unit, "location": self.location, "start_time": self.start_time,
             "deadline": self.deadline, "yes_condition": self.yes_condition, "no_condition": self.no_condition,
             "resolution_authority": self.resolution_authority, "ambiguity_flags": list(self.ambiguity_flags),
-            "proposition_status": self.proposition_status,
+            "proposition_status": self.proposition_status, "asset": self.asset,
         }
 
 

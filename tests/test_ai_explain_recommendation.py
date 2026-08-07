@@ -76,12 +76,26 @@ def ai_settings(tmp_path: Path, monkeypatch) -> Settings:
     )
 
 
+# A real, classifiable question (not a placeholder like "Will Team A win?",
+# which the Phase C classifier can't confidently place into a category —
+# see classification.py's SPORT_OTHER esports keywords). Phase E wires
+# history.py's Phase D similarity-weighted comparable-case scorer
+# (find_comparable_cases/compute_weighted_baseline) into engine.py's real
+# call path, which means these fixtures now need question text/metadata
+# that actually round-trips through classify_market()/parse_market_proposition()
+# the same way a real seeded market would — a bare "x" question or an
+# unparseable one previously scored 0.0 similarity against everything
+# (weight <= 0 is excluded from the weighted baseline), silently collapsing
+# comparable_sample_size to 0 and flipping NO_BET into INSUFFICIENT_DATA.
+_ESPORTS_QUESTION_TEMPLATE = "Will {name} win the League of Legends championship?"
+
+
 def _seed_market(storage: Storage, category="esports", yes_price=0.5) -> str:
     market = Market(
         provider="polymarket",
         provider_market_id="1",
         condition_id="",
-        question="Will Team A win?",
+        question=_ESPORTS_QUESTION_TEMPLATE.format(name="Team A"),
         slug="team-a",
         category=category,
         liquidity=100000,
@@ -97,32 +111,40 @@ def _seed_market(storage: Storage, category="esports", yes_price=0.5) -> str:
 
 
 def _seed_resolved_history(storage: Storage, n_yes: int, n_no: int, category="esports") -> None:
+    # Classify each seeded historical question through the real Phase A/C
+    # pipeline (not hand-picked labels) so the similarity scorer in
+    # history.py sees genuine classified_category/event_type/proposition
+    # data — exactly what a real backfilled market row looks like.
+    import json
+
+    from polymarketpulse.prediction.classification import classify_market
+    from polymarketpulse.prediction.semantics import parse_market_proposition
+
+    def _insert(pmid: str, question: str, outcome: str) -> None:
+        proposition = parse_market_proposition(question, None)
+        classification = classify_market(question, None, proposition)
+        storage.connection.execute(
+            "INSERT INTO markets (market_id, provider, provider_market_id, question, slug, url, "
+            "first_seen_at, last_seen_at, resolution_status, category, classified_category, "
+            "event_type, entities_json, proposition_json) "
+            "VALUES (?, 'polymarket', ?, ?, 'x', 'https://x', ?, ?, 'resolved', ?, ?, ?, ?, ?)",
+            (
+                pmid, pmid, question, datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat(),
+                category, classification.category, classification.event_type,
+                json.dumps([]),
+                json.dumps({"proposition_status": proposition.proposition_status, "location": proposition.location}),
+            ),
+        )
+        storage.connection.execute(
+            "INSERT INTO market_resolutions (provider, provider_market_id, resolved_at, winning_outcome, status, detected_at) "
+            "VALUES ('polymarket', ?, ?, ?, 'resolved', ?)",
+            (pmid, datetime.now(UTC).isoformat(), outcome, datetime.now(UTC).isoformat()),
+        )
+
     for i in range(n_yes):
-        pmid = f"h-yes-{i}"
-        storage.connection.execute(
-            "INSERT INTO markets (market_id, provider, provider_market_id, question, slug, url, "
-            "first_seen_at, last_seen_at, resolution_status, category) "
-            "VALUES (?, 'polymarket', ?, 'x', 'x', 'https://x', ?, ?, 'resolved', ?)",
-            (pmid, pmid, datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat(), category),
-        )
-        storage.connection.execute(
-            "INSERT INTO market_resolutions (provider, provider_market_id, resolved_at, winning_outcome, status, detected_at) "
-            "VALUES ('polymarket', ?, ?, 'Yes', 'resolved', ?)",
-            (pmid, datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat()),
-        )
+        _insert(f"h-yes-{i}", _ESPORTS_QUESTION_TEMPLATE.format(name=f"Team Yes{i}"), "Yes")
     for i in range(n_no):
-        pmid = f"h-no-{i}"
-        storage.connection.execute(
-            "INSERT INTO markets (market_id, provider, provider_market_id, question, slug, url, "
-            "first_seen_at, last_seen_at, resolution_status, category) "
-            "VALUES (?, 'polymarket', ?, 'x', 'x', 'https://x', ?, ?, 'resolved', ?)",
-            (pmid, pmid, datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat(), category),
-        )
-        storage.connection.execute(
-            "INSERT INTO market_resolutions (provider, provider_market_id, resolved_at, winning_outcome, status, detected_at) "
-            "VALUES ('polymarket', ?, ?, 'No', 'resolved', ?)",
-            (pmid, datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat()),
-        )
+        _insert(f"h-no-{i}", _ESPORTS_QUESTION_TEMPLATE.format(name=f"Team No{i}"), "No")
     storage.connection.commit()
 
 

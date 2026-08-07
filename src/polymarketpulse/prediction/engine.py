@@ -26,15 +26,21 @@ from .divergence import evaluate_divergence_safety
 from .ensemble import combine_submodels
 from .event_relations import collect_event_relation_signals, compute_event_relation_estimate
 from .evidence import compute_independent_evidence
+from .geopolitics import analyze_geopolitics
 from .history import compute_history_estimate
+from .macro import analyze_macro
 from .manipulation import compute_manipulation_risk
 from .market_flow import load_flow_metrics_from_db
 from .momentum import compute_momentum_estimate
 from .news import collect_news_evidence, compute_news_estimate
+from .politics import analyze_politics
+from .quant import analyze_quant
 from .reaction_lag import STATUS_REACTED, compute_market_reaction_lag
 from .reliability import compute_market_reliability
 from .resolution_edge import compute_resolution_edge
 from .scenarios import build_scenarios
+from .semantics import parse_market_proposition
+from .sports import analyze_sports
 from .types import (
     ContributionEntry,
     DataQualityBreakdown,
@@ -168,7 +174,9 @@ def market_blind_forecast(
     Returns a plain dict (not PredictionResult) since this is a standalone
     diagnostic/audit tool, not part of the production forecast path."""
     now = now or datetime.now(UTC)
-    history_estimate, comparable_sample_size, observed_yes_rate = compute_history_estimate(conn, category, provider)
+    history_estimate, comparable_sample_size, observed_yes_rate = compute_history_estimate(
+        conn, category, provider, question=question, resolution_text=resolution_text,
+    )
     independent_evidence = compute_independent_evidence(
         conn, provider=provider, provider_market_id=provider_market_id,
         question=question, resolution_text=resolution_text,
@@ -219,7 +227,7 @@ def compute_prediction(
 
     # --- History submodel --------------------------------------------------
     history_estimate, comparable_sample_size, observed_yes_rate = compute_history_estimate(
-        conn, category, provider
+        conn, category, provider, question=question, resolution_text=resolution_text,
     )
     reasoning.append(history_estimate.detail)
 
@@ -315,6 +323,190 @@ def compute_prediction(
     # version of the same computation, used for auditing this claim.
     independent_probability, _ = combine_submodels([history_estimate, independent_evidence_estimate])
 
+    # --- Specialized models (contribute ONLY to independent_probability) --
+    # These models never receive market_yes_price as an input — they are
+    # genuinely market-blind, computing probability from structured data
+    # or historical baselines only. They feed into independent_probability
+    # via combine_submodels but are NEVER used for momentum/news/Bayesian
+    # updates that would tether them to the market price.
+    specialized_estimates: list[SubmodelEstimate] = []
+    proposition = parse_market_proposition(question, resolution_text)
+    reasoning.append(f"Specialized model event_type: {proposition.event_type or 'none'}")
+
+    # Quant model (price-threshold markets)
+    if proposition.event_type in ("price_above", "price_below") and proposition.asset:
+        quant_result = analyze_quant(
+            text=question,
+            event_type=proposition.event_type,
+            proposition_status=proposition.proposition_status,
+            threshold=proposition.threshold,
+            asset=proposition.asset,
+            current_price=None,  # Placeholder — real price would come from price_analytics or external API
+            historical_volatility=None,  # Placeholder — real volatility from historical price data
+            deadline=proposition.deadline,
+        )
+        if quant_result.available and quant_result.probability is not None:
+            quant_estimate = SubmodelEstimate(
+                name="quant",
+                estimated_yes_probability=quant_result.probability,
+                weight=0.35,
+                available=True,
+                detail=f"Quant model: {quant_result.reason} (confidence: {quant_result.confidence}%)",
+            )
+            specialized_estimates.append(quant_estimate)
+            reasoning.append(quant_result.reason)
+        else:
+            reasoning.append(f"Quant model unavailable: {quant_result.reason}")
+            # Still add as unavailable for reporting
+            specialized_estimates.append(SubmodelEstimate(
+                name="quant",
+                estimated_yes_probability=None,
+                weight=0.0,
+                available=False,
+                detail=f"Quant model unavailable: {quant_result.reason}",
+            ))
+
+    # Politics model (office, resignation, legislation, etc.)
+    if proposition.event_type in (
+        "office_departure", "office_status", "resignation", "removal",
+        "impeachment", "election", "legislation", "appointment", "court_outcome",
+    ):
+        politics_result = analyze_politics(
+            text=question,
+            event_type=proposition.event_type,
+            proposition_status=proposition.proposition_status,
+            subject=proposition.subject,
+            location=proposition.location,
+            historical_baseline=None,
+        )
+        if politics_result.available and politics_result.probability is not None:
+            politics_estimate = SubmodelEstimate(
+                name="politics",
+                estimated_yes_probability=politics_result.probability,
+                weight=0.35,
+                available=True,
+                detail=f"Politics model: {politics_result.reason} (confidence: {politics_result.confidence}%)",
+            )
+            specialized_estimates.append(politics_estimate)
+            reasoning.append(politics_result.reason)
+        else:
+            reasoning.append(f"Politics model unavailable: {politics_result.reason}")
+            specialized_estimates.append(SubmodelEstimate(
+                name="politics",
+                estimated_yes_probability=None,
+                weight=0.0,
+                available=False,
+                detail=f"Politics model unavailable: {politics_result.reason}",
+            ))
+
+    # Geopolitics model (ceasefire, war_escalation, etc.)
+    if proposition.event_type in (
+        "ceasefire", "war_escalation", "military_action", "sanctions",
+        "territorial_control", "strategic_waterway", "diplomatic_agreement",
+    ):
+        geopolitics_result = analyze_geopolitics(
+            text=question,
+            event_type=proposition.event_type,
+            proposition_status=proposition.proposition_status,
+            historical_baseline=None,
+        )
+        if geopolitics_result.available and geopolitics_result.probability is not None:
+            geopolitics_estimate = SubmodelEstimate(
+                name="geopolitics",
+                estimated_yes_probability=geopolitics_result.probability,
+                weight=0.35,
+                available=True,
+                detail=f"Geopolitics model: {geopolitics_result.reason} (confidence: {geopolitics_result.confidence}%)",
+            )
+            specialized_estimates.append(geopolitics_estimate)
+            reasoning.append(geopolitics_result.reason)
+        else:
+            reasoning.append(f"Geopolitics model unavailable: {geopolitics_result.reason}")
+            specialized_estimates.append(SubmodelEstimate(
+                name="geopolitics",
+                estimated_yes_probability=None,
+                weight=0.0,
+                available=False,
+                detail=f"Geopolitics model unavailable: {geopolitics_result.reason}",
+            ))
+
+    # Macro model (central bank decisions, rate cuts/hikes/holds)
+    if proposition.event_type in (
+        "central_bank_decision", "rate_cut", "rate_hike", "rate_hold",
+        "monetary_policy", "policy_change",
+    ):
+        macro_result = analyze_macro(
+            text=question,
+            event_type=proposition.event_type,
+            proposition_status=proposition.proposition_status,
+            historical_baseline=None,
+        )
+        if macro_result.available and macro_result.probability is not None:
+            macro_estimate = SubmodelEstimate(
+                name="macro",
+                estimated_yes_probability=macro_result.probability,
+                weight=0.35,
+                available=True,
+                detail=f"Macro model: {macro_result.reason} (confidence: {macro_result.confidence}%)",
+            )
+            specialized_estimates.append(macro_estimate)
+            reasoning.append(macro_result.reason)
+        else:
+            reasoning.append(f"Macro model unavailable: {macro_result.reason}")
+            specialized_estimates.append(SubmodelEstimate(
+                name="macro",
+                estimated_yes_probability=None,
+                weight=0.0,
+                available=False,
+                detail=f"Macro model unavailable: {macro_result.reason}",
+            ))
+
+    # Sports model (POLYMARKET SPORTS only)
+    if proposition.event_type in (
+        "sport_match", "sport_tournament", "sport_qualification",
+        "sport_winner", "sport_final",
+    ):
+        sports_result = analyze_sports(
+            text=question,
+            event_type=proposition.event_type,
+            proposition_status=proposition.proposition_status,
+            sport=None,
+            team1=None,
+            team2=None,
+        )
+        if sports_result.available and sports_result.probability is not None:
+            sports_estimate = SubmodelEstimate(
+                name="sports",
+                estimated_yes_probability=sports_result.probability,
+                weight=0.35,
+                available=True,
+                detail=f"Sports model: {sports_result.reason} (confidence: {sports_result.confidence}%)",
+            )
+            specialized_estimates.append(sports_estimate)
+            reasoning.append(sports_result.reason)
+        else:
+            reasoning.append(f"Sports model unavailable: {sports_result.reason}")
+            specialized_estimates.append(SubmodelEstimate(
+                name="sports",
+                estimated_yes_probability=None,
+                weight=0.0,
+                available=False,
+                detail=f"Sports model unavailable: {sports_result.reason}",
+            ))
+
+    # Combine specialized estimates into independent_probability
+    if specialized_estimates:
+        specialized_available = [e for e in specialized_estimates if e.available]
+        if specialized_available:
+            specialized_independent_prob, _ = combine_submodels(specialized_available)
+            # Update independent_probability to include specialized models
+            # (combine with history + independent evidence)
+            combined_independent, _ = combine_submodels(
+                [history_estimate, independent_evidence_estimate] + specialized_available
+            )
+            independent_probability = combined_independent
+            reasoning.append(f"Specialized models contributed to independent probability: {specialized_independent_prob:.1%}")
+
     # --- Ensemble: history + momentum + independent evidence -> prior ----
     # No market-price fallback here: if none of the independent submodels
     # produced an estimate, `prior_estimate` stays None, which flows through
@@ -384,7 +576,7 @@ def compute_prediction(
     # --- Confidence (new: ensemble-aware, separate from probability) -----
     all_submodels = [
         history_estimate, momentum_estimate, news_estimate, independent_evidence_estimate, event_relation_estimate,
-    ]
+    ] + specialized_estimates
     market_stability = 1.0
     if price_analytics is not None and price_analytics.volatility is not None:
         market_stability = max(0.0, 1 - min(1.0, price_analytics.volatility * 10))
