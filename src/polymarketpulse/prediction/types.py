@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from .cross_market import CrossMarketResult
+    from .divergence_audit import DivergenceAuditResult
     from .event_relations import RelationSignal
     from .evidence import IndependentEvidenceResult
     from .manipulation import ManipulationRiskResult
@@ -246,6 +247,13 @@ class PredictionResult:
     # None otherwise. See prediction/divergence.py.
     forecast_suppression_reason: str | None = None
 
+    # --- Phase M: itemized divergence red-team audit (additive) -----------
+    # Populated whenever the divergence gap exceeded the threshold (whether
+    # the resulting verdict was PASS, WARN, or REJECT/suppressed) — None
+    # only when the gap never triggered the audit at all. See
+    # prediction/divergence_audit.py.
+    divergence_audit: DivergenceAuditResult | None = None
+
     # --- K1b: honest calibration status (additive) -----------------------
     # Always "UNCALIBRATED" today — see DEFAULT_CONFIDENCE_CALIBRATION_STATUS
     # above for why. Becomes a real per-market computed value once Phase N2
@@ -300,4 +308,5 @@ class PredictionResult:
             "contribution_breakdown": [c.as_dict() for c in self.contribution_breakdown],
             "forecast_suppression_reason": self.forecast_suppression_reason,
             "confidence_calibration_status": self.confidence_calibration_status,
+            "divergence_audit": self.divergence_audit.as_dict() if self.divergence_audit else None,
         }

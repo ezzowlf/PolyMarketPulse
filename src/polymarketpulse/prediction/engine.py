@@ -24,7 +24,8 @@ from .bayesian import bayesian_update
 from .confidence import compute_confidence, compute_freshness_score
 from .cross_market import compute_cross_market_relations
 from .deadline import classify_deadline_phase, deadline_weights_for
-from .divergence import evaluate_divergence_safety
+from .divergence import DIVERGENCE_THRESHOLD_PP
+from .divergence_audit import DivergenceAuditContext, audit_divergence
 from .ensemble import combine_submodels, quality_scaled_weight
 from .event_relations import collect_event_relation_signals, compute_event_relation_estimate
 from .evidence import compute_independent_evidence
@@ -563,35 +564,6 @@ def compute_prediction(
 
     forecast_status = _forecast_status(estimated_yes, independent_probability, all_submodels, confidence)
 
-    # --- Divergence safety (Phase B4) -------------------------------------
-    # A large gap between the market-blind independent estimate and the
-    # market's own price is only trustworthy if it's backed by real
-    # evidence. "Strong evidence" here means either: a reasonably sized
-    # historical comparable sample (10+, i.e. at least the LIMITED
-    # confidence tier — see history.py), or independent evidence with at
-    # least 2 independently-confirming sources AND at least one
-    # DIRECT_YES/DIRECT_NO-tier (primary-source-strength) item. Anything
-    # weaker than that, combined with a >15pp gap, gets suppressed rather
-    # than reported as a fabricated-looking number.
-    evidence_is_strong = bool(
-        (history_estimate.available and comparable_sample_size >= 10)
-        or (
-            independent_evidence.available
-            and independent_evidence.confirmation_count >= 2
-            and any(
-                f.relation_label in ("DIRECT_YES", "DIRECT_NO")
-                for f in (*independent_evidence.evidence_for_yes, *independent_evidence.evidence_for_no)
-            )
-        )
-    )
-    divergence_safety = evaluate_divergence_safety(independent_probability, market_yes, evidence_is_strong)
-    forecast_suppression_reason: str | None = None
-    if divergence_safety.suppressed:
-        reasoning.append(divergence_safety.reason)
-        forecast_suppression_reason = divergence_safety.reason
-        independent_probability = None
-        forecast_status = "FORECAST_SUPPRESSED"
-
     # K3: prior provenance per submodel, surfaced in contribution_breakdown
     # so a future frontend can visibly distinguish "computed from real
     # observed outcomes" from "a reasoned heuristic" from "a structural
@@ -619,6 +591,46 @@ def compute_prediction(
         "independent_evidence": "FALLBACK",
         "event_relations": "UNKNOWN",
     }
+
+    # --- Divergence red-team audit (Phase M) -------------------------------
+    # Replaces Phase B4's binary evidence_is_strong bool with a real,
+    # itemized audit (see divergence_audit.py for the per-check breakdown
+    # and verdict logic). REJECT behaves exactly like the old suppression
+    # path (independent_probability -> None, status -> FORECAST_SUPPRESSED);
+    # WARN leaves the forecast standing but attaches the audit for
+    # visibility; PASS attaches the audit with no suppression. The audit is
+    # only even invoked (by audit_divergence itself) when the gap exceeds
+    # DIVERGENCE_THRESHOLD_PP — a small gap never triggers it, matching the
+    # old behavior exactly.
+    audit_context = DivergenceAuditContext(
+        independent_probability=independent_probability,
+        market_probability=market_yes,
+        proposition=proposition,
+        independent_evidence=independent_evidence,
+        comparable_sample_size=comparable_sample_size,
+        history_prior_provenance=(
+            _PRIOR_PROVENANCE_BY_SOURCE.get("history") if history_estimate.available else "UNKNOWN"
+        ),
+        resolution_rules_present=resolution_rules_present,
+        submodel_estimates=tuple(all_submodels),
+    )
+    divergence_audit = audit_divergence(audit_context)
+    forecast_suppression_reason: str | None = None
+    if divergence_audit.verdict == "REJECT":
+        forecast_suppression_reason = (
+            f"Forecast suppressed: independent estimate diverges from the market price by "
+            f"{divergence_audit.gap:.1%}, exceeding the {DIVERGENCE_THRESHOLD_PP:.0%} safety threshold, and "
+            f"the Phase M red-team audit returned REJECT — {divergence_audit.summary} "
+            f"Failing checks: {[c.name for c in divergence_audit.checks if c.verdict == 'REJECT']}."
+        )
+        reasoning.append(forecast_suppression_reason)
+        independent_probability = None
+        forecast_status = "FORECAST_SUPPRESSED"
+    elif divergence_audit.verdict == "WARN":
+        reasoning.append(
+            f"Divergence audit WARN (not suppressed): {divergence_audit.summary} "
+            f"Flagged checks: {[c.name for c in divergence_audit.checks if c.verdict == 'WARN']}."
+        )
 
     total_available_weight = sum(s.weight for s in all_submodels if s.available)
     contribution_breakdown = tuple(
@@ -696,4 +708,5 @@ def compute_prediction(
         forecast_status=forecast_status,
         contribution_breakdown=contribution_breakdown,
         forecast_suppression_reason=forecast_suppression_reason,
+        divergence_audit=divergence_audit,
     )
