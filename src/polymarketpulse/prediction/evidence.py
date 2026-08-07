@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from .bayesian import bayesian_update
 from .news import _trust_for_source, score_sentiment
 from .resolution_rules import parse_resolution_conditions
+from .semantics import classify_evidence_relation, extract_event, parse_market_proposition
 
 # Evidence loses relevance faster than the general news submodel's 48h
 # half-life — "early signal" freshness is the whole point of this module.
@@ -55,17 +56,22 @@ class EvidenceFactor:
     url: str
     published_at: str | None
     reliability: float  # 0..1
-    tone: float  # -1..+1, normalized (from GDELT tone/100 or lexicon sentiment)
+    tone: float  # -1..+1, normalized (from GDELT tone/100 or lexicon sentiment) — AUXILIARY signal only,
+    # see semantics.classify_evidence_relation: tone alone never determines matched_condition above WEAK tier.
     matched_condition: str | None  # "yes" | "no" | None
     recency_weight: float  # 0..1
     link_confidence: float  # 0..1, topical match confidence from news/linker.py
+    relation_label: str = "AMBIGUOUS"  # semantics.EvidenceRelationLabel — the real entailment classification
+    entailment: str = "NEUTRAL"  # "ENTAILS" | "CONTRADICTS" | "NEUTRAL"
+    relation_weight: float = 0.0  # semantics.EvidenceRelation.quantitative_weight, 0..1
 
     def as_dict(self) -> dict:
         return {
             "title": self.title, "source": self.source, "source_domain": self.source_domain,
             "url": self.url, "published_at": self.published_at, "reliability": self.reliability,
             "tone": self.tone, "matched_condition": self.matched_condition,
-            "recency_weight": self.recency_weight,
+            "recency_weight": self.recency_weight, "relation_label": self.relation_label,
+            "entailment": self.entailment, "relation_weight": self.relation_weight,
         }
 
 
@@ -171,8 +177,15 @@ def compute_independent_evidence(
             f"({len(rows)} gefunden, mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig)."
         )
 
+    # Legacy resolution-condition term lists — still consulted as a
+    # defense-in-depth secondary check (see SENTIMENT_FALLBACK_MIN_RELEVANCE
+    # below), but the primary classification now comes from
+    # semantics.classify_evidence_relation, which reasons about what the
+    # event actually *is* (entailment) rather than the article's tone.
     yes_terms, no_terms, subject_terms = parse_resolution_conditions(question, resolution_text)
     del subject_terms  # reserved for future relevance filtering; not yet used to exclude evidence
+
+    proposition = parse_market_proposition(question, resolution_text)
 
     factors: list[EvidenceFactor] = []
     for event_id, title, source, published_at, link_confidence, source_url in rows:
@@ -184,22 +197,46 @@ def compute_independent_evidence(
         recency = _recency_weight_local(published_at, now)
 
         title_lower = title.lower()
-        matched_condition = None
-        if yes_terms and any(t in title_lower for t in yes_terms):
-            matched_condition = "yes"  # direct: matches the market's own "resolves YES if..." wording
-        elif no_terms and any(t in title_lower for t in no_terms):
+        event = extract_event(title)
+        relation = classify_evidence_relation(proposition, event, sentiment, link_confidence)
+
+        # Sentiment is never allowed to promote a relation past the WEAK
+        # tier here — classify_evidence_relation already enforces this
+        # internally, but SENTIMENT_FALLBACK_MIN_RELEVANCE is kept as a
+        # second, independent gate on the WEAK tier specifically (defense
+        # in depth: even a semantics bug can't resurrect the original
+        # "tone about the subject == evidence" failure mode).
+        relation_label = relation.label
+        relation_weight = relation.quantitative_weight
+        if relation_label in ("WEAK_YES", "WEAK_NO") and link_confidence < SENTIMENT_FALLBACK_MIN_RELEVANCE:
+            relation_label = "AMBIGUOUS"
+            relation_weight = 0.0
+
+        matched_condition: str | None = None
+        if relation_label in ("DIRECT_YES", "SUPPORTS_YES", "WEAK_YES"):
+            matched_condition = "yes"
+        elif relation_label in ("DIRECT_NO", "SUPPORTS_NO", "WEAK_NO"):
             matched_condition = "no"
-        elif link_confidence >= SENTIMENT_FALLBACK_MIN_RELEVANCE and sentiment > 0.2:
-            matched_condition = "yes"  # weak: tone-only, gated behind a real relevance bar
-        elif link_confidence >= SENTIMENT_FALLBACK_MIN_RELEVANCE and sentiment < -0.2:
-            matched_condition = "no"
+
+        # Explicit "resolves YES/NO if ..." term matches from the market's
+        # own resolution text are on-topic by construction (not incidental
+        # keyword overlap) — if present and the semantics layer found
+        # nothing else, they still count as full-weight direct evidence.
+        if matched_condition is None:
+            if yes_terms and any(t in title_lower for t in yes_terms):
+                matched_condition = "yes"
+                relation_label, relation_weight = "DIRECT_YES", 1.0
+            elif no_terms and any(t in title_lower for t in no_terms):
+                matched_condition = "no"
+                relation_label, relation_weight = "DIRECT_NO", 1.0
 
         factors.append(
             EvidenceFactor(
                 news_event_id=event_id, title=title, source=source, source_domain=domain,
                 url=source_url or "", published_at=published_at, reliability=reliability,
                 tone=sentiment, matched_condition=matched_condition, recency_weight=recency,
-                link_confidence=link_confidence,
+                link_confidence=link_confidence, relation_label=relation_label,
+                entailment=relation.entailment, relation_weight=relation_weight,
             )
         )
 
@@ -226,12 +263,19 @@ def compute_independent_evidence(
             f"von {len(rows)} verknüpften Quellen insgesamt."
         )
 
-    weight_sum = sum(f.reliability * f.recency_weight * f.link_confidence for f in scored)
+    # relation_weight (0..1, from semantics.classify_evidence_relation) is
+    # the entailment-strength multiplier: DIRECT_*/SUPPORTS_* evidence
+    # weighs close to its full reliability*recency*link_confidence product,
+    # WEAK_* evidence (tone-only, gated) contributes only a fraction, and
+    # CONTEXT/IRRELEVANT/AMBIGUOUS evidence (relation_weight == 0) never
+    # reaches this point at all (filtered out of `scored` above).
+    weight_sum = sum(f.reliability * f.recency_weight * f.link_confidence * f.relation_weight for f in scored)
     if weight_sum <= 0:
         return _unavailable("keine unabhängige Schätzung möglich — Quellvertrauen/Aktualität zu gering.")
 
     direction_sum = sum(
-        (1.0 if f.matched_condition == "yes" else -1.0) * f.reliability * f.recency_weight * f.link_confidence
+        (1.0 if f.matched_condition == "yes" else -1.0)
+        * f.reliability * f.recency_weight * f.link_confidence * f.relation_weight
         for f in scored
     )
     weighted_direction = round(direction_sum / weight_sum, 4)  # -1..+1
