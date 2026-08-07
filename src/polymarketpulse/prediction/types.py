@@ -40,12 +40,22 @@ class ContributionEntry:
     estimated_yes_probability: float | None
     weight_share: float | None  # this submodel's share of the ensemble's total weight, 0..1
     detail: str
+    # Phase F: distinguishes "this specialized model was never a candidate
+    # for this market's event_type/category" (eligible=False) from "it was
+    # eligible but had no usable data for this specific market"
+    # (eligible=True, available=False). None for the always-eligible
+    # generic submodels (history, momentum, news, independent_evidence,
+    # event_relations), which every market is a candidate for by
+    # construction — eligibility is a meaningful distinction only for the
+    # specialized (Phase E) router-selected models.
+    eligible: bool | None = None
 
     def as_dict(self) -> dict:
         return {
             "source": self.source, "available": self.available,
             "estimated_yes_probability": self.estimated_yes_probability,
             "weight_share": self.weight_share, "detail": self.detail,
+            "eligible": self.eligible,
         }
 
 

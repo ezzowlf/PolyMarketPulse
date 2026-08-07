@@ -65,6 +65,11 @@ _EVENT_TYPE_TO_MODEL: dict[str, str] = {
     "sport_final": "sports",
 }
 
+# All specialized (Phase E) model names the router can select between —
+# exported so callers (engine.py) can enumerate "not eligible for this
+# market" entries without hardcoding the list a second time.
+ALL_SPECIALIZED_MODEL_NAMES: tuple[str, ...] = ("quant", "macro", "politics", "geopolitics", "sports")
+
 # Reverse mapping: model name → event types it handles
 _MODEL_TO_EVENT_TYPES: dict[str, frozenset[str]] = {
     "quant": frozenset({"price_above", "price_below"}),
