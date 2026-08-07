@@ -796,6 +796,36 @@ def _migration_014_comparable_baseline_history(conn: sqlite3.Connection) -> None
     _add_column(conn, "markets", "deadline", "TEXT")
 
 
+def _migration_015_extracted_event_persistence(conn: sqlite3.Connection) -> None:
+    """Phase H: additive columns on the migration-12 `events` table so the
+    ExtractedEvent structure that `prediction/semantics.extract_event()`
+    already computes during evidence scoring (prediction/evidence.py) can be
+    persisted verbatim instead of staying transient. Deliberately reuses
+    the existing Event/Entity/Relation event-graph foundation rather than
+    inventing a parallel table — `events.event_type`/`source`/`source_url`/
+    `occurred_at` already existed; this adds only the fields ExtractedEvent
+    has that `events` did not: actors (as JSON, entity resolution is future
+    work), action-family, target/matched phrase, status, certainty, and a
+    link back to which market's evidence pipeline run produced it. All
+    nullable, all backfilled lazily — safe on both a fresh DB and an
+    existing populated one. No causal/graph-traversal logic added here,
+    just correct storage of already-computed data (provenance = source +
+    certainty + created_at, all already present/added)."""
+    _add_column(conn, "events", "actors_json", "TEXT")
+    _add_column(conn, "events", "action", "TEXT")
+    _add_column(conn, "events", "target", "TEXT")
+    _add_column(conn, "events", "expected_time", "TEXT")
+    _add_column(conn, "events", "status", "TEXT")
+    _add_column(conn, "events", "source_type", "TEXT")
+    _add_column(conn, "events", "certainty", "TEXT")
+    _add_column(conn, "events", "provider", "TEXT")
+    _add_column(conn, "events", "provider_market_id", "TEXT")
+    _add_column(conn, "events", "news_event_id", "INTEGER")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_events_provider_market ON events(provider, provider_market_id)"
+    )
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -811,6 +841,7 @@ MIGRATIONS: list[Migration] = [
     (12, "event_relationship_graph", _migration_012_event_relationship_graph),
     (13, "market_classification", _migration_013_market_classification),
     (14, "comparable_baseline_history", _migration_014_comparable_baseline_history),
+    (15, "extracted_event_persistence", _migration_015_extracted_event_persistence),
 ]
 
 

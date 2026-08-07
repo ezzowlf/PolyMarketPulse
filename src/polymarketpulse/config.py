@@ -47,6 +47,7 @@ class Settings:
     openai_daily_budget_usd: float
     openai_reasoning_effort: str | None
     openai_escalation_enabled: bool
+    llm_semantics_enabled: bool
 
     @classmethod
     def load(cls) -> Settings:
@@ -90,6 +91,13 @@ class Settings:
             openai_daily_budget_usd=float(_env("OPENAI_DAILY_BUDGET_USD") or "1.00"),
             openai_reasoning_effort=_env("OPENAI_REASONING_EFFORT", default="low") or None,
             openai_escalation_enabled=_bool(_env("OPENAI_ESCALATION_ENABLED", default="false")),
+            # Phase G: optional LLM-assist for semantics.py's proposition
+            # parsing / evidence-relation classification, only ever invoked
+            # when the rule-based result is already AMBIGUOUS. Off by
+            # default, following the exact same gating pattern as
+            # news_enabled/ai_enabled above — must be explicitly flipped on,
+            # never live-called during automated tests or by default.
+            llm_semantics_enabled=_bool(_env("POLYMARKETPULSE_LLM_SEMANTICS_ENABLED", default="false")),
         )
 
     @property

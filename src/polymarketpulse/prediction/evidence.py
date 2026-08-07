@@ -148,6 +148,49 @@ def _domain_reliability(source: str, source_domain: str) -> float:
     return 0.5
 
 
+def _persist_extracted_event(
+    conn: sqlite3.Connection,
+    provider: str,
+    provider_market_id: str,
+    title: str,
+    event: object,
+    news_event_id: int,
+    published_at: str | None,
+    news_source: str | None = None,
+) -> None:
+    """Phase H: additive-only persistence of the already-computed
+    ExtractedEvent into the migration-12/15 `events` table, so it's usable
+    by a future event graph instead of staying transient. Deliberately a
+    pure side-effect with no return value consumed anywhere in the scoring
+    math below — this must never change independent-evidence output.
+    Wrapped so any failure (e.g. an older DB missing migration 15's
+    columns) degrades to a no-op rather than breaking evidence scoring."""
+    import json as _json
+
+    try:
+        conn.execute(
+            """
+            INSERT INTO events (
+                title, event_type, occurred_at, geographic_scope, source, source_url, created_at,
+                actors_json, action, target, expected_time, status, source_type, certainty,
+                provider, provider_market_id, news_event_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                title, event.event_type, event.event_time or published_at, event.location,
+                event.source or news_source, None, datetime.now(UTC).isoformat(),
+                _json.dumps(list(event.actors)), event.action, event.target, event.expected_time,
+                event.status, event.source_type, event.certainty,
+                provider, provider_market_id, news_event_id,
+            ),
+        )
+        conn.commit()
+    except sqlite3.Error:
+        # Additive persistence only — never let a storage-layer issue
+        # (e.g. a not-yet-migrated DB) break evidence scoring itself.
+        pass
+
+
 def _first_reported_at(rows: list[tuple]) -> datetime | None:
     timestamps = []
     for row in rows:
@@ -218,6 +261,10 @@ def compute_independent_evidence(
         title_lower = title.lower()
         event = extract_event(title)
         relation = classify_evidence_relation(proposition, event, sentiment, link_confidence)
+        # Phase H: persist the structured event alongside the market it was
+        # scored for (provenance: source, certainty, timestamp) — purely
+        # additive, does not affect any of the scoring below.
+        _persist_extracted_event(conn, provider, provider_market_id, title, event, event_id, published_at, source)
 
         # Sentiment is never allowed to promote a relation past the WEAK
         # tier here — classify_evidence_relation already enforces this

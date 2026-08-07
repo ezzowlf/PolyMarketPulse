@@ -5,6 +5,7 @@ import re
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .migrations import current_schema_version, run_migrations
 from .models import Market, ResolutionStatus, Signal
@@ -12,6 +13,9 @@ from .prediction.classification import classify_market
 from .prediction.semantics import parse_market_proposition
 from .providers.base import ProviderCapabilities
 from .signals import PreviousSnapshot
+
+if TYPE_CHECKING:
+    from .prediction.semantics import ExtractedEvent
 
 STATUS_TABLES = (
     "markets",
@@ -1294,6 +1298,44 @@ class Storage:
                 int(contradiction_present) if contradiction_present is not None else None,
                 orderbook_imbalance, net_flow, wallet_concentration_score, reaction_lag_hours,
                 submodel_estimates_json, warnings_json, engine_version, config_hash,
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def save_extracted_event(
+        self,
+        provider: str,
+        provider_market_id: str,
+        title: str,
+        event: ExtractedEvent,
+        source: str | None = None,
+        news_event_id: int | None = None,
+        occurred_at: str | None = None,
+    ) -> int:
+        """Phase H: additive persistence of the structured event that
+        `prediction.semantics.extract_event()` already computes during
+        evidence scoring (see prediction/evidence.py's
+        compute_independent_evidence). Reuses the migration-12 `events`
+        table (extended in migration 15) rather than a parallel schema —
+        pure storage, no causal/graph-traversal inference. Provenance
+        (source, certainty, created_at, and the linking news_event_id /
+        market) is recorded alongside every row."""
+        now = datetime.now(UTC).isoformat()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO events (
+                title, event_type, occurred_at, geographic_scope, source, source_url, created_at,
+                actors_json, action, target, expected_time, status, source_type, certainty,
+                provider, provider_market_id, news_event_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                title, event.event_type, occurred_at or event.event_time, event.location,
+                source or event.source, None, now,
+                json.dumps(list(event.actors)), event.action, event.target, event.expected_time,
+                event.status, event.source_type, event.certainty,
+                provider, provider_market_id, news_event_id,
             ),
         )
         self.connection.commit()
