@@ -414,8 +414,15 @@ def compute_history_estimate(
     provider: str,
     question: str | None = None,
     resolution_text: str | None = None,
-) -> tuple[SubmodelEstimate, int, float | None]:
-    """Returns (estimate, comparable_sample_size, observed_yes_rate).
+) -> tuple[SubmodelEstimate, int, float | None, WeightedBaselineResult | None]:
+    """Returns (estimate, comparable_sample_size, observed_yes_rate, uncertainty).
+
+    `uncertainty` is the full WeightedBaselineResult (Kish ESS, Wilson
+    lower/upper/width) when the similarity-weighted path ran (`question`
+    supplied), so K1/J2 composites can reuse the *real* K2 numbers instead
+    of recomputing them — None on the legacy category-equality path, which
+    has no ESS/Wilson-interval concept at all (honestly reported, not
+    faked).
 
     When `question` is supplied, this uses the Phase D similarity-weighted
     comparable-case scorer (find_comparable_cases + compute_weighted_baseline)
@@ -430,7 +437,8 @@ def compute_history_estimate(
     their old behavior."""
     if question:
         return _compute_history_estimate_weighted(conn, category, provider, question, resolution_text)
-    return _compute_history_estimate_legacy(conn, category, provider)
+    est, n, rate = _compute_history_estimate_legacy(conn, category, provider)
+    return est, n, rate, None
 
 
 def _compute_history_estimate_weighted(
@@ -439,7 +447,7 @@ def _compute_history_estimate_weighted(
     provider: str,
     question: str,
     resolution_text: str | None,
-) -> tuple[SubmodelEstimate, int, float | None]:
+) -> tuple[SubmodelEstimate, int, float | None, WeightedBaselineResult | None]:
     target_proposition = parse_market_proposition(question, resolution_text)
     target_classification = classify_market(question, resolution_text, target_proposition)
     candidates = _load_comparable_candidates(conn, provider=provider)
@@ -455,7 +463,7 @@ def _compute_history_estimate_weighted(
                 name="history", estimated_yes_probability=observed_yes_rate, weight=0.0, available=False,
                 detail=result.detail,
             ),
-            sample_size, observed_yes_rate,
+            sample_size, observed_yes_rate, result,
         )
 
     tier_cap = _TIER_MAX_WEIGHT[result.tier]
@@ -465,7 +473,7 @@ def _compute_history_estimate_weighted(
             name="history", estimated_yes_probability=observed_yes_rate, weight=weight, available=True,
             detail=result.detail,
         ),
-        sample_size, observed_yes_rate,
+        sample_size, observed_yes_rate, result,
     )
 
 

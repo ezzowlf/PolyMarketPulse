@@ -186,7 +186,8 @@ def test_valid_nano_response_is_used_and_not_mini(storage: Storage, ai_settings:
         from polymarketpulse.prediction import compute_prediction
 
         prediction = compute_prediction(
-            storage.connection, market_id, "polymarket", "1", "esports", 0.5, 100000, None, 0, None, False
+            storage.connection, market_id, "polymarket", "1", "esports", 0.5, 100000, None, 0, None, False,
+            question=_ESPORTS_QUESTION_TEMPLATE.format(name="Team A"),
         )
         explanation = _valid_explanation_for(prediction)
         return explanation.model_dump(), 500, 100
@@ -207,7 +208,8 @@ def test_second_call_hits_cache_no_network(storage: Storage, ai_settings: Settin
         from polymarketpulse.prediction import compute_prediction
 
         prediction = compute_prediction(
-            storage.connection, market_id, "polymarket", "1", "esports", 0.5, 100000, None, 0, None, False
+            storage.connection, market_id, "polymarket", "1", "esports", 0.5, 100000, None, 0, None, False,
+            question=_ESPORTS_QUESTION_TEMPLATE.format(name="Team A"),
         )
         return _valid_explanation_for(prediction).model_dump(), 500, 100
 
@@ -227,7 +229,8 @@ def test_invalid_json_twice_falls_back_to_mini(storage: Storage, ai_settings: Se
 
         market_id_local = "polymarket:1"
         prediction = compute_prediction(
-            storage.connection, market_id_local, "polymarket", "1", "esports", 0.5, 100000, None, 0, None, False
+            storage.connection, market_id_local, "polymarket", "1", "esports", 0.5, 100000, None, 0, None, False,
+            question=_ESPORTS_QUESTION_TEMPLATE.format(name="Team A"),
         )
         return _valid_explanation_for(prediction).model_dump(), 400, 90
 
@@ -274,7 +277,8 @@ def test_mismatched_recommendation_is_rejected(storage: Storage, ai_settings: Se
         from polymarketpulse.prediction import compute_prediction
 
         prediction = compute_prediction(
-            storage.connection, "polymarket:1", "polymarket", "1", "esports", 0.5, 100000, None, 0, None, False
+            storage.connection, "polymarket:1", "polymarket", "1", "esports", 0.5, 100000, None, 0, None, False,
+            question=_ESPORTS_QUESTION_TEMPLATE.format(name="Team A"),
         )
         bad = _valid_explanation_for(prediction).model_dump()
         bad["recommendation"] = "STRONG_YES" if prediction.recommendation != "STRONG_YES" else "STRONG_NO"
@@ -294,7 +298,8 @@ def test_invented_source_id_is_rejected(storage: Storage, ai_settings: Settings)
         from polymarketpulse.prediction import compute_prediction
 
         prediction = compute_prediction(
-            storage.connection, "polymarket:1", "polymarket", "1", "esports", 0.5, 100000, None, 0, None, False
+            storage.connection, "polymarket:1", "polymarket", "1", "esports", 0.5, 100000, None, 0, None, False,
+            question=_ESPORTS_QUESTION_TEMPLATE.format(name="Team A"),
         )
         explanation = _valid_explanation_for(prediction)
         explanation = explanation.model_copy(
@@ -344,7 +349,8 @@ def test_actual_token_usage_is_persisted(storage: Storage, ai_settings: Settings
         from polymarketpulse.prediction import compute_prediction
 
         prediction = compute_prediction(
-            storage.connection, "polymarket:1", "polymarket", "1", "esports", 0.5, 100000, None, 0, None, False
+            storage.connection, "polymarket:1", "polymarket", "1", "esports", 0.5, 100000, None, 0, None, False,
+            question=_ESPORTS_QUESTION_TEMPLATE.format(name="Team A"),
         )
         return _valid_explanation_for(prediction).model_dump(), 3210, 777
 
@@ -373,8 +379,17 @@ def test_data_changing_invalidates_cache(storage: Storage, ai_settings: Settings
             "SELECT yes_price FROM market_snapshots WHERE market_id = ? ORDER BY captured_at DESC LIMIT 1",
             (market_id,),
         ).fetchone()[0]
+        # Read the *current* question from the DB too (not a hardcoded
+        # constant) — the confidence composite (K1) now genuinely depends on
+        # the parsed proposition, so the fake response must match whatever
+        # question was actually live in the DB for this call, exactly like
+        # it already does for current_price above.
+        current_question = storage.connection.execute(
+            "SELECT question FROM markets WHERE market_id = ?", (market_id,),
+        ).fetchone()[0]
         prediction = compute_prediction(
-            storage.connection, "polymarket:1", "polymarket", "1", "esports", current_price, 100000, None, 0, None, False
+            storage.connection, "polymarket:1", "polymarket", "1", "esports", current_price, 100000, None, 0, None, False,
+            question=current_question or "",
         )
         return _valid_explanation_for(prediction).model_dump(), 400, 90
 

@@ -104,6 +104,24 @@ class DivergenceAuditContext:
     submodel_estimates: tuple[SubmodelEstimate, ...]
 
 
+def compute_model_disagreement(submodel_estimates: tuple[SubmodelEstimate, ...] | list[SubmodelEstimate]) -> float | None:
+    """Stdev across available submodels' estimated_yes_probability values.
+    Returns None when fewer than 2 submodels are available (disagreement is
+    not a meaningful concept with 0 or 1 data points) — callers (J2/K1
+    composites in confidence.py) must treat None as N/A, never as 0 or a
+    forced high/low score. Shared by audit_divergence's own
+    `model_disagreement` check below so the two never drift apart."""
+    ests = [
+        s.estimated_yes_probability
+        for s in submodel_estimates
+        if s.available and s.estimated_yes_probability is not None
+    ]
+    if len(ests) < 2:
+        return None
+    mean = sum(ests) / len(ests)
+    return (sum((e - mean) ** 2 for e in ests) / len(ests)) ** 0.5
+
+
 def audit_divergence(context: DivergenceAuditContext) -> DivergenceAuditResult:
     ip, mp = context.independent_probability, context.market_probability
     if ip is None or mp is None:
@@ -331,14 +349,8 @@ def audit_divergence(context: DivergenceAuditContext) -> DivergenceAuditResult:
         checks.append(AuditCheck("freshness", "UNKNOWN", "No freshness timestamp available."))
 
     # 10. Model disagreement (variance across available submodel estimates)
-    ests = [
-        s.estimated_yes_probability
-        for s in context.submodel_estimates
-        if s.available and s.estimated_yes_probability is not None
-    ]
-    if len(ests) >= 2:
-        mean = sum(ests) / len(ests)
-        stdev = (sum((e - mean) ** 2 for e in ests) / len(ests)) ** 0.5
+    stdev = compute_model_disagreement(context.submodel_estimates)
+    if stdev is not None:
         if stdev <= 0.10:
             checks.append(AuditCheck("model_disagreement", "PASS", f"Submodels agree closely (stdev={stdev:.3f})."))
         elif stdev <= 0.25:

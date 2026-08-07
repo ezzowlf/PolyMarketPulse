@@ -73,7 +73,7 @@ def test_history_submodel_finds_resolution_only_markets(storage: Storage) -> Non
     for i in range(1):
         storage.record_resolution(_resolved_market(f"r-no-{i}", "No"))
 
-    estimate, sample_size, observed_rate = compute_history_estimate(storage.connection, "esports", "polymarket")
+    estimate, sample_size, observed_rate, _unc = compute_history_estimate(storage.connection, "esports", "polymarket")
     assert sample_size == 5
     assert observed_rate == pytest.approx(0.8)
     assert estimate.available is True
@@ -106,7 +106,7 @@ def test_two_cases_yields_unavailable_not_pseudo_precise_probability(storage: St
     """Spec requirement: no pseudo-precise probability from 2 cases."""
     storage.record_resolution(_resolved_market("two-a", "Yes"))
     storage.record_resolution(_resolved_market("two-b", "No"))
-    estimate, sample_size, _rate = compute_history_estimate(storage.connection, "esports", "polymarket")
+    estimate, sample_size, _rate, _unc = compute_history_estimate(storage.connection, "esports", "polymarket")
     assert sample_size == 2
     assert estimate.available is False
     assert estimate.weight == 0.0
@@ -118,8 +118,8 @@ def test_very_low_tier_gets_less_weight_than_usable_tier(storage: Storage) -> No
     for i in range(35):
         storage.record_resolution(_resolved_market(f"usable-{i}", "Yes", category="usable_cat"))
 
-    vlow_estimate, _, _ = compute_history_estimate(storage.connection, "vlow_cat", "polymarket")
-    usable_estimate, _, _ = compute_history_estimate(storage.connection, "usable_cat", "polymarket")
+    vlow_estimate, _, _, _ = compute_history_estimate(storage.connection, "vlow_cat", "polymarket")
+    usable_estimate, _, _, _ = compute_history_estimate(storage.connection, "usable_cat", "polymarket")
     assert vlow_estimate.weight < usable_estimate.weight
 
 

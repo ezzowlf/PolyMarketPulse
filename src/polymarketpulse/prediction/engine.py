@@ -21,7 +21,12 @@ from typing import TYPE_CHECKING
 from ..price_analytics import PricePoint
 from ..providers.coingecko import fetch_price_and_volatility, resolve_coingecko_id
 from .bayesian import bayesian_update
-from .confidence import compute_confidence, compute_freshness_score
+from .confidence import (
+    compute_confidence,
+    compute_confidence_composite,
+    compute_data_quality_composite,
+    compute_freshness_score,
+)
 from .cross_market import compute_cross_market_relations
 from .deadline import classify_deadline_phase, deadline_weights_for
 from .divergence import DIVERGENCE_THRESHOLD_PP
@@ -201,7 +206,7 @@ def market_blind_forecast(
     Returns a plain dict (not PredictionResult) since this is a standalone
     diagnostic/audit tool, not part of the production forecast path."""
     now = now or datetime.now(UTC)
-    history_estimate, comparable_sample_size, observed_yes_rate = compute_history_estimate(
+    history_estimate, comparable_sample_size, observed_yes_rate, _history_uncertainty = compute_history_estimate(
         conn, category, provider, question=question, resolution_text=resolution_text,
     )
     independent_evidence = compute_independent_evidence(
@@ -254,7 +259,7 @@ def compute_prediction(
     reasoning.append(f"Deadline-Phase: {deadline_phase} (News-Gewicht {deadline_weights.news_weight:.2f}).")
 
     # --- History submodel --------------------------------------------------
-    history_estimate, comparable_sample_size, observed_yes_rate = compute_history_estimate(
+    history_estimate, comparable_sample_size, observed_yes_rate, history_uncertainty = compute_history_estimate(
         conn, category, provider, question=question, resolution_text=resolution_text,
     )
     reasoning.append(history_estimate.detail)
@@ -535,6 +540,40 @@ def compute_prediction(
         dq, all_submodels, market_stability=market_stability, deadline_phase_known=resolution_date is not None
     )
 
+    # --- J2/K1: genuine multi-dimensional composites (additive) -----------
+    # Real dimensions (Kish ESS, Wilson-interval width, evidence relation
+    # tiers, source quality/independence, structured-data availability,
+    # divergence_audit's model-disagreement stdev, specialized-model
+    # reliability tagging) replace the previous flat/coarse proxies. The
+    # legacy `dq`/`confidence` above are kept byte-for-byte for existing
+    # `.data_quality.total`/`.confidence_score` consumers (grep across src/
+    # shows opportunities.py, shadow_trading.py, ai/fallback.py, cli.py all
+    # read these two fields expecting a 0..100 float) — engine.py now ALSO
+    # computes and attaches the honest composites additively, and uses the
+    # K1 composite as the production confidence_score (data_quality.total
+    # stays as the legacy 6-field average since it feeds shadow_trading's
+    # tuned thresholds; the new composite is the honest, structured version
+    # surfaced alongside it via data_quality_composite/confidence_composite).
+    data_quality_composite = compute_data_quality_composite(
+        proposition=proposition, history_uncertainty=history_uncertainty,
+        comparable_sample_size=comparable_sample_size, independent_evidence=independent_evidence,
+        specialized_estimates=specialized_estimates, eligible_specialized_models=routing.eligible_models,
+        aktualitaet=aktualitaet,
+    )
+    confidence_composite = compute_confidence_composite(
+        proposition=proposition, history_uncertainty=history_uncertainty,
+        comparable_sample_size=comparable_sample_size, independent_evidence=independent_evidence,
+        specialized_estimates=specialized_estimates, all_submodel_estimates=all_submodels,
+        aktualitaet=aktualitaet, deadline_phase_known=resolution_date is not None,
+        legacy_data_quality=dq,
+    )
+    # K1: the composite score IS the production confidence_score — this is
+    # the actual rebuild, not just an additive side-channel. The legacy
+    # compute_confidence() call above is kept only because tests/test_prediction_v2.py
+    # exercises it directly as a unit (coverage/agreement/stability
+    # heuristic); it no longer determines PredictionResult.confidence_score.
+    confidence = confidence_composite.score
+
     uncertainty_lower = uncertainty_upper = None
     if estimated_yes is not None:
         spread = max(0.05, 0.25 - (confidence / 100) * 0.2)
@@ -679,6 +718,8 @@ def compute_prediction(
         net_yes_edge=net_edge,
         confidence_score=confidence,
         data_quality=dq,
+        data_quality_composite=data_quality_composite,
+        confidence_composite=confidence_composite,
         uncertainty_lower=uncertainty_lower,
         uncertainty_upper=uncertainty_upper,
         recommendation=recommendation,

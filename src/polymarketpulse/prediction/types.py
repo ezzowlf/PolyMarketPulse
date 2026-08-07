@@ -148,6 +148,49 @@ class DataQualityBreakdown:
 
 
 @dataclass(frozen=True)
+class QualityDimension:
+    """One measured dimension feeding a J2/K1 composite. `available=False`
+    means this dimension is genuinely not computable for this market today
+    (e.g. no independent evidence at all, or the legacy history path with no
+    Kish-ESS concept) — it is excluded from the composite average and its
+    weight is redistributed among the dimensions that ARE available, rather
+    than silently defaulting to a flattering mid/high score. This is the
+    direct fix for the "12 irrelevant articles inflate quality" bug class."""
+
+    name: str
+    raw_value: float | None
+    normalized_score: float | None  # 0..100, None when not available
+    available: bool
+    reason: str
+
+    def as_dict(self) -> dict:
+        return {
+            "name": self.name, "raw_value": self.raw_value,
+            "normalized_score": self.normalized_score,
+            "available": self.available, "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class QualityComposite:
+    """Shared shape for both the J2 data_quality composite and the K1
+    confidence composite: a real weighted average over whichever dimensions
+    were actually computable this call, plus the full per-dimension detail
+    so a UI/audit can see exactly what fed the number and what didn't."""
+
+    dimensions: tuple[QualityDimension, ...]
+    score: float  # 0..100
+    formula_detail: str
+
+    def as_dict(self) -> dict:
+        return {
+            "dimensions": [d.as_dict() for d in self.dimensions],
+            "score": self.score,
+            "formula_detail": self.formula_detail,
+        }
+
+
+@dataclass(frozen=True)
 class ScenarioSet:
     """Deterministic, factor-derived scenario descriptions. Text is built
     from structured inputs (submodel estimates, news events, deadline
@@ -260,6 +303,23 @@ class PredictionResult:
     # has resolved-shadow-forecast history to fit a calibration curve from.
     confidence_calibration_status: ConfidenceCalibrationStatus = DEFAULT_CONFIDENCE_CALIBRATION_STATUS
 
+    # --- J2/K1: genuine multi-dimensional composites (additive) -----------
+    # data_quality (legacy DataQualityBreakdown above, kept byte-for-byte
+    # backward compatible for existing `.data_quality.total` consumers) is
+    # now itself computed from these same real dimensions where the legacy
+    # field shape has room for them; `data_quality_composite` is the full,
+    # honest per-dimension breakdown additionally exposed here, including
+    # dimensions the legacy 6-field shape had no slot for (evidence
+    # relevance tiers, source independence, structured-data availability,
+    # model agreement, provider health). See confidence.py for the formula.
+    data_quality_composite: QualityComposite | None = None
+    # confidence_score above is now fed by this same composite approach
+    # (see confidence.compute_confidence) — confidence_composite is the
+    # full per-dimension breakdown, proving confidence is a function of
+    # measured data quality/robustness signals only, never of how far the
+    # probability estimate sits from 50%.
+    confidence_composite: QualityComposite | None = None
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -309,4 +369,6 @@ class PredictionResult:
             "forecast_suppression_reason": self.forecast_suppression_reason,
             "confidence_calibration_status": self.confidence_calibration_status,
             "divergence_audit": self.divergence_audit.as_dict() if self.divergence_audit else None,
+            "data_quality_composite": self.data_quality_composite.as_dict() if self.data_quality_composite else None,
+            "confidence_composite": self.confidence_composite.as_dict() if self.confidence_composite else None,
         }

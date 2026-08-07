@@ -70,6 +70,57 @@ _EVENT_TYPE_TO_MODEL: dict[str, str] = {
 # market" entries without hardcoding the list a second time.
 ALL_SPECIALIZED_MODEL_NAMES: tuple[str, ...] = ("quant", "macro", "politics", "geopolitics", "sports")
 
+# K1: minimal, real encoding of each specialized model's honest backing-data
+# quality, so confidence.py can genuinely discount a model whose "real data"
+# is actually just evidence/heuristic reasoning versus one backed by a real
+# external structured-data feed. This was previously only prose in an audit
+# report (Phase E), never encoded in code — this dict is the encoding.
+# Classification, read from each model's own module docstring + source:
+#   PRODUCTION_DATA_PATH        quant.py calls providers/coingecko.py's real,
+#                                keyless CoinGecko market_chart endpoint for
+#                                actual current price + trailing volatility —
+#                                a genuine external structured-data feed.
+#   FUNCTIONAL_BUT_UNCALIBRATED macro.py / politics.py / geopolitics.py reason
+#                                over real inputs (parsed proposition,
+#                                resolution rules, independent evidence,
+#                                historical comparables) but have no real
+#                                external calendar/process-tracking/conflict-
+#                                data provider wired in — their probability
+#                                math is real and non-fabricated, but not
+#                                validated against a fitted calibration curve
+#                                (same honest status as the engine's overall
+#                                UNCALIBRATED tag, K1b).
+#   STRUCTURAL_SCAFFOLD          sports.py has no external data source at all
+#                                (no provider import, no DB query) despite its
+#                                docstring's stated intent to "only use actual
+#                                match results/standings data" — it estimates
+#                                purely from proposition text heuristics. Real
+#                                code, but not backed by real sports data;
+#                                confidence must discount it more than the
+#                                other three specialized models.
+#   UNAVAILABLE                  reserved for a model that exists but is
+#                                administratively disabled; unused today.
+SpecializedModelReliability = str  # Literal["PRODUCTION_DATA_PATH", "FUNCTIONAL_BUT_UNCALIBRATED", "STRUCTURAL_SCAFFOLD", "UNAVAILABLE"]
+
+SPECIALIZED_MODEL_RELIABILITY: dict[str, SpecializedModelReliability] = {
+    "quant": "PRODUCTION_DATA_PATH",
+    "macro": "FUNCTIONAL_BUT_UNCALIBRATED",
+    "politics": "FUNCTIONAL_BUT_UNCALIBRATED",
+    "geopolitics": "FUNCTIONAL_BUT_UNCALIBRATED",
+    "sports": "STRUCTURAL_SCAFFOLD",
+}
+
+# Discount factor (0..1) confidence.py applies to a specialized model's
+# contribution to the model-reliability confidence dimension. Documented,
+# not tuned against data (there is no resolved-forecast history yet to tune
+# against — same honesty constraint as everything else K1 touches).
+SPECIALIZED_MODEL_RELIABILITY_SCORE: dict[str, float] = {
+    "PRODUCTION_DATA_PATH": 1.0,
+    "FUNCTIONAL_BUT_UNCALIBRATED": 0.6,
+    "STRUCTURAL_SCAFFOLD": 0.25,
+    "UNAVAILABLE": 0.0,
+}
+
 # Reverse mapping: model name → event types it handles
 _MODEL_TO_EVENT_TYPES: dict[str, frozenset[str]] = {
     "quant": frozenset({"price_above", "price_below"}),
