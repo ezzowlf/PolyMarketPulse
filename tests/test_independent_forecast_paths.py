@@ -57,6 +57,20 @@ def test_history_only_path_produces_baseline_only(storage: Storage) -> None:
     assert result.independent_probability is not None
 
 
+def test_history_only_path_reports_data_fitted_prior_provenance(storage: Storage) -> None:
+    # K3: contribution_breakdown should honestly label the "history" entry
+    # as DATA_FITTED (a real weighted baseline over actually-resolved
+    # comparable markets) rather than leaving prior_provenance unset or
+    # mislabeling it as a heuristic. See engine.py's _PRIOR_PROVENANCE_BY_SOURCE.
+    for i in range(10):
+        storage.record_resolution(_resolved(f"hpp-{i}", "Yes" if i % 3 else "No"))
+    result = compute_prediction(storage.connection, "m1", "polymarket", "1", "geopolitics", 0.4, 50000, 90, 0, None, True)
+    history_entries = [e for e in result.contribution_breakdown if e.source == "history"]
+    assert history_entries, "expected a 'history' entry in contribution_breakdown"
+    assert history_entries[0].available is True
+    assert history_entries[0].prior_provenance == "DATA_FITTED"
+
+
 def test_evidence_only_path_produces_evidence_only(storage: Storage) -> None:
     # Note: the same linked news items are also picked up by the older,
     # market-price-anchored "news" submodel (compute_news_estimate) — since

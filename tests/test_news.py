@@ -4,6 +4,7 @@ from polymarketpulse.models import Market
 from polymarketpulse.news.base import NewsEvent
 from polymarketpulse.news.linker import link_news_to_markets
 from polymarketpulse.news.rss import fetch_feed
+from polymarketpulse.prediction.news import _trust_for_source
 
 
 def test_news_event_content_hash_deduplicates_identical_items() -> None:
@@ -74,3 +75,13 @@ def test_link_news_to_markets_requires_shared_terms() -> None:
     for link in links:
         assert link.confidence > 0
         assert link.matched_terms
+
+
+def test_primary_wire_source_trusted_above_unknown_source() -> None:
+    # Reuters/AP are curated primary wire sources; an unrecognized blog-style
+    # source falls back to the neutral 0.5 default. This is the "primary
+    # source weighting" the evidence pipeline relies on (evidence.py's
+    # _domain_reliability reuses this same trust table).
+    assert _trust_for_source("Reuters") > _trust_for_source("some-random-blog")
+    assert _trust_for_source("reuters") == _trust_for_source("Reuters")  # case-insensitive
+    assert _trust_for_source("some-random-blog") == 0.5
