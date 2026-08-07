@@ -309,6 +309,51 @@ function _evidenceSectionHtml(p) {
         : ""
     }
     <p class="sub">${ie.detail}</p>
+    ${_resolutionEdgeHtml(p.resolution_edge)}
+    ${_crossMarketHtml(p.cross_market)}
+    ${_reactionLagHtml(p.reaction_lag)}
+  `;
+}
+
+function _resolutionEdgeHtml(re) {
+  if (!re) return "";
+  return `
+    <h4>Resolution-Kriterien</h4>
+    <div class="widget-grid">
+      ${widgetCard({ title: "Resolution-Risiko", value: re.risk_level })}
+      ${widgetCard({ title: "Resolution Edge Score", value: `${fmtNum(re.resolution_edge_score, 0)} / 100` })}
+      ${widgetCard({ title: "Explizite Frist", value: re.has_explicit_deadline ? "ja" : "nein" })}
+      ${widgetCard({ title: "Zuständige Quelle", value: re.authority_source || "unbekannt" })}
+    </div>
+    <p><strong>YES-Bedingung:</strong> ${re.yes_condition}</p>
+    <p><strong>NO-Bedingung:</strong> ${re.no_condition}</p>
+    ${re.pitfalls.length ? `<p><strong>Stolperfallen:</strong></p><ul>${re.pitfalls.map((p2) => `<li>${p2}</li>`).join("")}</ul>` : ""}
+  `;
+}
+
+function _crossMarketHtml(cm) {
+  if (!cm) return "";
+  if (!cm.available) return `<h4>Cross-Market</h4><p class="sub">${cm.detail}</p>`;
+  return `
+    <h4>Cross-Market-Widersprüche</h4>
+    <p class="sub">${cm.detail}</p>
+    ${
+      cm.related_markets.length
+        ? `<ul>${cm.related_markets.map((m) => `<li>(${fmtNum(m.overlap_confidence * 100, 0)}% Überlappung) ${m.question} — ${m.yes_price !== null ? fmtPct(m.yes_price) : "kein Preis"} <span class="sub">(${m.provider})</span></li>`).join("")}</ul>`
+        : ""
+    }
+  `;
+}
+
+function _reactionLagHtml(rl) {
+  if (!rl) return "";
+  return `
+    <h4>Marktreaktion</h4>
+    <div class="widget-grid">
+      ${widgetCard({ title: "Status", value: rl.status })}
+      ${widgetCard({ title: "Reaktionsdauer", value: rl.reaction_detected_at_hours !== null ? `${fmtNum(rl.reaction_detected_at_hours, 1)} h` : "–" })}
+    </div>
+    <p class="sub">${rl.detail}</p>
   `;
 }
 

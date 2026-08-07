@@ -19,6 +19,7 @@ STATUS_DEADLINE_SOON = "Kurz vor Deadline"
 STATUS_INTERESTING = "Interessant"
 STATUS_WATCH = "Beobachten"
 STATUS_NO_EDGE = "Keine klare Edge"
+STATUS_RESOLUTION_UNCLEAR = "Resolution unklar"
 
 DEADLINE_URGENT_HOURS = 24
 
@@ -57,6 +58,9 @@ def _status_for(market_yes_price: float | None, prediction) -> str:
     net_edge = prediction.net_yes_edge
     if net_edge is None or abs(net_edge) < 0.03:
         return STATUS_NO_EDGE
+    resolution_edge = prediction.resolution_edge
+    if resolution_edge is not None and resolution_edge.risk_level == "hoch":
+        return STATUS_RESOLUTION_UNCLEAR
     if prediction.confidence_score < 40:
         return STATUS_WATCH
     if abs(net_edge) >= 0.08 and prediction.confidence_score >= 55:
@@ -67,7 +71,10 @@ def _status_for(market_yes_price: float | None, prediction) -> str:
 def _opportunity_score(prediction, liquidity: float | None, spread: float | None, deadline_hours: float | None) -> float:
     """Composite ranking score (0-100) — deliberately not just |edge|. A
     market with a big edge but low confidence must not outrank a market
-    with a smaller, well-supported edge (explicit product requirement)."""
+    with a smaller, well-supported edge (explicit product requirement).
+    Resolution clarity and cross-market inconsistency additionally pull the
+    score down when the wording is a trap or related markets disagree in a
+    way that isn't explained by fees/spread/differing rules."""
     if prediction.net_yes_edge is None:
         return 0.0
     edge_component = min(40.0, abs(prediction.net_yes_edge) * 100 * 2.2)  # ~18pp edge -> ~40 pts
@@ -78,7 +85,24 @@ def _opportunity_score(prediction, liquidity: float | None, spread: float | None
     deadline_component = 0.0
     if deadline_hours is not None and 0 <= deadline_hours < 168:
         deadline_component = max(0.0, 5.0 * (1 - deadline_hours / 168))
-    score = edge_component + confidence_component + quality_component + liquidity_component + deadline_component - spread_penalty
+
+    resolution_edge = prediction.resolution_edge
+    resolution_penalty = 0.0
+    if resolution_edge is not None:
+        # A low resolution_edge_score (unclear wording, no named authority,
+        # no explicit deadline) directly reduces how "interesting" a market
+        # can be, regardless of how big the raw edge looks.
+        resolution_penalty = max(0.0, (60.0 - resolution_edge.resolution_edge_score) * 0.15)
+
+    cross_market = prediction.cross_market
+    inconsistency_penalty = 0.0
+    if cross_market is not None and cross_market.logical_inconsistency_score is not None:
+        inconsistency_penalty = min(10.0, cross_market.logical_inconsistency_score * 0.1)
+
+    score = (
+        edge_component + confidence_component + quality_component + liquidity_component + deadline_component
+        - spread_penalty - resolution_penalty - inconsistency_penalty
+    )
     return round(max(0.0, min(100.0, score)), 1)
 
 
@@ -139,6 +163,9 @@ def compute_opportunity(storage: Storage, market_row: dict) -> dict | None:
         "first_seen_at": market_row.get("first_seen_at"),
         "change_since_last_analysis": _change_since_last(storage.connection, market_row["market_id"]),
         "independent_evidence": prediction.independent_evidence.as_dict() if prediction.independent_evidence else None,
+        "resolution_edge": prediction.resolution_edge.as_dict() if prediction.resolution_edge else None,
+        "cross_market": prediction.cross_market.as_dict() if prediction.cross_market else None,
+        "reaction_lag": prediction.reaction_lag.as_dict() if prediction.reaction_lag else None,
     }
 
 

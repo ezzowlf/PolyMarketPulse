@@ -24,6 +24,9 @@ def test_fetch_feed_parses_rss_items(monkeypatch) -> None:
         request = httpx.Request("GET", url)
         return httpx.Response(200, text=rss_xml, request=request)
 
+    # assert_safe_url performs a real DNS lookup by design (SSRF guard) —
+    # stubbed here so this stays a pure, network-free unit test.
+    monkeypatch.setattr("polymarketpulse.news.rss.assert_safe_url", lambda url: None)
     monkeypatch.setattr("polymarketpulse.news.rss.httpx.get", fake_get)
     events = fetch_feed("https://fed.gov/feed", "federal_reserve")
     assert len(events) == 1

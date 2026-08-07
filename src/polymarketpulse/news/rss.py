@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from ..security import MAX_RESPONSE_BYTES, SSRFError, assert_safe_url
 from .base import NewsEvent
 
 # Only free, official, publicly accessible feeds. No paywalled content, no
@@ -38,9 +39,16 @@ def fetch_feed(url: str, source_name: str, timeout: float = 20.0) -> list[NewsEv
     missing fields — returns whatever items could be parsed, empty list on
     total failure."""
     try:
+        assert_safe_url(url)
+    except SSRFError:
+        return []
+
+    try:
         response = httpx.get(url, timeout=timeout, headers={"User-Agent": "PolymarketPulse/0.2"})
         response.raise_for_status()
     except httpx.HTTPError:
+        return []
+    if len(response.content) > MAX_RESPONSE_BYTES:
         return []
 
     try:

@@ -15,17 +15,20 @@ history, linked news) are queried internally from `market_id` /
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from ..price_analytics import PricePoint
 from .bayesian import bayesian_update
 from .confidence import compute_confidence
+from .cross_market import compute_cross_market_relations
 from .deadline import classify_deadline_phase, deadline_weights_for
 from .ensemble import combine_submodels
 from .evidence import compute_independent_evidence
 from .history import compute_history_estimate
 from .momentum import compute_momentum_estimate
 from .news import collect_news_evidence, compute_news_estimate
+from .reaction_lag import compute_market_reaction_lag
+from .resolution_edge import compute_resolution_edge
 from .scenarios import build_scenarios
 from .types import DataQualityBreakdown, PredictionResult, Recommendation, SubmodelEstimate
 
@@ -165,6 +168,14 @@ def compute_prediction(
     )
     reasoning.append(independent_evidence.detail)
 
+    # --- Structural edge analysis (additive, doesn't feed the ensemble) --
+    resolution_edge = compute_resolution_edge(question, resolution_text, authority_source=resolution_text)
+    cross_market = compute_cross_market_relations(conn, market_id, provider, question, market_yes_price)
+    first_evidence_at = None
+    if independent_evidence.time_since_first_report_hours is not None:
+        first_evidence_at = now - timedelta(hours=independent_evidence.time_since_first_report_hours)
+    reaction_lag = compute_market_reaction_lag(conn, market_id, first_evidence_at, now=now)
+
     # --- Ensemble: history + momentum + independent evidence -> prior ----
     prior_estimate, _ = combine_submodels([history_estimate, momentum_estimate, independent_evidence_estimate])
     if prior_estimate is None:
@@ -256,4 +267,7 @@ def compute_prediction(
         news_sentiment_score=weighted_sentiment,
         news_confirmation_count=confirmation_count,
         independent_evidence=independent_evidence,
+        resolution_edge=resolution_edge,
+        cross_market=cross_market,
+        reaction_lag=reaction_lag,
     )

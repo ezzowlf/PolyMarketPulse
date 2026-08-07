@@ -4,7 +4,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from .cross_market import CrossMarketResult
     from .evidence import IndependentEvidenceResult
+    from .reaction_lag import ReactionLagResult
+    from .resolution_edge import ResolutionEdgeResult
 
 Recommendation = Literal[
     "STRONG_YES", "YES", "WATCH_YES", "NO_BET", "WATCH_NO", "NO", "STRONG_NO", "INSUFFICIENT_DATA"
@@ -125,6 +128,11 @@ class PredictionResult:
     # --- Independent Evidence & Early-Signal Engine (additive) ---------
     independent_evidence: IndependentEvidenceResult | None = None
 
+    # --- Structural edge analysis (additive) ----------------------------
+    resolution_edge: ResolutionEdgeResult | None = None
+    cross_market: CrossMarketResult | None = None
+    reaction_lag: ReactionLagResult | None = None
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -156,4 +164,7 @@ class PredictionResult:
             "news_sentiment_score": self.news_sentiment_score,
             "news_confirmation_count": self.news_confirmation_count,
             "independent_evidence": self.independent_evidence.as_dict() if self.independent_evidence else None,
+            "resolution_edge": self.resolution_edge.as_dict() if self.resolution_edge else None,
+            "cross_market": self.cross_market.as_dict() if self.cross_market else None,
+            "reaction_lag": self.reaction_lag.as_dict() if self.reaction_lag else None,
         }

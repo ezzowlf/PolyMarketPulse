@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from ..security import MAX_RESPONSE_BYTES, SSRFError, assert_safe_url
 from .base import NewsEvent
 
 GDELT_DOC_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
@@ -45,11 +46,18 @@ def fetch_gdelt(
         "sort": "datedesc",
     }
     try:
+        assert_safe_url(GDELT_DOC_URL)
+    except SSRFError:
+        return []
+
+    try:
         response = httpx.get(
             GDELT_DOC_URL, params=params, timeout=timeout,
             headers={"User-Agent": "PolymarketPulse/0.2"},
         )
         response.raise_for_status()
+        if len(response.content) > MAX_RESPONSE_BYTES:
+            return []
         payload = response.json()
     except (httpx.HTTPError, ValueError):
         return []

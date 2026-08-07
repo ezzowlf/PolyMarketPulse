@@ -15,7 +15,10 @@ def test_build_query_for_empty_question_returns_empty_string() -> None:
     assert build_query_for_question("") == ""
 
 
-def test_fetch_gdelt_parses_articles() -> None:
+def test_fetch_gdelt_parses_articles(monkeypatch) -> None:
+    # assert_safe_url does a real DNS lookup by design (SSRF guard) — stubbed
+    # here so this stays a pure, network-free unit test.
+    monkeypatch.setattr("polymarketpulse.news.gdelt.assert_safe_url", lambda url: None)
     mock_response = MagicMock()
     mock_response.raise_for_status.return_value = None
     mock_response.json.return_value = {
@@ -38,7 +41,8 @@ def test_fetch_gdelt_parses_articles() -> None:
     assert events[0].source_domain == "reuters.com"
 
 
-def test_fetch_gdelt_returns_empty_on_error() -> None:
+def test_fetch_gdelt_returns_empty_on_error(monkeypatch) -> None:
+    monkeypatch.setattr("polymarketpulse.news.gdelt.assert_safe_url", lambda url: None)
     with patch("polymarketpulse.news.gdelt.httpx.get", side_effect=httpx.ConnectError("boom")):
         events = fetch_gdelt("ceasefire")
     assert events == []
