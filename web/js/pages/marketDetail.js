@@ -312,6 +312,59 @@ function _evidenceSectionHtml(p) {
     ${_resolutionEdgeHtml(p.resolution_edge)}
     ${_crossMarketHtml(p.cross_market)}
     ${_reactionLagHtml(p.reaction_lag)}
+    ${_marketFlowHtml(p)}
+  `;
+}
+
+function _marketFlowHtml(p) {
+  const rel = p.market_reliability;
+  const risk = p.manipulation_risk;
+  const ob = p.orderbook_metrics;
+  const flow = p.trade_flow_metrics;
+  const wallet = p.wallet_concentration;
+
+  return `
+    <h4>Marktreliabilität und Orderfluss</h4>
+    <div class="widget-grid">
+      ${widgetCard({ title: "Marktreliabilität", value: rel ? rel.level : "unzureichende Daten" })}
+      ${widgetCard({ title: "Manipulationsrisiko", value: risk ? `${fmtNum(risk.risk_score, 0)} / 100` : "–" })}
+    </div>
+    <h5>Orderbuch</h5>
+    ${
+      ob && ob.available
+        ? `<div class="widget-grid">
+            ${widgetCard({ title: "Spread", value: fmtNum(ob.spread, 4) })}
+            ${widgetCard({ title: "Imbalance", value: ob.imbalance !== null ? ob.imbalance.toFixed(2) : "–" })}
+            ${widgetCard({ title: "Tiefe (Bid+Ask)", value: "$" + fmtNum((ob.bid_depth || 0) + (ob.ask_depth || 0)) })}
+            ${widgetCard({ title: "Dünn", value: ob.thin ? "ja" : "nein" })}
+          </div>`
+        : `<p class="sub">${ob ? ob.detail : "Orderbuchdaten nicht verfügbar."}</p>`
+    }
+    <h5>Marktfluss (öffentliche Trades)</h5>
+    ${
+      flow && flow.available
+        ? `<div class="widget-grid">
+            ${widgetCard({ title: "Status", value: flow.status })}
+            ${widgetCard({ title: "Netto-Flow", value: "$" + fmtNum(flow.net_flow_usd) })}
+            ${widgetCard({ title: "Anteil großer Trades", value: flow.large_trade_ratio !== null ? `${(flow.large_trade_ratio * 100).toFixed(0)}%` : "–" })}
+          </div><p class="sub">${flow.detail}</p>`
+        : `<p class="sub">${flow ? flow.detail : "Trade-Daten nicht verfügbar."}</p>`
+    }
+    <h5>Öffentliche Positionen</h5>
+    ${
+      wallet && wallet.available
+        ? `<div class="widget-grid">
+            ${widgetCard({ title: "Konzentration", value: `${fmtNum(wallet.concentration_score, 0)} / 100` })}
+            ${widgetCard({ title: "Größte Adresse", value: wallet.top1_share !== null ? `${(wallet.top1_share * 100).toFixed(0)}%` : "–" })}
+          </div>
+          <p class="sub">Gekürzte Top-Adressen: ${wallet.top_wallets.join(", ")} — keine Identitätszuordnung.</p>`
+        : `<p class="sub">${wallet ? wallet.detail : "Positionsdaten nicht verfügbar."}</p>`
+    }
+    ${
+      risk && risk.reasons.length
+        ? `<h5>Risikohinweise</h5><ul>${risk.reasons.map((r) => `<li>${r}</li>`).join("")}</ul><p class="sub">${risk.detail}</p>`
+        : ""
+    }
   `;
 }
 

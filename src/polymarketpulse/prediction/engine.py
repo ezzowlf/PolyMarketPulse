@@ -25,9 +25,12 @@ from .deadline import classify_deadline_phase, deadline_weights_for
 from .ensemble import combine_submodels
 from .evidence import compute_independent_evidence
 from .history import compute_history_estimate
+from .manipulation import compute_manipulation_risk
+from .market_flow import load_flow_metrics_from_db
 from .momentum import compute_momentum_estimate
 from .news import collect_news_evidence, compute_news_estimate
-from .reaction_lag import compute_market_reaction_lag
+from .reaction_lag import STATUS_REACTED, compute_market_reaction_lag
+from .reliability import compute_market_reliability
 from .resolution_edge import compute_resolution_edge
 from .scenarios import build_scenarios
 from .types import DataQualityBreakdown, PredictionResult, Recommendation, SubmodelEstimate
@@ -176,6 +179,33 @@ def compute_prediction(
         first_evidence_at = now - timedelta(hours=independent_evidence.time_since_first_report_hours)
     reaction_lag = compute_market_reaction_lag(conn, market_id, first_evidence_at, now=now)
 
+    # --- Public market-flow / order-book / wallet intelligence -----------
+    # Reads collector output (see cli.py `flow-fetch`); computes no network
+    # calls itself. A market price move without any linked evidence for it
+    # is the same "breaking but not explained" signal reaction_lag/evidence
+    # already track — reused here as a reliability/manipulation input.
+    orderbook_metrics, trade_flow_metrics, wallet_concentration = load_flow_metrics_from_db(
+        conn, provider, provider_market_id
+    )
+    price_moved_without_evidence = (
+        reaction_lag.status == STATUS_REACTED and not independent_evidence.available
+    )
+    market_reliability = compute_market_reliability(
+        resolution_edge_score=resolution_edge.resolution_edge_score,
+        orderbook_imbalance=orderbook_metrics.imbalance if orderbook_metrics.available else None,
+        orderbook_thin=orderbook_metrics.thin if orderbook_metrics.available else None,
+        wallet_concentration_score=wallet_concentration.concentration_score if wallet_concentration.available else None,
+        cross_market_inconsistency_score=cross_market.logical_inconsistency_score if cross_market.available else None,
+        price_moved_without_evidence=price_moved_without_evidence,
+    )
+    manipulation_risk = compute_manipulation_risk(
+        orderbook_thin=orderbook_metrics.thin if orderbook_metrics.available else None,
+        large_trade_ratio=trade_flow_metrics.large_trade_ratio if trade_flow_metrics.available else None,
+        price_moved_without_evidence=price_moved_without_evidence,
+        wallet_concentration_score=wallet_concentration.concentration_score if wallet_concentration.available else None,
+        deadline_hours=(resolution_date - now).total_seconds() / 3600 if resolution_date else None,
+    )
+
     # --- Ensemble: history + momentum + independent evidence -> prior ----
     prior_estimate, _ = combine_submodels([history_estimate, momentum_estimate, independent_evidence_estimate])
     if prior_estimate is None:
@@ -270,4 +300,9 @@ def compute_prediction(
         resolution_edge=resolution_edge,
         cross_market=cross_market,
         reaction_lag=reaction_lag,
+        orderbook_metrics=orderbook_metrics,
+        trade_flow_metrics=trade_flow_metrics,
+        wallet_concentration=wallet_concentration,
+        market_reliability=market_reliability,
+        manipulation_risk=manipulation_risk,
     )

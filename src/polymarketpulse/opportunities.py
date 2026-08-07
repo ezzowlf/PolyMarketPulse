@@ -20,6 +20,7 @@ STATUS_INTERESTING = "Interessant"
 STATUS_WATCH = "Beobachten"
 STATUS_NO_EDGE = "Keine klare Edge"
 STATUS_RESOLUTION_UNCLEAR = "Resolution unklar"
+STATUS_MANIPULATION_RISK = "Manipulationsrisiko hoch"
 
 DEADLINE_URGENT_HOURS = 24
 
@@ -58,6 +59,9 @@ def _status_for(market_yes_price: float | None, prediction) -> str:
     net_edge = prediction.net_yes_edge
     if net_edge is None or abs(net_edge) < 0.03:
         return STATUS_NO_EDGE
+    manipulation_risk = prediction.manipulation_risk
+    if manipulation_risk is not None and manipulation_risk.risk_score >= 60:
+        return STATUS_MANIPULATION_RISK
     resolution_edge = prediction.resolution_edge
     if resolution_edge is not None and resolution_edge.risk_level == "hoch":
         return STATUS_RESOLUTION_UNCLEAR
@@ -99,9 +103,20 @@ def _opportunity_score(prediction, liquidity: float | None, spread: float | None
     if cross_market is not None and cross_market.logical_inconsistency_score is not None:
         inconsistency_penalty = min(10.0, cross_market.logical_inconsistency_score * 0.1)
 
+    manipulation_risk = prediction.manipulation_risk
+    manipulation_penalty = 0.0
+    if manipulation_risk is not None:
+        manipulation_penalty = min(15.0, manipulation_risk.risk_score * 0.15)
+
+    reliability = prediction.market_reliability
+    reliability_component = 0.0
+    if reliability is not None and reliability.score is not None:
+        reliability_component = (reliability.score - 50.0) * 0.1  # can be negative
+
     score = (
         edge_component + confidence_component + quality_component + liquidity_component + deadline_component
-        - spread_penalty - resolution_penalty - inconsistency_penalty
+        + reliability_component
+        - spread_penalty - resolution_penalty - inconsistency_penalty - manipulation_penalty
     )
     return round(max(0.0, min(100.0, score)), 1)
 
@@ -166,6 +181,11 @@ def compute_opportunity(storage: Storage, market_row: dict) -> dict | None:
         "resolution_edge": prediction.resolution_edge.as_dict() if prediction.resolution_edge else None,
         "cross_market": prediction.cross_market.as_dict() if prediction.cross_market else None,
         "reaction_lag": prediction.reaction_lag.as_dict() if prediction.reaction_lag else None,
+        "orderbook_metrics": prediction.orderbook_metrics.as_dict() if prediction.orderbook_metrics else None,
+        "trade_flow_metrics": prediction.trade_flow_metrics.as_dict() if prediction.trade_flow_metrics else None,
+        "wallet_concentration": prediction.wallet_concentration.as_dict() if prediction.wallet_concentration else None,
+        "market_reliability": prediction.market_reliability.as_dict() if prediction.market_reliability else None,
+        "manipulation_risk": prediction.manipulation_risk.as_dict() if prediction.manipulation_risk else None,
     }
 
 

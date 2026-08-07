@@ -6,7 +6,10 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from .cross_market import CrossMarketResult
     from .evidence import IndependentEvidenceResult
+    from .manipulation import ManipulationRiskResult
+    from .market_flow import OrderBookMetrics, TradeFlowMetrics, WalletConcentrationMetrics
     from .reaction_lag import ReactionLagResult
+    from .reliability import MarketReliabilityResult
     from .resolution_edge import ResolutionEdgeResult
 
 Recommendation = Literal[
@@ -133,6 +136,13 @@ class PredictionResult:
     cross_market: CrossMarketResult | None = None
     reaction_lag: ReactionLagResult | None = None
 
+    # --- Public market-flow / order-book / wallet intelligence (additive) --
+    orderbook_metrics: OrderBookMetrics | None = None
+    trade_flow_metrics: TradeFlowMetrics | None = None
+    wallet_concentration: WalletConcentrationMetrics | None = None
+    market_reliability: MarketReliabilityResult | None = None
+    manipulation_risk: ManipulationRiskResult | None = None
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -167,4 +177,9 @@ class PredictionResult:
             "resolution_edge": self.resolution_edge.as_dict() if self.resolution_edge else None,
             "cross_market": self.cross_market.as_dict() if self.cross_market else None,
             "reaction_lag": self.reaction_lag.as_dict() if self.reaction_lag else None,
+            "orderbook_metrics": self.orderbook_metrics.as_dict() if self.orderbook_metrics else None,
+            "trade_flow_metrics": self.trade_flow_metrics.as_dict() if self.trade_flow_metrics else None,
+            "wallet_concentration": self.wallet_concentration.as_dict() if self.wallet_concentration else None,
+            "market_reliability": self.market_reliability.as_dict() if self.market_reliability else None,
+            "manipulation_risk": self.manipulation_risk.as_dict() if self.manipulation_risk else None,
         }

@@ -6,8 +6,8 @@ from polymarketpulse.migrations import current_schema_version, run_migrations
 def test_run_migrations_on_fresh_db_applies_all() -> None:
     conn = sqlite3.connect(":memory:")
     applied = run_migrations(conn)
-    assert applied == [1, 2, 3, 4, 5, 6, 7, 8, 9]
-    assert current_schema_version(conn) == 9
+    assert applied == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    assert current_schema_version(conn) == 10
 
 
 def test_run_migrations_is_idempotent() -> None:
@@ -15,7 +15,7 @@ def test_run_migrations_is_idempotent() -> None:
     run_migrations(conn)
     second_run = run_migrations(conn)
     assert second_run == []
-    assert current_schema_version(conn) == 9
+    assert current_schema_version(conn) == 10
 
 
 def test_migration_preserves_existing_phase1_data() -> None:
@@ -77,5 +77,11 @@ def test_migration_creates_new_tables() -> None:
         "news_market_reactions",
         "ai_analysis_runs",
         "shadow_setups",
+        "public_trade_events",
+        "public_wallet_positions",
+        "wallet_market_statistics",
+        "market_flow_signals",
+        "market_reliability_snapshots",
+        "manipulation_risk_events",
     ):
         assert expected in tables

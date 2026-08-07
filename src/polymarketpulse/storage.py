@@ -33,6 +33,12 @@ STATUS_TABLES = (
     "news_market_reactions",
     "ai_analysis_runs",
     "shadow_setups",
+    "public_trade_events",
+    "public_wallet_positions",
+    "wallet_market_statistics",
+    "market_flow_signals",
+    "market_reliability_snapshots",
+    "manipulation_risk_events",
 )
 
 
@@ -589,6 +595,116 @@ class Storage:
             ),
         )
         self.connection.commit()
+
+    # --- public market flow (order book / trades / holders) --------------------
+
+    def save_orderbook_snapshot(self, provider: str, provider_market_id: str, bids: list, asks: list) -> None:
+        now = datetime.now(UTC).isoformat()
+        self.connection.execute(
+            "INSERT INTO orderbook_snapshots (provider, provider_market_id, captured_at, bids_json, asks_json) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (provider, provider_market_id, now, json.dumps(bids), json.dumps(asks)),
+        )
+        self.connection.commit()
+
+    def save_public_trade_event(self, provider: str, provider_market_id: str, trade) -> bool:
+        """Returns False (no-op) if this trade_hash was already stored for
+        this market — trades are immutable once mined, so re-fetching the
+        same window should not create duplicates."""
+        now = datetime.now(UTC).isoformat()
+        cursor = self.connection.execute(
+            """
+            INSERT INTO public_trade_events (provider, provider_market_id, trade_hash, captured_at,
+                                              traded_at, side, outcome, price, size, wallet_address)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(provider, provider_market_id, trade_hash) DO NOTHING
+            """,
+            (
+                provider, provider_market_id, trade.trade_hash, now,
+                datetime.fromtimestamp(trade.traded_at_unix, tz=UTC).isoformat(),
+                trade.side, trade.outcome, trade.price, trade.size, trade.wallet_address,
+            ),
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
+
+    def save_public_wallet_positions(self, provider: str, provider_market_id: str, holders: list) -> None:
+        now = datetime.now(UTC).isoformat()
+        for h in holders:
+            self.connection.execute(
+                """
+                INSERT INTO public_wallet_positions (provider, provider_market_id, captured_at,
+                                                       wallet_address, outcome_index, amount)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(provider, provider_market_id, captured_at, wallet_address, outcome_index) DO NOTHING
+                """,
+                (provider, provider_market_id, now, h.wallet_address, h.outcome_index, h.amount),
+            )
+        self.connection.commit()
+
+    def save_market_flow_signal(self, provider: str, provider_market_id: str, status: str, net_flow: float | None, large_trade_ratio: float | None, price_move_without_evidence: bool, detail: str) -> None:
+        now = datetime.now(UTC).isoformat()
+        self.connection.execute(
+            """
+            INSERT INTO market_flow_signals (provider, provider_market_id, captured_at, status, net_flow,
+                                              large_trade_ratio, price_move_without_evidence, detail)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (provider, provider_market_id, now, status, net_flow, large_trade_ratio, int(price_move_without_evidence), detail),
+        )
+        self.connection.commit()
+
+    def save_market_reliability_snapshot(self, market_id: str, level: str, score: float | None, detail: str) -> None:
+        now = datetime.now(UTC).isoformat()
+        self.connection.execute(
+            "INSERT INTO market_reliability_snapshots (market_id, captured_at, reliability_level, reliability_score, detail) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (market_id, now, level, score, detail),
+        )
+        self.connection.commit()
+
+    def save_manipulation_risk_event(self, market_id: str, risk_score: float, reasons: list, confidence: float) -> None:
+        now = datetime.now(UTC).isoformat()
+        self.connection.execute(
+            "INSERT INTO manipulation_risk_events (market_id, captured_at, risk_score, reasons_json, confidence) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (market_id, now, risk_score, json.dumps(reasons), confidence),
+        )
+        self.connection.commit()
+
+    def latest_orderbook_snapshot(self, provider: str, provider_market_id: str) -> dict | None:
+        row = self.connection.execute(
+            "SELECT captured_at, bids_json, asks_json FROM orderbook_snapshots "
+            "WHERE provider = ? AND provider_market_id = ? ORDER BY captured_at DESC LIMIT 1",
+            (provider, provider_market_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return {"captured_at": row[0], "bids": json.loads(row[1]), "asks": json.loads(row[2])}
+
+    def recent_public_trades(self, provider: str, provider_market_id: str, limit: int = 100) -> list[dict]:
+        rows = self.connection.execute(
+            "SELECT trade_hash, traded_at, side, outcome, price, size, wallet_address FROM public_trade_events "
+            "WHERE provider = ? AND provider_market_id = ? ORDER BY traded_at DESC LIMIT ?",
+            (provider, provider_market_id, limit),
+        ).fetchall()
+        cols = ("trade_hash", "traded_at", "side", "outcome", "price", "size", "wallet_address")
+        return [dict(zip(cols, r, strict=True)) for r in rows]
+
+    def latest_wallet_positions(self, provider: str, provider_market_id: str) -> list[dict]:
+        row = self.connection.execute(
+            "SELECT MAX(captured_at) FROM public_wallet_positions WHERE provider = ? AND provider_market_id = ?",
+            (provider, provider_market_id),
+        ).fetchone()
+        if row is None or row[0] is None:
+            return []
+        rows = self.connection.execute(
+            "SELECT wallet_address, outcome_index, amount FROM public_wallet_positions "
+            "WHERE provider = ? AND provider_market_id = ? AND captured_at = ?",
+            (provider, provider_market_id, row[0]),
+        ).fetchall()
+        cols = ("wallet_address", "outcome_index", "amount")
+        return [dict(zip(cols, r, strict=True)) for r in rows]
 
     # --- cross-provider matching -----------------------------------------------
 

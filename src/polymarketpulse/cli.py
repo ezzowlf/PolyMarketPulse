@@ -483,6 +483,61 @@ def cmd_news_fetch(args: argparse.Namespace) -> int:
         storage.close()
 
 
+def cmd_flow_fetch(args: argparse.Namespace) -> int:
+    """Collects public order-book, trade, and holder data for open markets
+    that have a known CLOB token/condition id. Research-only: no orders, no
+    wallet keys, no signatures — read-only public REST calls."""
+    from .providers.polymarket_flow import fetch_holders, fetch_order_book, fetch_trades
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        rows = storage.connection.execute(
+            "SELECT market_id, provider, provider_market_id, condition_id, yes_token_id FROM markets "
+            "WHERE resolution_status = 'unresolved' AND condition_id IS NOT NULL AND yes_token_id IS NOT NULL "
+            "ORDER BY last_seen_at DESC LIMIT ?",
+            (args.limit,),
+        ).fetchall()
+
+        results = []
+        for market_id, provider, provider_market_id, condition_id, yes_token_id in rows:
+            book = fetch_order_book(yes_token_id, timeout=settings.request_timeout)
+            trades = fetch_trades(condition_id, timeout=settings.request_timeout)
+            holders = fetch_holders(condition_id, timeout=settings.request_timeout)
+
+            if book.fetched:
+                storage.save_orderbook_snapshot(
+                    provider, provider_market_id,
+                    [{"price": b.price, "size": b.size} for b in book.bids],
+                    [{"price": a.price, "size": a.size} for a in book.asks],
+                )
+            new_trades = 0
+            if trades.fetched:
+                for t in trades.trades:
+                    if storage.save_public_trade_event(provider, provider_market_id, t):
+                        new_trades += 1
+            if holders.fetched:
+                storage.save_public_wallet_positions(provider, provider_market_id, holders.holders)
+
+            results.append({
+                "market_id": market_id, "orderbook_fetched": book.fetched,
+                "trades_fetched": trades.fetched, "new_trades": new_trades,
+                "holders_fetched": holders.fetched,
+            })
+
+        if args.json:
+            print(json.dumps(results, indent=2, ensure_ascii=False))
+        else:
+            print(f"{len(results)} Markt/Märkte geprüft.")
+            for r in results:
+                print(f"  {r['market_id']}: Orderbuch={'ja' if r['orderbook_fetched'] else 'nein'}, "
+                      f"Trades={'ja' if r['trades_fetched'] else 'nein'} (+{r['new_trades']} neu), "
+                      f"Holders={'ja' if r['holders_fetched'] else 'nein'}")
+        return 0
+    finally:
+        storage.close()
+
+
 def cmd_db_migrate(args: argparse.Namespace) -> int:
     settings = Settings.load()
     storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
@@ -1170,6 +1225,11 @@ def build_parser() -> argparse.ArgumentParser:
     news_parser = subparsers.add_parser("news-fetch", help="News-Feeds abrufen und Märkten zuordnen")
     news_parser.add_argument("--json", action="store_true")
     news_parser.set_defaults(func=cmd_news_fetch)
+
+    flow_parser = subparsers.add_parser("flow-fetch", help="Öffentliche Orderbuch-/Trade-/Holder-Daten abrufen")
+    flow_parser.add_argument("--limit", type=int, default=20)
+    flow_parser.add_argument("--json", action="store_true")
+    flow_parser.set_defaults(func=cmd_flow_fetch)
 
     db_migrate_parser = subparsers.add_parser("db-migrate", help="Datenbankmigrationen ausführen")
     db_migrate_parser.add_argument("--json", action="store_true")

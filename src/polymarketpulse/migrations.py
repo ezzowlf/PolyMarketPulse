@@ -509,6 +509,93 @@ def _migration_009_ai_attempt_tracking(conn: sqlite3.Connection) -> None:
     _add_column(conn, "ai_analysis_runs", "total_actual_cost_usd", "REAL")
 
 
+def _migration_010_market_flow_intelligence(conn: sqlite3.Connection) -> None:
+    """Adds storage for the public market-flow/order-book/wallet-concentration
+    collectors (research-only; no wallet keys, signatures, or transactions —
+    only publicly visible on-chain addresses and public CLOB data). Purely
+    additive: `orderbook_snapshots` already existed from migration 1 but was
+    never written to — reused here rather than duplicated."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS public_trade_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT NOT NULL,
+            provider_market_id TEXT NOT NULL,
+            trade_hash TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            traded_at TEXT NOT NULL,
+            side TEXT NOT NULL,
+            outcome TEXT,
+            price REAL NOT NULL,
+            size REAL NOT NULL,
+            wallet_address TEXT NOT NULL,
+            UNIQUE(provider, provider_market_id, trade_hash)
+        );
+        CREATE INDEX IF NOT EXISTS idx_public_trade_events_market
+        ON public_trade_events(provider, provider_market_id, traded_at);
+
+        CREATE TABLE IF NOT EXISTS public_wallet_positions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT NOT NULL,
+            provider_market_id TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            wallet_address TEXT NOT NULL,
+            outcome_index INTEGER,
+            amount REAL NOT NULL,
+            UNIQUE(provider, provider_market_id, captured_at, wallet_address, outcome_index)
+        );
+        CREATE INDEX IF NOT EXISTS idx_public_wallet_positions_market
+        ON public_wallet_positions(provider, provider_market_id, captured_at);
+
+        CREATE TABLE IF NOT EXISTS wallet_market_statistics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            wallet_address TEXT NOT NULL,
+            markets_seen_in INTEGER NOT NULL DEFAULT 0,
+            resolved_markets_seen_in INTEGER NOT NULL DEFAULT 0,
+            resolved_correct_count INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            UNIQUE(wallet_address)
+        );
+
+        CREATE TABLE IF NOT EXISTS market_flow_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT NOT NULL,
+            provider_market_id TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            net_flow REAL,
+            large_trade_ratio REAL,
+            price_move_without_evidence INTEGER NOT NULL DEFAULT 0,
+            detail TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_market_flow_signals_market
+        ON market_flow_signals(provider, provider_market_id, captured_at);
+
+        CREATE TABLE IF NOT EXISTS market_reliability_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_id TEXT NOT NULL REFERENCES markets(market_id),
+            captured_at TEXT NOT NULL,
+            reliability_level TEXT NOT NULL,
+            reliability_score REAL,
+            detail TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_market_reliability_market
+        ON market_reliability_snapshots(market_id, captured_at);
+
+        CREATE TABLE IF NOT EXISTS manipulation_risk_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_id TEXT NOT NULL REFERENCES markets(market_id),
+            captured_at TEXT NOT NULL,
+            risk_score REAL NOT NULL,
+            reasons_json TEXT NOT NULL,
+            confidence REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_manipulation_risk_market
+        ON manipulation_risk_events(market_id, captured_at);
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -519,6 +606,7 @@ MIGRATIONS: list[Migration] = [
     (7, "ai_cost_tracking", _migration_007_ai_cost_tracking),
     (8, "prediction_snapshots", _migration_008_prediction_snapshots),
     (9, "ai_attempt_tracking", _migration_009_ai_attempt_tracking),
+    (10, "market_flow_intelligence", _migration_010_market_flow_intelligence),
 ]
 
 
