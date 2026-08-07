@@ -32,6 +32,19 @@ RECENCY_HALF_LIFE_HOURS = 24.0
 BREAKING_WINDOW_HOURS = 48.0
 MIN_EVIDENCE_ITEMS_FOR_ESTIMATE = 2  # a single headline is not "independent evidence"
 
+# Below this term-overlap link confidence, a headline that merely mentions
+# the market's subject entity in a positive/negative tone is NOT treated as
+# directional evidence for the resolution condition. This is the fix for a
+# real, observed failure mode: an unrelated "Trump delivers wins in Nevada"
+# headline (loosely linked via the shared word "Trump") was being scored as
+# YES-evidence for a "Trump out as President" market purely because of its
+# positive tone — sentiment about the subject is not the same thing as
+# evidence about the specific proposition the market resolves on. Explicit
+# yes/no resolution-condition term matches (see resolution_rules.py) are
+# exempt from this gate — those are on-topic by construction, not by
+# incidental keyword overlap.
+SENTIMENT_FALLBACK_MIN_RELEVANCE = 0.35
+
 
 @dataclass(frozen=True)
 class EvidenceFactor:
@@ -173,12 +186,12 @@ def compute_independent_evidence(
         title_lower = title.lower()
         matched_condition = None
         if yes_terms and any(t in title_lower for t in yes_terms):
-            matched_condition = "yes"
+            matched_condition = "yes"  # direct: matches the market's own "resolves YES if..." wording
         elif no_terms and any(t in title_lower for t in no_terms):
             matched_condition = "no"
-        elif sentiment > 0.2:
-            matched_condition = "yes"
-        elif sentiment < -0.2:
+        elif link_confidence >= SENTIMENT_FALLBACK_MIN_RELEVANCE and sentiment > 0.2:
+            matched_condition = "yes"  # weak: tone-only, gated behind a real relevance bar
+        elif link_confidence >= SENTIMENT_FALLBACK_MIN_RELEVANCE and sentiment < -0.2:
             matched_condition = "no"
 
         factors.append(
@@ -199,10 +212,18 @@ def compute_independent_evidence(
     confirmation_count = max(len(yes_domains), len(no_domains))
 
     scored = [f for f in factors if f.matched_condition is not None]
-    if not scored:
+    if len(scored) < MIN_EVIDENCE_ITEMS_FOR_ESTIMATE:
+        # This is the real fix, not just the earlier `len(rows) < MIN...`
+        # check: having 2+ *linked* articles is not the same as having 2+
+        # articles that actually say something about the resolution
+        # condition. A single on-topic (or loosely-relevant-but-toned)
+        # headline must never be enough to move the estimate on its own —
+        # "no data" must stay "no data" (unavailable), not collapse into a
+        # confident-looking number built from one weak signal.
         return _unavailable(
-            "keine unabhängige Schätzung möglich — verknüpfte Quellen vorhanden, aber keine davon "
-            "äußert sich erkennbar zu den Resolution-Bedingungen (weder Stichwort- noch Stimmungstreffer)."
+            f"keine unabhängige Schätzung möglich — nur {len(scored)} Nachrichtentreffer mit erkennbarem "
+            f"Bezug zur Resolution-Bedingung (mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig), "
+            f"von {len(rows)} verknüpften Quellen insgesamt."
         )
 
     weight_sum = sum(f.reliability * f.recency_weight * f.link_confidence for f in scored)
@@ -216,10 +237,16 @@ def compute_independent_evidence(
     weighted_direction = round(direction_sum / weight_sum, 4)  # -1..+1
 
     # Independent probability starts from a neutral 0.5 prior — deliberately
-    # NOT the market price — and is moved only by the evidence itself.
+    # NOT the market price — and is moved only by the evidence itself. The
+    # evidence's own average relevance (term-overlap link confidence) additionally
+    # scales how far it's allowed to move that prior — a handful of only
+    # loosely-relevant (but strongly-toned) articles must produce a much
+    # smaller swing than the same count of directly on-topic ones, even
+    # after the relevance gate above.
+    average_relevance = sum(f.link_confidence for f in scored) / len(scored)
     bayes = bayesian_update(
         prior_probability=0.5, weighted_news_sentiment=weighted_direction,
-        confirmation_count=confirmation_count, news_weight_multiplier=1.0,
+        confirmation_count=confirmation_count, news_weight_multiplier=average_relevance,
     )
     independent_yes_probability = bayes.posterior_probability
 
