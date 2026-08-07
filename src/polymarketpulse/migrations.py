@@ -781,6 +781,21 @@ def _migration_013_market_classification(conn: sqlite3.Connection) -> None:
     _add_column(conn, "markets", "event_type", "TEXT")
 
 
+def _migration_014_comparable_baseline_history(conn: sqlite3.Connection) -> None:
+    """Phase D: additive columns on `markets` for the similarity-weighted
+    comparable-case baseline (history.py). Stores the already-computed
+    MarketProposition (Phase A) as JSON alongside a lightweight entities
+    list, plus a parsed deadline string, so find_comparable_cases() and
+    compute_weighted_baseline() have real structured data to score against
+    without re-parsing question text on every lookup. Purely additive:
+    existing columns/tables are untouched, and every new column is
+    nullable so old rows (and rows written by code that hasn't been
+    updated yet) remain valid."""
+    _add_column(conn, "markets", "proposition_json", "TEXT")
+    _add_column(conn, "markets", "entities_json", "TEXT")
+    _add_column(conn, "markets", "deadline", "TEXT")
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -795,6 +810,7 @@ MIGRATIONS: list[Migration] = [
     (11, "shadow_trading", _migration_011_shadow_trading),
     (12, "event_relationship_graph", _migration_012_event_relationship_graph),
     (13, "market_classification", _migration_013_market_classification),
+    (14, "comparable_baseline_history", _migration_014_comparable_baseline_history),
 ]
 
 

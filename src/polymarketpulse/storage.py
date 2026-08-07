@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -49,6 +50,30 @@ STATUS_TABLES = (
     "event_market_relevance",
     "event_relations",
 )
+
+
+# Phase D: cheap, dependency-free entity extraction for the comparable-case
+# scorer (D3). Deliberately a standalone implementation rather than reaching
+# into semantics.py's private `_extract_actors` — Phase D only *consumes*
+# Phase A/B/C's public functions (parse_market_proposition/classify_market),
+# it does not modify or import their internals.
+_ENTITY_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b")
+_ENTITY_STOPWORDS = frozenset({"Will", "The", "A", "An", "This", "That", "Is", "Yes", "No"})
+
+
+def _extract_entities(question: str, max_entities: int = 8) -> list[str]:
+    """Naive proper-noun-run extraction from a market question, used only
+    as a comparable-case entity-overlap signal — not a replacement for any
+    Phase A/B/C NLP."""
+    seen: set[str] = set()
+    entities: list[str] = []
+    for match in _ENTITY_RE.findall(question or ""):
+        if match in _ENTITY_STOPWORDS or len(match) < 3:
+            continue
+        if match not in seen:
+            seen.add(match)
+            entities.append(match)
+    return entities[:max_entities]
 
 
 def _row_key(market: Market) -> str:
@@ -209,10 +234,14 @@ class Storage:
         except Exception:  # noqa: BLE001 - classification must never block a market write
             # Fall back to "unclassified" rather than losing the scan.
             classification = None
+            proposition = None
 
         classified_category = classification.category if classification else None
         classification_confidence = classification.confidence if classification else None
         event_type = classification.event_type if classification else None
+        proposition_json = json.dumps(proposition.as_dict()) if proposition else None
+        deadline = proposition.deadline if proposition else None
+        entities_json = json.dumps(_extract_entities(market.question))
 
         self.connection.execute(
             """
@@ -222,8 +251,9 @@ class Storage:
                 event_id, description, outcomes, outcome_prices, resolved_at,
                 resolution_status, winning_outcome, resolution_source, raw_data_hash,
                 provider_data, first_seen_at, last_seen_at,
-                classified_category, classification_confidence, event_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                classified_category, classification_confidence, event_type,
+                proposition_json, entities_json, deadline
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(provider, provider_market_id) DO UPDATE SET
                 condition_id = excluded.condition_id,
                 question = excluded.question,
@@ -248,7 +278,10 @@ class Storage:
                 last_seen_at = excluded.last_seen_at,
                 classified_category = excluded.classified_category,
                 classification_confidence = excluded.classification_confidence,
-                event_type = excluded.event_type
+                event_type = excluded.event_type,
+                proposition_json = excluded.proposition_json,
+                entities_json = excluded.entities_json,
+                deadline = excluded.deadline
             """,
             (
                 key,
@@ -279,6 +312,9 @@ class Storage:
                 classified_category,
                 classification_confidence,
                 event_type,
+                proposition_json,
+                entities_json,
+                deadline,
             ),
         )
         # The stored market_id may differ from `key` for rows that pre-date
@@ -392,6 +428,54 @@ class Storage:
 
         self.connection.commit()
         return snapshots_written
+
+    # --- Phase D: backfill classification/proposition on existing rows ----
+
+    def backfill_classifications(self, only_missing: bool = True) -> int:
+        """Re-run classify_market/parse_market_proposition over already-stored
+        `markets` rows and populate classified_category/event_type/
+        proposition_json/entities_json/deadline. Needed for rows written
+        before migration 14 (or before Phase C's classifier existed at all)
+        so find_comparable_cases() has real structured data for every
+        historical row, not just newly-ingested ones. `only_missing=True`
+        (default) only touches rows where proposition_json is still NULL;
+        pass False to force a full re-classification pass. Returns the
+        number of rows updated."""
+        where = "WHERE proposition_json IS NULL" if only_missing else ""
+        rows = self.connection.execute(
+            f"SELECT market_id, question, description FROM markets {where}"
+        ).fetchall()
+        updated = 0
+        for market_id, question, description in rows:
+            question = question or ""
+            try:
+                proposition = parse_market_proposition(question, description)
+                classification = classify_market(question, description, proposition)
+            except Exception:  # noqa: BLE001 - never abort the backfill on one bad row
+                classification = None
+                proposition = None
+            if classification is None or proposition is None:
+                continue
+            self.connection.execute(
+                """
+                UPDATE markets SET
+                    classified_category = ?, classification_confidence = ?, event_type = ?,
+                    proposition_json = ?, entities_json = ?, deadline = ?
+                WHERE market_id = ?
+                """,
+                (
+                    classification.category,
+                    classification.confidence,
+                    classification.event_type,
+                    json.dumps(proposition.as_dict()),
+                    json.dumps(_extract_entities(question)),
+                    proposition.deadline,
+                    market_id,
+                ),
+            )
+            updated += 1
+        self.connection.commit()
+        return updated
 
     # --- resolutions ----------------------------------------------------------
 
