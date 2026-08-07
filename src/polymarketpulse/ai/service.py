@@ -451,6 +451,17 @@ def _persist_prediction_snapshot(storage: Storage, market: dict, prediction: Pre
     warnings_json = json.dumps(list(prediction.reasoning_notes[:10]))
     config_hash = hash_payload(PREDICTION_VERSION, "v1-config")
 
+    # Phase N: which submodels actually contributed to THIS forecast (source
+    # names of contribution_breakdown entries with available=True). Purely
+    # derived from prediction.contribution_breakdown, which is itself
+    # computed with no resolution/outcome data — no look-ahead risk.
+    models_used = ",".join(
+        entry.source for entry in prediction.contribution_breakdown if entry.available
+    )
+    divergence_verdict = (
+        prediction.divergence_audit.verdict if prediction.divergence_audit else None
+    )
+
     return storage.save_prediction_snapshot(
         market_id=prediction.market_id, provider=market["provider"],
         provider_market_id=market["provider_market_id"], category=market["category"],
@@ -474,6 +485,18 @@ def _persist_prediction_snapshot(storage: Storage, market: dict, prediction: Pre
         reaction_lag_hours=lag.reaction_detected_at_hours if lag else None,
         submodel_estimates_json=submodel_json, warnings_json=warnings_json,
         engine_version=PREDICTION_VERSION, config_hash=config_hash,
+        # --- Phase N: shadow forecast snapshot fields, forecast-time only ---
+        # market_probability_at_forecast is exactly the market price value
+        # that was passed INTO compute_prediction() to produce this
+        # prediction (prediction.market_yes_probability echoes that same
+        # input back) — never derived from, or aware of, any resolution.
+        market_probability_at_forecast=prediction.market_yes_probability,
+        blended_probability=prediction.blended_probability,
+        calibrated_probability=prediction.calibrated_probability,
+        confidence_calibration_status=prediction.confidence_calibration_status,
+        forecast_status=prediction.forecast_status,
+        models_used=models_used or None,
+        divergence_verdict=divergence_verdict,
     )
 
 

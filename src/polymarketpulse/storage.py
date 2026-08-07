@@ -1275,6 +1275,11 @@ class Storage:
         wallet_concentration_score: float | None = None, reaction_lag_hours: float | None = None,
         submodel_estimates_json: str | None = None, warnings_json: str | None = None,
         engine_version: str | None = None, config_hash: str | None = None,
+        # --- Phase N: shadow forecast snapshot fields (additive, PRE-resolution only) ---
+        market_probability_at_forecast: float | None = None,
+        blended_probability: float | None = None, calibrated_probability: float | None = None,
+        confidence_calibration_status: str | None = None, forecast_status: str | None = None,
+        models_used: str | None = None, divergence_verdict: str | None = None,
     ) -> int:
         now = datetime.now(UTC).isoformat()
         cursor = self.connection.execute(
@@ -1286,8 +1291,10 @@ class Storage:
                 market_reliability_score, market_reliability_level, manipulation_risk_score, opportunity_score,
                 deadline_phase, evidence_count, independent_confirmation_count, contradiction_present,
                 orderbook_imbalance, net_flow, wallet_concentration_score, reaction_lag_hours,
-                submodel_estimates_json, warnings_json, engine_version, config_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                submodel_estimates_json, warnings_json, engine_version, config_hash,
+                forecast_at, market_probability_at_forecast, blended_probability, calibrated_probability,
+                confidence_calibration_status, forecast_status, models_used, divergence_verdict
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 market_id, provider, provider_market_id, category, prediction_version, now,
@@ -1298,6 +1305,10 @@ class Storage:
                 int(contradiction_present) if contradiction_present is not None else None,
                 orderbook_imbalance, net_flow, wallet_concentration_score, reaction_lag_hours,
                 submodel_estimates_json, warnings_json, engine_version, config_hash,
+                # forecast_at deliberately equals `now` (the same forecast-time write instant as
+                # created_at) — no resolution/outcome data is ever read or written on this path.
+                now, market_probability_at_forecast, blended_probability, calibrated_probability,
+                confidence_calibration_status, forecast_status, models_used, divergence_verdict,
             ),
         )
         self.connection.commit()

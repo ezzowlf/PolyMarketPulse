@@ -826,6 +826,67 @@ def _migration_015_extracted_event_persistence(conn: sqlite3.Connection) -> None
     )
 
 
+def _migration_016_shadow_forecast_calibration_fields(conn: sqlite3.Connection) -> None:
+    """Phase N: additive columns on the migration-8 `prediction_snapshots`
+    table so every persisted prediction also carries the exact PRE-
+    resolution forecast-time fields Phase N2's calibration framework needs
+    to eventually join against `market_resolutions` (Phase N2, this same
+    round) — Brier score, log-loss, reliability bins, and per-model-family
+    error, once enough resolved history exists.
+
+    Deliberately reuses the existing `prediction_snapshots` table (rather
+    than a parallel `shadow_forecast_snapshots` table) because it is
+    already the "every computed prediction, resolution-independent" record
+    (see _migration_008_prediction_snapshots's docstring) with a
+    (provider, provider_market_id, created_at) index ready to join against
+    `market_resolutions(provider, provider_market_id, resolved_at)`. No
+    resolution/outcome column is added here or anywhere in this migration —
+    that is the whole point: this table must remain queryable-and-complete
+    from forecast-time data alone, with the outcome join happening later,
+    read-only, in calibration.py.
+
+    New columns, all nullable, all additive:
+      - forecast_at: explicit forecast timestamp (redundant with
+        `created_at` today, but named per the Phase N spec and kept
+        separate in case snapshot-write time and forecast-computation time
+        ever diverge).
+      - market_probability_at_forecast: the market price that was passed
+        INTO compute_prediction() at call time (identical value to the
+        existing `market_yes_probability` column) — named explicitly per
+        spec so the calibration join has an unambiguous, self-documenting
+        "what the market said before this forecast was made" column,
+        decoupled from any future repurposing of `market_yes_probability`.
+      - blended_probability / calibrated_probability: the two newer
+        PredictionResult numbers (types.py) that `prediction_snapshots` did
+        not previously capture (it only had estimated_yes_probability,
+        which is blended_probability's V1-era alias).
+      - confidence_calibration_status: verbatim copy of
+        PredictionResult.confidence_calibration_status (today always the
+        literal "UNCALIBRATED" — see types.py's
+        DEFAULT_CONFIDENCE_CALIBRATION_STATUS docstring).
+      - forecast_status: verbatim copy of PredictionResult.forecast_status
+        (e.g. BLENDED_FORECAST, FORECAST_SUPPRESSED, ...).
+      - models_used: comma-joined `source` names of every
+        contribution_breakdown entry with available=True — which submodels
+        actually contributed to this specific forecast.
+      - divergence_verdict: PredictionResult.divergence_audit.verdict
+        (PASS/WARN/REJECT) when Phase M's audit ran, else NULL (audit
+        never triggered / gap below threshold).
+      - engine_version: NOTE this column already exists (added in
+        migration 8) and is reused as-is for the Phase N spec's
+        "engine_version" field (literal tag, e.g. "v1-phaseN") — not
+        re-added here.
+    """
+    _add_column(conn, "prediction_snapshots", "forecast_at", "TEXT")
+    _add_column(conn, "prediction_snapshots", "market_probability_at_forecast", "REAL")
+    _add_column(conn, "prediction_snapshots", "blended_probability", "REAL")
+    _add_column(conn, "prediction_snapshots", "calibrated_probability", "REAL")
+    _add_column(conn, "prediction_snapshots", "confidence_calibration_status", "TEXT")
+    _add_column(conn, "prediction_snapshots", "forecast_status", "TEXT")
+    _add_column(conn, "prediction_snapshots", "models_used", "TEXT")
+    _add_column(conn, "prediction_snapshots", "divergence_verdict", "TEXT")
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -842,6 +903,7 @@ MIGRATIONS: list[Migration] = [
     (13, "market_classification", _migration_013_market_classification),
     (14, "comparable_baseline_history", _migration_014_comparable_baseline_history),
     (15, "extracted_event_persistence", _migration_015_extracted_event_persistence),
+    (16, "shadow_forecast_calibration_fields", _migration_016_shadow_forecast_calibration_fields),
 ]
 
 
