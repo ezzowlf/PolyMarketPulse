@@ -17,6 +17,32 @@ Recommendation = Literal[
     "STRONG_YES", "YES", "WATCH_YES", "NO_BET", "WATCH_NO", "NO", "STRONG_NO", "INSUFFICIENT_DATA"
 ]
 
+# K3: tags every "prior"/base-rate-like starting point in the engine with
+# its real provenance, so a reasoned-but-not-statistically-fitted number
+# (e.g. base_rates.py's manually-authored table) can never be presented as
+# if it were computed from real observed outcomes.
+#   DATA_FITTED      computed from real observed historical outcomes with a
+#                     real, reportable sample size (e.g. history.py's
+#                     weighted comparable-case baseline).
+#   EXPERT_HEURISTIC  a documented, reasoned-but-not-statistically-fitted
+#                     number (e.g. base_rates.py's manually-reasoned table).
+#   FALLBACK          a structural default (e.g. evidence.py's neutral 0.5
+#                     Bayesian starting point) that then gets moved by real
+#                     evidence — not itself a claim about the world.
+#   UNKNOWN           provenance genuinely not tracked for this value.
+PriorProvenance = Literal["DATA_FITTED", "EXPERT_HEURISTIC", "FALLBACK", "UNKNOWN"]
+
+ConfidenceCalibrationStatus = Literal["UNCALIBRATED", "CALIBRATED"]
+
+# K1b: the confidence score has no real out-of-sample resolved-shadow-forecast
+# data to calibrate against yet (that is Phase N/N2's job: collect resolved
+# forecasts, compute Brier/reliability curves, and fit an actual calibration
+# mapping). Until that data exists, every PredictionResult is honestly
+# tagged UNCALIBRATED — a literal, not a computed number pretending to be
+# one. Phase N2 will replace this constant with a real per-market lookup
+# once resolved-forecast history exists to compute it from.
+DEFAULT_CONFIDENCE_CALIBRATION_STATUS: ConfidenceCalibrationStatus = "UNCALIBRATED"
+
 ForecastStatus = Literal[
     "NO_FORECAST", "BASELINE_ONLY", "EVIDENCE_ONLY", "LOW_DATA", "INDEPENDENT_FORECAST", "BLENDED_FORECAST",
     # Phase B4: independent estimate diverged sharply from the market price
@@ -49,6 +75,11 @@ class ContributionEntry:
     # construction — eligibility is a meaningful distinction only for the
     # specialized (Phase E) router-selected models.
     eligible: bool | None = None
+    # K3: provenance of the "prior" this contribution effectively acts as
+    # (its starting point before evidence moves it) — None for submodels
+    # that don't have a prior/base-rate concept at all (e.g. momentum).
+    # See PriorProvenance in this module for the literal's meaning.
+    prior_provenance: PriorProvenance | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -56,6 +87,7 @@ class ContributionEntry:
             "estimated_yes_probability": self.estimated_yes_probability,
             "weight_share": self.weight_share, "detail": self.detail,
             "eligible": self.eligible,
+            "prior_provenance": self.prior_provenance,
         }
 
 
@@ -214,6 +246,12 @@ class PredictionResult:
     # None otherwise. See prediction/divergence.py.
     forecast_suppression_reason: str | None = None
 
+    # --- K1b: honest calibration status (additive) -----------------------
+    # Always "UNCALIBRATED" today — see DEFAULT_CONFIDENCE_CALIBRATION_STATUS
+    # above for why. Becomes a real per-market computed value once Phase N2
+    # has resolved-shadow-forecast history to fit a calibration curve from.
+    confidence_calibration_status: ConfidenceCalibrationStatus = DEFAULT_CONFIDENCE_CALIBRATION_STATUS
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -261,4 +299,5 @@ class PredictionResult:
             "forecast_status": self.forecast_status,
             "contribution_breakdown": [c.as_dict() for c in self.contribution_breakdown],
             "forecast_suppression_reason": self.forecast_suppression_reason,
+            "confidence_calibration_status": self.confidence_calibration_status,
         }

@@ -512,7 +512,14 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
 _REPORTED_TERMS = ("report", "reports", "reported", "according to", "sources say", "officials say")
 _CONFIRMED_TERMS = ("confirmed", "confirms", "confirmation", "officially")
 _ANNOUNCED_TERMS = ("announces", "announced", "announcement")
-_SPECULATIVE_TERMS = ("could", "may", "might", "considering", "weighing", "reportedly considering", "rumored")
+_SPECULATIVE_TERMS = (
+    "could", "may", "might", "considering", "weighing", "reportedly considering", "rumored",
+    # K4 fix: "a ceasefire proposal was submitted" / "expected ceasefire" are
+    # not-yet-occurred events that were previously falling through to
+    # certainty="unknown" and then status="actual" (see _STATUS_BY_ACTION),
+    # wrongly reading identically to a confirmed ceasefire.
+    "proposal", "proposed", "submitted", "expected",
+)
 
 # Negation/failure terms — a headline can contain an event-family keyword
 # (e.g. "ceasefire") while actually reporting that the event did NOT
@@ -523,6 +530,19 @@ _NEGATION_TERMS = (
     "denied", "denies", "rejected", "rejects", "fails", "failed", "failure", "collapse", "collapses",
     "collapsed", "falls apart", "fell apart", "breaks down", "broke down", "postponed", "delayed",
     "cancelled", "canceled", "ruled out", "backs down", "backed down", "not confirmed",
+    # K4 fix: explicit "not <verb>" / modal-negation phrasings were falling
+    # through to the plain keyword match (e.g. "Ceasefire not agreed after
+    # talks" and "Trump will not resign, aide says" were both wrongly
+    # classified as the event having occurred, because "not agreed"/
+    # "will not resign" contain no term from the original list above).
+    "not agreed", "no agreement", "not reached", "no deal", "will not", "won't", "did not", "does not",
+    # K4 fix: "Ceasefire expires at midnight" was matching the bare keyword
+    # "ceasefire" (in _DEESCALATION_TERMS) and being read as a NEW ceasefire
+    # taking effect, when it actually reports an EXISTING one ending — the
+    # opposite direction. Scoped narrowly (only fires when combined with an
+    # already-detected escalation/deescalation action, same as every other
+    # entry in this tuple) so it doesn't affect unrelated "expires" usages.
+    "expires", "expiring", "expired",
 )
 
 # event_types that describe opposite outcomes of the same underlying
@@ -640,6 +660,16 @@ def extract_event(title: str, body: str | None = None) -> ExtractedEvent:
     certainty = _detect_certainty(text)
 
     status: Literal["actual", "intent", "call_for", "continuation", "unknown"] = _STATUS_BY_ACTION.get(action, "unknown") if action else "unknown"
+
+    # K4 fix: escalation/deescalation status was hardcoded to "actual"
+    # regardless of certainty (see _STATUS_BY_ACTION), so a merely proposed/
+    # expected/speculative ceasefire ("Ceasefire proposal submitted",
+    # "Ceasefire expected next week") was read as confidently as a confirmed
+    # one. Downgrade to "intent" (not-yet-occurred) when the detected
+    # certainty is speculative — mirrors how office_departure already
+    # distinguishes "intent" from "actual".
+    if action in ("escalation", "deescalation") and certainty == "speculative":
+        status = "intent"
 
     event_type = None
     if action in ("resignation", "announce_intent_to_resign", "call_for_resignation", "official_duty", "routine_activity"):

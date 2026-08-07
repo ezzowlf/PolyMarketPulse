@@ -266,10 +266,54 @@ def _load_comparable_candidates(conn: sqlite3.Connection, provider: str | None =
     return out
 
 
+# --- K2: historical baseline uncertainty interval --------------------------
+# Wilson score interval, not a naive normal-approximation (Wald) interval:
+# the Wald interval (p +/- z*sqrt(p(1-p)/n)) badly undercovers at small n or
+# when p is near 0/1 — exactly the "4 cases must not look as trustworthy as
+# 400" regime this feature exists for. Wilson score is the standard
+# textbook fix (correct even at very small n, never produces bounds outside
+# [0,1]) and needs only n (here: Kish's effective sample size, ESS, so a
+# handful of near-duplicate high-weight cases don't buy an artificially
+# narrow interval) and p (the weighted YES mass) as inputs — no extra
+# hyperparameters to justify, unlike a Beta-posterior credible interval
+# which would require picking a prior (alpha, beta) that isn't otherwise
+# motivated anywhere else in this codebase.
+_WILSON_Z = 1.96  # 95% interval
+
+
+def _wilson_score_interval(p: float, n: float) -> tuple[float, float]:
+    """Wilson score interval for a proportion `p` estimated from an
+    (effective) sample size `n`. Returns (lower, upper), both in [0, 1].
+    n <= 0 returns the maximally uninformative (0.0, 1.0) interval."""
+    if n <= 0:
+        return 0.0, 1.0
+    z = _WILSON_Z
+    z2 = z * z
+    denom = 1 + z2 / n
+    center = (p + z2 / (2 * n)) / denom
+    half_width = (z * ((p * (1 - p) / n + z2 / (4 * n * n)) ** 0.5)) / denom
+    lower = max(0.0, center - half_width)
+    upper = min(1.0, center + half_width)
+    return round(lower, 4), round(upper, 4)
+
+
 @dataclass(frozen=True)
 class WeightedBaselineResult:
     """Result of `compute_weighted_baseline`. `baseline_yes_probability` is
-    None when there are zero usable (resolved, YES/NO) comparable cases."""
+    None when there are zero usable (resolved, YES/NO) comparable cases.
+
+    K2 additions: `lower_bound`/`upper_bound` are a 95% Wilson score
+    interval around `baseline_yes_probability`, computed from the weighted
+    YES mass and `effective_sample_size` (Kish's ESS as the effective N).
+    `uncertainty_width` is `upper_bound - lower_bound` — the single number
+    that visibly shrinks as real comparable evidence accumulates, so a
+    4-case baseline reports a visibly wider (less trustworthy-looking)
+    interval than a 400-case one at the same point estimate.
+    `historical_probability` is an alias of `baseline_yes_probability` kept
+    for the K2 field-name spec (`historical_probability`,
+    `effective_sample_size`, `lower_bound`, `upper_bound`,
+    `uncertainty_width`) without breaking the existing
+    `baseline_yes_probability` name other callers already read."""
 
     baseline_yes_probability: float | None
     total_weight: float
@@ -278,6 +322,13 @@ class WeightedBaselineResult:
     tier: str
     detail: str
     excluded_non_binary_count: int = 0
+    lower_bound: float | None = None
+    upper_bound: float | None = None
+    uncertainty_width: float | None = None
+
+    @property
+    def historical_probability(self) -> float | None:
+        return self.baseline_yes_probability
 
 
 def compute_weighted_baseline(
@@ -335,6 +386,9 @@ def compute_weighted_baseline(
     else:
         tier = TIER_USABLE
 
+    lower, upper = _wilson_score_interval(baseline, ess)
+    width = round(upper - lower, 4)
+
     return WeightedBaselineResult(
         baseline_yes_probability=round(baseline, 4) if baseline is not None else None,
         total_weight=round(total_weight, 4),
@@ -344,9 +398,13 @@ def compute_weighted_baseline(
         detail=(
             f"{len(usable)} gewichtete Vergleichsfälle (Gesamtgewicht={total_weight:.2f}, "
             f"effektive Stichprobengröße={ess:.2f}), gewichteter Basiswert={baseline:.2%} "
-            f"(Konfidenzstufe: {tier})."
+            f"(Konfidenzstufe: {tier}). 95%-Wilson-Intervall: [{lower:.2%}, {upper:.2%}] "
+            f"(Breite={width:.2%})."
         ),
         excluded_non_binary_count=excluded,
+        lower_bound=lower,
+        upper_bound=upper,
+        uncertainty_width=width,
     )
 
 

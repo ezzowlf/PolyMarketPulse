@@ -166,3 +166,46 @@ def test_non_binary_winning_outcome_excluded_from_training_labels() -> None:
     result = compute_weighted_baseline(cases)
     assert result.case_count == 1
     assert result.excluded_non_binary_count == 1
+
+
+# --- K2: historical baseline uncertainty (Wilson score interval) -----------
+
+
+def _mixed(n_yes: int, n_no: int) -> list[tuple[ComparableCandidate, float]]:
+    cases = [(_candidate(f"y{i}", "q", "POLITICS", None, (), "Yes"), 1.0) for i in range(n_yes)]
+    cases += [(_candidate(f"n{i}", "q", "POLITICS", None, (), "No"), 1.0) for i in range(n_no)]
+    return cases
+
+
+def test_small_sample_has_visibly_wider_interval_than_large_sample_same_point_estimate() -> None:
+    # 4 cases must not look as trustworthy as 400 at the same ~50% point
+    # estimate — the exact spec requirement for K2.
+    small = compute_weighted_baseline(_mixed(2, 2))  # 4 cases, 50% YES
+    large = compute_weighted_baseline(_mixed(200, 200))  # 400 cases, 50% YES
+
+    assert small.baseline_yes_probability == large.baseline_yes_probability == 0.5
+    assert small.uncertainty_width is not None
+    assert large.uncertainty_width is not None
+    assert small.uncertainty_width > large.uncertainty_width
+    # Small sample's interval should span a large chunk of [0,1]; the large
+    # sample's interval should be tight around 0.5.
+    assert small.uncertainty_width > 0.5
+    assert large.uncertainty_width < 0.15
+
+
+def test_bounds_are_within_unit_interval_and_straddle_point_estimate() -> None:
+    result = compute_weighted_baseline(_mixed(3, 1))  # 4 cases, 75% YES
+    assert result.lower_bound is not None and result.upper_bound is not None
+    assert 0.0 <= result.lower_bound <= result.baseline_yes_probability <= result.upper_bound <= 1.0
+
+
+def test_historical_probability_property_aliases_baseline_yes_probability() -> None:
+    result = compute_weighted_baseline(_mixed(5, 5))
+    assert result.historical_probability == result.baseline_yes_probability
+
+
+def test_empty_comparable_set_has_no_bounds() -> None:
+    result = compute_weighted_baseline([])
+    assert result.lower_bound is None
+    assert result.upper_bound is None
+    assert result.uncertainty_width is None

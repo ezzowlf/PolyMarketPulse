@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from ..price_analytics import PricePoint
 from ..providers.coingecko import fetch_price_and_volatility, resolve_coingecko_id
 from .bayesian import bayesian_update
-from .confidence import compute_confidence
+from .confidence import compute_confidence, compute_freshness_score
 from .cross_market import compute_cross_market_relations
 from .deadline import classify_deadline_phase, deadline_weights_for
 from .divergence import evaluate_divergence_safety
@@ -496,15 +496,27 @@ def compute_prediction(
         reasoning.append(f"Netto-Edge nach pauschalem Kosten-/Spread-Abschlag von {cost_haircut:.0%}: {net_edge:+.1%}.")
 
     # --- Data quality (unchanged shape from V1) ---------------------------
+    # J1 fix: aktualitaet used to be hardcoded to a flat 85.0 regardless of
+    # actual data staleness (see git history for the removed "KNOWN
+    # LIMITATION" comment). Now computed from real timestamps: independent
+    # evidence's own per-item recency_weight (evidence.py, decayed from real
+    # published_at) and the latest market_snapshots.captured_at (decayed
+    # with a much shorter half-life, since price data goes stale far faster
+    # than news topicality). See confidence.compute_freshness_score.
+    _evidence_recency = [
+        e.recency_weight
+        for e in (*independent_evidence.evidence_for_yes, *independent_evidence.evidence_for_no)
+    ]
+    _latest_price_captured_at = price_points[-1].captured_at if price_points else None
+    _price_is_primary = proposition.event_type in ("price_above", "price_below")
+    aktualitaet, freshness_detail = compute_freshness_score(
+        _evidence_recency, _latest_price_captured_at, now=now, price_signal_is_primary=_price_is_primary,
+    )
+    reasoning.append(freshness_detail)
+
     dq = DataQualityBreakdown(
         vollstaendigkeit=90.0 if data_quality_report_score and data_quality_report_score >= 90 else 60.0,
-        # KNOWN LIMITATION: not yet computed from the actual last-scan
-        # timestamp — compute_prediction() has no snapshot-age input to
-        # work with today. A fixed 85 means "Aktualität" cannot currently
-        # drag an otherwise-poor market's data quality down. Wiring a real
-        # snapshot-age input through is out of scope for this fix; see the
-        # audit report's "offene Einschränkungen" section.
-        aktualitaet=85.0,
+        aktualitaet=aktualitaet,
         quellenuebereinstimmung=round(min(100.0, (news_agreement or 0.5) * 100), 1) if news_count else 50.0,
         historische_fallzahl=round(min(100.0, comparable_sample_size * 8.0), 1),
         resolution_klarheit=90.0 if resolution_rules_present else 40.0,
@@ -580,6 +592,34 @@ def compute_prediction(
         independent_probability = None
         forecast_status = "FORECAST_SUPPRESSED"
 
+    # K3: prior provenance per submodel, surfaced in contribution_breakdown
+    # so a future frontend can visibly distinguish "computed from real
+    # observed outcomes" from "a reasoned heuristic" from "a structural
+    # default that evidence then moved". See types.PriorProvenance.
+    #   history: a real weighted baseline over actually-resolved comparable
+    #     markets (history.py) -> DATA_FITTED.
+    #   independent_evidence: starts from the neutral 0.5 Bayesian prior,
+    #     which is a structural default, not a claim about the world
+    #     (evidence.py) -> FALLBACK. When the extraordinary-event guard
+    #     anchors to base_rates.py instead, that anchor is a documented,
+    #     reasoned-but-not-statistically-fitted number -> EXPERT_HEURISTIC;
+    #     since a single ContributionEntry can't carry both, FALLBACK is
+    #     reported as the base case (the guard only fires for a minority of
+    #     extraordinary-event-type markets — see evidence.py's
+    #     extraordinary_guard_applied flag for the per-market truth).
+    #   event_relations: starts from the market price itself when available
+    #     (not a prior in the base-rate sense) -> UNKNOWN (not tracked).
+    #   momentum/news: not prior-based (adjust an existing estimate rather
+    #     than anchor one) -> None (no prior_provenance concept applies).
+    #   specialized models: mix of structured-data-derived and heuristic
+    #     confidence math depending on the model -> UNKNOWN today (not yet
+    #     audited per-model; see K3 report for this honestly-left gap).
+    _PRIOR_PROVENANCE_BY_SOURCE: dict[str, str] = {
+        "history": "DATA_FITTED",
+        "independent_evidence": "FALLBACK",
+        "event_relations": "UNKNOWN",
+    }
+
     total_available_weight = sum(s.weight for s in all_submodels if s.available)
     contribution_breakdown = tuple(
         ContributionEntry(
@@ -587,6 +627,9 @@ def compute_prediction(
             weight_share=(round(s.weight / total_available_weight, 4) if s.available and total_available_weight > 0 else None),
             detail=s.detail,
             eligible=specialized_eligibility.get(s.name),
+            prior_provenance=_PRIOR_PROVENANCE_BY_SOURCE.get(
+                s.name, "UNKNOWN" if s.name in ALL_SPECIALIZED_MODEL_NAMES else None
+            ),
         )
         for s in all_submodels
     )
