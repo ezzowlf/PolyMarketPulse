@@ -1,8 +1,9 @@
 """Live Acceptance Test — run 20 real Polymarket markets through the API."""
 
-import httpx
 import json
 from pathlib import Path
+
+import httpx
 
 API_BASE = "http://127.0.0.1:8000"
 
@@ -103,7 +104,7 @@ def main():
                 "divergence": divergence,
             })
             
-        except Exception as e:
+        except httpx.HTTPError as e:
             print(f"  ERROR: {e}")
             results.append({
                 "question": question,
