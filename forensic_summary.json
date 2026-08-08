@@ -1,0 +1,104 @@
+{
+  "total_forecasts": 10,
+  "model_usage": {
+    "history": {
+      "eligible": 0,
+      "available": 10,
+      "used": 0
+    },
+    "momentum": {
+      "eligible": 0,
+      "available": 1,
+      "used": 0
+    },
+    "news": {
+      "eligible": 0,
+      "available": 1,
+      "used": 0
+    },
+    "independent_evidence": {
+      "eligible": 0,
+      "available": 0,
+      "used": 0
+    },
+    "event_relations": {
+      "eligible": 0,
+      "available": 0,
+      "used": 0
+    },
+    "quant": {
+      "eligible": 1,
+      "available": 0,
+      "used": 0
+    },
+    "macro": {
+      "eligible": 4,
+      "available": 1,
+      "used": 0
+    },
+    "politics": {
+      "eligible": 2,
+      "available": 1,
+      "used": 0
+    },
+    "geopolitics": {
+      "eligible": 0,
+      "available": 0,
+      "used": 0
+    },
+    "sports": {
+      "eligible": 0,
+      "available": 0,
+      "used": 0
+    }
+  },
+  "model_weights": {
+    "history": {
+      "mean": 0,
+      "median": 0
+    },
+    "momentum": {
+      "mean": 0,
+      "median": 0
+    },
+    "news": {
+      "mean": 0,
+      "median": 0
+    },
+    "independent_evidence": {
+      "mean": 0,
+      "median": 0
+    },
+    "event_relations": {
+      "mean": 0,
+      "median": 0
+    },
+    "quant": {
+      "mean": 0,
+      "median": 0
+    },
+    "macro": {
+      "mean": 0,
+      "median": 0
+    },
+    "politics": {
+      "mean": 0,
+      "median": 0
+    },
+    "geopolitics": {
+      "mean": 0,
+      "median": 0
+    },
+    "sports": {
+      "mean": 0,
+      "median": 0
+    }
+  },
+  "categories": {
+    "history_only": 0,
+    "history_plus_evidence": 0,
+    "history_plus_specialized": 0,
+    "specialized_without_history": 0,
+    "multi_model": 0
+  }
+}

@@ -1,0 +1,1862 @@
+[
+  {
+    "question": "Will the Iranian regime fall before 2027?",
+    "market_id": "polymarket:663583",
+    "independent_prob": 0.3977,
+    "final_prob": 0.3977,
+    "edge": 0.3127,
+    "confidence": 67.7,
+    "data_quality": 70.0,
+    "status": "BASELINE_ONLY",
+    "contributions": [
+      {
+        "source": "history",
+        "available": true,
+        "estimated_yes_probability": 0.3977,
+        "weight_share": 1.0,
+        "detail": "126 gewichtete Vergleichsf\u00e4lle (Gesamtgewicht=5.28, effektive Stichprobengr\u00f6\u00dfe=42.67), gewichteter Basiswert=39.77% (Konfidenzstufe: usable). 95%-Wilson-Intervall: [26.53%, 54.71%] (Breite=28.18%).",
+        "eligible": null,
+        "prior_provenance": "DATA_FITTED"
+      },
+      {
+        "source": "momentum",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Zu wenige Preis-Snapshots f\u00fcr Momentum-/Reversion-Analyse (< 3) \u2014 kein eigenst\u00e4ndiges Signal m\u00f6glich.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "news",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine auswertbaren, verkn\u00fcpften Nachrichten mit erkennbarer Tonalit\u00e4t gefunden.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "independent_evidence",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "keine unabh\u00e4ngige Sch\u00e4tzung m\u00f6glich \u2014 zu wenige verkn\u00fcpfte \u00f6ffentliche Prim\u00e4rquellen (0 gefunden, mindestens 2 n\u00f6tig).",
+        "eligible": null,
+        "prior_provenance": "FALLBACK"
+      },
+      {
+        "source": "event_relations",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine gespeicherten Event-Beziehungen f\u00fcr diesen Markt.",
+        "eligible": null,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "quant",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Quant model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "macro",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Macro model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "politics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Politics model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "geopolitics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Geopolitics model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "sports",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Sports model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      }
+    ],
+    "historical_comparables": [
+      {
+        "market_id": "polymarket:100",
+        "question": "Will indoor dining be prohibited in NYC at any point before 2021?",
+        "similarity_score": 0.33,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:19",
+        "question": "Will Kim Kardashian and Kanye West divorce before Jan 1, 2021?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:63777",
+        "question": "Will Robinhood allow buying of $GME on February 2nd?",
+        "similarity_score": 0.33,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:68069",
+        "question": "Will LINK be above $30 on February 10th?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:87",
+        "question": "Will Donald Trump attend Joe Biden\u2019s inauguration ceremony in person?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:120",
+        "question": "Will Mike Tyson win his boxing match against Roy Jones Jr?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      },
+      {
+        "market_id": "polymarket:13107",
+        "question": "Will Joe Biden be inaugurated as President of the USA on January 20th, 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      },
+      {
+        "market_id": "polymarket:1832661",
+        "question": "Pharos FDV above $200M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      },
+      {
+        "market_id": "polymarket:1832662",
+        "question": "Pharos FDV above $300M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      },
+      {
+        "market_id": "polymarket:1832663",
+        "question": "Pharos FDV above $500M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      }
+    ],
+    "evidence_summary": {},
+    "discarded_evidence": []
+  },
+  {
+    "question": "Trump out as President by August 31?",
+    "market_id": "polymarket:3231771",
+    "independent_prob": 0.3255,
+    "final_prob": 0.3535,
+    "edge": 0.327,
+    "confidence": 46.6,
+    "data_quality": 61.8,
+    "status": "BLENDED_FORECAST",
+    "contributions": [
+      {
+        "source": "history",
+        "available": true,
+        "estimated_yes_probability": 0.3255,
+        "weight_share": 0.6381,
+        "detail": "10 gewichtete Vergleichsf\u00e4lle (Gesamtgewicht=0.98, effektive Stichprobengr\u00f6\u00dfe=3.37), gewichteter Basiswert=32.55% (Konfidenzstufe: very_low). 95%-Wilson-Intervall: [6.40%, 77.30%] (Breite=70.90%).",
+        "eligible": null,
+        "prior_provenance": "DATA_FITTED"
+      },
+      {
+        "source": "momentum",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Zu wenige Preis-Snapshots f\u00fcr Momentum-/Reversion-Analyse (< 3) \u2014 kein eigenst\u00e4ndiges Signal m\u00f6glich.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "news",
+        "available": true,
+        "estimated_yes_probability": 0.0865,
+        "weight_share": 0.3619,
+        "detail": "1 verkn\u00fcpfte Nachricht(en) mit Tonalit\u00e4t ausgewertet, gewichtete Stimmung +1.00 (-1=negativ, +1=positiv), 1 unabh\u00e4ngige best\u00e4tigende Quelle(n).",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "independent_evidence",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "keine unabh\u00e4ngige Sch\u00e4tzung m\u00f6glich \u2014 nur 1 Nachrichtentreffer mit erkennbarem Bezug zur Resolution-Bedingung (mindestens 2 n\u00f6tig), von 12 verkn\u00fcpften Quellen insgesamt.",
+        "eligible": null,
+        "prior_provenance": "FALLBACK"
+      },
+      {
+        "source": "event_relations",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine gespeicherten Event-Beziehungen f\u00fcr diesen Markt.",
+        "eligible": null,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "politics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Politics model eligible for this market but unavailable (see routing reasons above).",
+        "eligible": true,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "quant",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Quant model not eligible for this market's event_type ('office_departure').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "macro",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Macro model not eligible for this market's event_type ('office_departure').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "geopolitics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Geopolitics model not eligible for this market's event_type ('office_departure').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "sports",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Sports model not eligible for this market's event_type ('office_departure').",
+        "eligible": false,
+        "prior_provenance": null
+      }
+    ],
+    "historical_comparables": [
+      {
+        "market_id": "polymarket:29919",
+        "question": "Will Trump complete his first term?",
+        "similarity_score": 0.31,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.3178
+      },
+      {
+        "market_id": "polymarket:3971",
+        "question": "Will Donald Trump pardon Julian Assange?",
+        "similarity_score": 0.31,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.3178
+      },
+      {
+        "market_id": "polymarket:59",
+        "question": "Will there be a federal charge filed against Hunter Biden before 2021?",
+        "similarity_score": 0.3,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.3075
+      },
+      {
+        "market_id": "polymarket:40",
+        "question": "Will Trump win the 2020 U.S. presidential election?",
+        "similarity_score": 0.009231,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0095
+      },
+      {
+        "market_id": "polymarket:96",
+        "question": "Will Trump win any of Pennsylvania, Arizona or Georgia?",
+        "similarity_score": 0.009231,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0095
+      },
+      {
+        "market_id": "polymarket:77",
+        "question": "Will Donald Trump formally concede the 2020 US Election before December 1st, 2020?",
+        "similarity_score": 0.008,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0082
+      },
+      {
+        "market_id": "polymarket:87",
+        "question": "Will Donald Trump attend Joe Biden\u2019s inauguration ceremony in person?",
+        "similarity_score": 0.008,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0082
+      },
+      {
+        "market_id": "polymarket:73",
+        "question": "Will Donald Trump tweet announcing that he won the election before November 5th 2020?",
+        "similarity_score": 0.0075,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0077
+      },
+      {
+        "market_id": "polymarket:75",
+        "question": "Will the Ethereum 2.0 Genesis Event happen successfully on December 1st, 2020?",
+        "similarity_score": 0.0075,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0077
+      },
+      {
+        "market_id": "polymarket:93",
+        "question": "Will Donald Trump be inaugurated for his second term as President of the USA on Inauguration Day, January 20th, 2021?",
+        "similarity_score": 0.006,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0062
+      }
+    ],
+    "evidence_summary": {},
+    "discarded_evidence": []
+  },
+  {
+    "question": "Will the Fed decrease interest rates by 25 bps after the September 2026 meeting?",
+    "market_id": "polymarket:2252243",
+    "independent_prob": 0.3981,
+    "final_prob": 0.3981,
+    "edge": 0.3606,
+    "confidence": 72.6,
+    "data_quality": 65.1,
+    "status": "BASELINE_ONLY",
+    "contributions": [
+      {
+        "source": "history",
+        "available": true,
+        "estimated_yes_probability": 0.3981,
+        "weight_share": 1.0,
+        "detail": "126 gewichtete Vergleichsf\u00e4lle (Gesamtgewicht=3.79, effektive Stichprobengr\u00f6\u00dfe=125.93), gewichteter Basiswert=39.81% (Konfidenzstufe: usable). 95%-Wilson-Intervall: [31.68%, 48.54%] (Breite=16.86%).",
+        "eligible": null,
+        "prior_provenance": "DATA_FITTED"
+      },
+      {
+        "source": "momentum",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Zu wenige Preis-Snapshots f\u00fcr Momentum-/Reversion-Analyse (< 3) \u2014 kein eigenst\u00e4ndiges Signal m\u00f6glich.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "news",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine auswertbaren, verkn\u00fcpften Nachrichten mit erkennbarer Tonalit\u00e4t gefunden.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "independent_evidence",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "keine unabh\u00e4ngige Sch\u00e4tzung m\u00f6glich \u2014 nur 0 Nachrichtentreffer mit erkennbarem Bezug zur Resolution-Bedingung (mindestens 2 n\u00f6tig), von 4 verkn\u00fcpften Quellen insgesamt.",
+        "eligible": null,
+        "prior_provenance": "FALLBACK"
+      },
+      {
+        "source": "event_relations",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine gespeicherten Event-Beziehungen f\u00fcr diesen Markt.",
+        "eligible": null,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "macro",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Macro model eligible for this market but unavailable (see routing reasons above).",
+        "eligible": true,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "quant",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Quant model not eligible for this market's event_type ('rate_cut').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "politics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Politics model not eligible for this market's event_type ('rate_cut').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "geopolitics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Geopolitics model not eligible for this market's event_type ('rate_cut').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "sports",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Sports model not eligible for this market's event_type ('rate_cut').",
+        "eligible": false,
+        "prior_provenance": null
+      }
+    ],
+    "historical_comparables": [
+      {
+        "market_id": "polymarket:75",
+        "question": "Will the Ethereum 2.0 Genesis Event happen successfully on December 1st, 2020?",
+        "similarity_score": 0.038,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.01
+      },
+      {
+        "market_id": "polymarket:100",
+        "question": "Will indoor dining be prohibited in NYC at any point before 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:120",
+        "question": "Will Mike Tyson win his boxing match against Roy Jones Jr?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:13107",
+        "question": "Will Joe Biden be inaugurated as President of the USA on January 20th, 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832661",
+        "question": "Pharos FDV above $200M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832662",
+        "question": "Pharos FDV above $300M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832663",
+        "question": "Pharos FDV above $500M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832664",
+        "question": "Pharos FDV above $800M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832665",
+        "question": "Pharos FDV above $1B one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832666",
+        "question": "Pharos FDV above $1.5B one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      }
+    ],
+    "evidence_summary": {},
+    "discarded_evidence": []
+  },
+  {
+    "question": "Will the Fed decrease interest rates by 50+ bps after the September 2026 meeting?",
+    "market_id": "polymarket:2252242",
+    "independent_prob": 0.3981,
+    "final_prob": 0.3981,
+    "edge": 0.3676,
+    "confidence": 72.6,
+    "data_quality": 65.1,
+    "status": "BASELINE_ONLY",
+    "contributions": [
+      {
+        "source": "history",
+        "available": true,
+        "estimated_yes_probability": 0.3981,
+        "weight_share": 1.0,
+        "detail": "126 gewichtete Vergleichsf\u00e4lle (Gesamtgewicht=3.79, effektive Stichprobengr\u00f6\u00dfe=125.93), gewichteter Basiswert=39.81% (Konfidenzstufe: usable). 95%-Wilson-Intervall: [31.68%, 48.54%] (Breite=16.86%).",
+        "eligible": null,
+        "prior_provenance": "DATA_FITTED"
+      },
+      {
+        "source": "momentum",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Zu wenige Preis-Snapshots f\u00fcr Momentum-/Reversion-Analyse (< 3) \u2014 kein eigenst\u00e4ndiges Signal m\u00f6glich.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "news",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine auswertbaren, verkn\u00fcpften Nachrichten mit erkennbarer Tonalit\u00e4t gefunden.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "independent_evidence",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "keine unabh\u00e4ngige Sch\u00e4tzung m\u00f6glich \u2014 nur 0 Nachrichtentreffer mit erkennbarem Bezug zur Resolution-Bedingung (mindestens 2 n\u00f6tig), von 4 verkn\u00fcpften Quellen insgesamt.",
+        "eligible": null,
+        "prior_provenance": "FALLBACK"
+      },
+      {
+        "source": "event_relations",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine gespeicherten Event-Beziehungen f\u00fcr diesen Markt.",
+        "eligible": null,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "macro",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Macro model eligible for this market but unavailable (see routing reasons above).",
+        "eligible": true,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "quant",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Quant model not eligible for this market's event_type ('rate_cut').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "politics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Politics model not eligible for this market's event_type ('rate_cut').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "geopolitics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Geopolitics model not eligible for this market's event_type ('rate_cut').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "sports",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Sports model not eligible for this market's event_type ('rate_cut').",
+        "eligible": false,
+        "prior_provenance": null
+      }
+    ],
+    "historical_comparables": [
+      {
+        "market_id": "polymarket:75",
+        "question": "Will the Ethereum 2.0 Genesis Event happen successfully on December 1st, 2020?",
+        "similarity_score": 0.038,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.01
+      },
+      {
+        "market_id": "polymarket:100",
+        "question": "Will indoor dining be prohibited in NYC at any point before 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:120",
+        "question": "Will Mike Tyson win his boxing match against Roy Jones Jr?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:13107",
+        "question": "Will Joe Biden be inaugurated as President of the USA on January 20th, 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832661",
+        "question": "Pharos FDV above $200M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832662",
+        "question": "Pharos FDV above $300M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832663",
+        "question": "Pharos FDV above $500M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832664",
+        "question": "Pharos FDV above $800M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832665",
+        "question": "Pharos FDV above $1B one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832666",
+        "question": "Pharos FDV above $1.5B one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      }
+    ],
+    "evidence_summary": {},
+    "discarded_evidence": []
+  },
+  {
+    "question": "Will the U.S. invade Iran before 2027?",
+    "market_id": "665374",
+    "independent_prob": 0.3977,
+    "final_prob": 0.3487,
+    "edge": 0.1537,
+    "confidence": 69.1,
+    "data_quality": 64.4,
+    "status": "BLENDED_FORECAST",
+    "contributions": [
+      {
+        "source": "history",
+        "available": true,
+        "estimated_yes_probability": 0.3977,
+        "weight_share": 0.7778,
+        "detail": "126 gewichtete Vergleichsf\u00e4lle (Gesamtgewicht=5.28, effektive Stichprobengr\u00f6\u00dfe=42.67), gewichteter Basiswert=39.77% (Konfidenzstufe: usable). 95%-Wilson-Intervall: [26.53%, 54.71%] (Breite=28.18%).",
+        "eligible": null,
+        "prior_provenance": "DATA_FITTED"
+      },
+      {
+        "source": "momentum",
+        "available": true,
+        "estimated_yes_probability": 0.1774,
+        "weight_share": 0.2222,
+        "detail": "Mean-Reversion: ungew\u00f6hnliche Einzelbewegung (2.3x Volatilit\u00e4t) mit 1 Trendwechseln -> Gegenkomponente +0.3%.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "news",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine auswertbaren, verkn\u00fcpften Nachrichten mit erkennbarer Tonalit\u00e4t gefunden.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "independent_evidence",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "keine unabh\u00e4ngige Sch\u00e4tzung m\u00f6glich \u2014 zu wenige verkn\u00fcpfte \u00f6ffentliche Prim\u00e4rquellen (1 gefunden, mindestens 2 n\u00f6tig).",
+        "eligible": null,
+        "prior_provenance": "FALLBACK"
+      },
+      {
+        "source": "event_relations",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine gespeicherten Event-Beziehungen f\u00fcr diesen Markt.",
+        "eligible": null,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "quant",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Quant model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "macro",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Macro model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "politics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Politics model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "geopolitics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Geopolitics model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "sports",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Sports model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      }
+    ],
+    "historical_comparables": [
+      {
+        "market_id": "polymarket:100",
+        "question": "Will indoor dining be prohibited in NYC at any point before 2021?",
+        "similarity_score": 0.33,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:19",
+        "question": "Will Kim Kardashian and Kanye West divorce before Jan 1, 2021?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:63777",
+        "question": "Will Robinhood allow buying of $GME on February 2nd?",
+        "similarity_score": 0.33,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:68069",
+        "question": "Will LINK be above $30 on February 10th?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:87",
+        "question": "Will Donald Trump attend Joe Biden\u2019s inauguration ceremony in person?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:120",
+        "question": "Will Mike Tyson win his boxing match against Roy Jones Jr?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      },
+      {
+        "market_id": "polymarket:13107",
+        "question": "Will Joe Biden be inaugurated as President of the USA on January 20th, 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      },
+      {
+        "market_id": "polymarket:1832661",
+        "question": "Pharos FDV above $200M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      },
+      {
+        "market_id": "polymarket:1832662",
+        "question": "Pharos FDV above $300M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      },
+      {
+        "market_id": "polymarket:1832663",
+        "question": "Pharos FDV above $500M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      }
+    ],
+    "evidence_summary": {},
+    "discarded_evidence": []
+  },
+  {
+    "question": "Will the price of Bitcoin be above $68,000 on August 7?",
+    "market_id": "polymarket:3241080",
+    "independent_prob": 0.4309,
+    "final_prob": 0.4309,
+    "edge": 0.4104,
+    "confidence": 67.7,
+    "data_quality": 56.3,
+    "status": "BASELINE_ONLY",
+    "contributions": [
+      {
+        "source": "history",
+        "available": true,
+        "estimated_yes_probability": 0.4309,
+        "weight_share": 1.0,
+        "detail": "126 gewichtete Vergleichsf\u00e4lle (Gesamtgewicht=5.59, effektive Stichprobengr\u00f6\u00dfe=40.73), gewichteter Basiswert=43.09% (Konfidenzstufe: usable). 95%-Wilson-Intervall: [29.14%, 58.24%] (Breite=29.10%).",
+        "eligible": null,
+        "prior_provenance": "DATA_FITTED"
+      },
+      {
+        "source": "momentum",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Zu wenige Preis-Snapshots f\u00fcr Momentum-/Reversion-Analyse (< 3) \u2014 kein eigenst\u00e4ndiges Signal m\u00f6glich.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "news",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine auswertbaren, verkn\u00fcpften Nachrichten mit erkennbarer Tonalit\u00e4t gefunden.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "independent_evidence",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "keine unabh\u00e4ngige Sch\u00e4tzung m\u00f6glich \u2014 zu wenige verkn\u00fcpfte \u00f6ffentliche Prim\u00e4rquellen (0 gefunden, mindestens 2 n\u00f6tig).",
+        "eligible": null,
+        "prior_provenance": "FALLBACK"
+      },
+      {
+        "source": "event_relations",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine gespeicherten Event-Beziehungen f\u00fcr diesen Markt.",
+        "eligible": null,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "quant",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Quant model eligible for this market but unavailable (see routing reasons above).",
+        "eligible": true,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "macro",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Macro model not eligible for this market's event_type ('price_above').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "politics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Politics model not eligible for this market's event_type ('price_above').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "geopolitics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Geopolitics model not eligible for this market's event_type ('price_above').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "sports",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Sports model not eligible for this market's event_type ('price_above').",
+        "eligible": false,
+        "prior_provenance": null
+      }
+    ],
+    "historical_comparables": [
+      {
+        "market_id": "polymarket:75",
+        "question": "Will the Ethereum 2.0 Genesis Event happen successfully on December 1st, 2020?",
+        "similarity_score": 0.338,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0605
+      },
+      {
+        "market_id": "polymarket:61328",
+        "question": "Will ETH be above $1500 on February 3rd, 2021?",
+        "similarity_score": 0.33,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0591
+      },
+      {
+        "market_id": "polymarket:65931",
+        "question": "Will Dogecoin be above $.069 on February 2nd?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0591
+      },
+      {
+        "market_id": "polymarket:76",
+        "question": "Will $BTC break $20k before 2021?",
+        "similarity_score": 0.33,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0591
+      },
+      {
+        "market_id": "polymarket:8938",
+        "question": "Will ETH be above $1,500 on January 27th?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0591
+      },
+      {
+        "market_id": "polymarket:97",
+        "question": "Will any art piece on Superrare sell for more than $100k before 2021?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0591
+      },
+      {
+        "market_id": "polymarket:100",
+        "question": "Will indoor dining be prohibited in NYC at any point before 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0054
+      },
+      {
+        "market_id": "polymarket:120",
+        "question": "Will Mike Tyson win his boxing match against Roy Jones Jr?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0054
+      },
+      {
+        "market_id": "polymarket:13107",
+        "question": "Will Joe Biden be inaugurated as President of the USA on January 20th, 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0054
+      },
+      {
+        "market_id": "polymarket:1832661",
+        "question": "Pharos FDV above $200M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0054
+      }
+    ],
+    "evidence_summary": {},
+    "discarded_evidence": []
+  },
+  {
+    "question": "Will Bayern Munich win on 2026-08-07?",
+    "market_id": "polymarket:3296879",
+    "independent_prob": 0.3977,
+    "final_prob": 0.3977,
+    "edge": -0.0873,
+    "confidence": 66.9,
+    "data_quality": 65.8,
+    "status": "BASELINE_ONLY",
+    "contributions": [
+      {
+        "source": "history",
+        "available": true,
+        "estimated_yes_probability": 0.3977,
+        "weight_share": 1.0,
+        "detail": "126 gewichtete Vergleichsf\u00e4lle (Gesamtgewicht=5.28, effektive Stichprobengr\u00f6\u00dfe=42.67), gewichteter Basiswert=39.77% (Konfidenzstufe: usable). 95%-Wilson-Intervall: [26.53%, 54.71%] (Breite=28.18%).",
+        "eligible": null,
+        "prior_provenance": "DATA_FITTED"
+      },
+      {
+        "source": "momentum",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Zu wenige Preis-Snapshots f\u00fcr Momentum-/Reversion-Analyse (< 3) \u2014 kein eigenst\u00e4ndiges Signal m\u00f6glich.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "news",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine auswertbaren, verkn\u00fcpften Nachrichten mit erkennbarer Tonalit\u00e4t gefunden.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "independent_evidence",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "keine unabh\u00e4ngige Sch\u00e4tzung m\u00f6glich \u2014 zu wenige verkn\u00fcpfte \u00f6ffentliche Prim\u00e4rquellen (0 gefunden, mindestens 2 n\u00f6tig).",
+        "eligible": null,
+        "prior_provenance": "FALLBACK"
+      },
+      {
+        "source": "event_relations",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine gespeicherten Event-Beziehungen f\u00fcr diesen Markt.",
+        "eligible": null,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "quant",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Quant model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "macro",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Macro model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "politics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Politics model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "geopolitics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Geopolitics model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "sports",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Sports model not eligible for this market's event_type ('none').",
+        "eligible": false,
+        "prior_provenance": null
+      }
+    ],
+    "historical_comparables": [
+      {
+        "market_id": "polymarket:100",
+        "question": "Will indoor dining be prohibited in NYC at any point before 2021?",
+        "similarity_score": 0.33,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:19",
+        "question": "Will Kim Kardashian and Kanye West divorce before Jan 1, 2021?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:63777",
+        "question": "Will Robinhood allow buying of $GME on February 2nd?",
+        "similarity_score": 0.33,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:68069",
+        "question": "Will LINK be above $30 on February 10th?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:87",
+        "question": "Will Donald Trump attend Joe Biden\u2019s inauguration ceremony in person?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0625
+      },
+      {
+        "market_id": "polymarket:120",
+        "question": "Will Mike Tyson win his boxing match against Roy Jones Jr?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      },
+      {
+        "market_id": "polymarket:13107",
+        "question": "Will Joe Biden be inaugurated as President of the USA on January 20th, 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      },
+      {
+        "market_id": "polymarket:1832661",
+        "question": "Pharos FDV above $200M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      },
+      {
+        "market_id": "polymarket:1832662",
+        "question": "Pharos FDV above $300M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      },
+      {
+        "market_id": "polymarket:1832663",
+        "question": "Pharos FDV above $500M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0057
+      }
+    ],
+    "evidence_summary": {},
+    "discarded_evidence": []
+  },
+  {
+    "question": "Will there be no change in Fed interest rates after the September 2026 meeting?",
+    "market_id": "polymarket:2252244",
+    "independent_prob": 0.4408,
+    "final_prob": 0.3981,
+    "edge": -0.0669,
+    "confidence": 72.4,
+    "data_quality": 65.1,
+    "status": "BASELINE_ONLY",
+    "contributions": [
+      {
+        "source": "history",
+        "available": true,
+        "estimated_yes_probability": 0.3981,
+        "weight_share": 0.7887,
+        "detail": "126 gewichtete Vergleichsf\u00e4lle (Gesamtgewicht=3.79, effektive Stichprobengr\u00f6\u00dfe=125.93), gewichteter Basiswert=39.81% (Konfidenzstufe: usable). 95%-Wilson-Intervall: [31.68%, 48.54%] (Breite=16.86%).",
+        "eligible": null,
+        "prior_provenance": "DATA_FITTED"
+      },
+      {
+        "source": "momentum",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Zu wenige Preis-Snapshots f\u00fcr Momentum-/Reversion-Analyse (< 3) \u2014 kein eigenst\u00e4ndiges Signal m\u00f6glich.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "news",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine auswertbaren, verkn\u00fcpften Nachrichten mit erkennbarer Tonalit\u00e4t gefunden.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "independent_evidence",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "keine unabh\u00e4ngige Sch\u00e4tzung m\u00f6glich \u2014 nur 0 Nachrichtentreffer mit erkennbarem Bezug zur Resolution-Bedingung (mindestens 2 n\u00f6tig), von 4 verkn\u00fcpften Quellen insgesamt.",
+        "eligible": null,
+        "prior_provenance": "FALLBACK"
+      },
+      {
+        "source": "event_relations",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine gespeicherten Event-Beziehungen f\u00fcr diesen Markt.",
+        "eligible": null,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "macro",
+        "available": true,
+        "estimated_yes_probability": 0.6,
+        "weight_share": 0.2113,
+        "detail": "Macro model: reported rate hold (not yet confirmed) (confidence: 50%)",
+        "eligible": true,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "quant",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Quant model not eligible for this market's event_type ('rate_hold').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "politics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Politics model not eligible for this market's event_type ('rate_hold').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "geopolitics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Geopolitics model not eligible for this market's event_type ('rate_hold').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "sports",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Sports model not eligible for this market's event_type ('rate_hold').",
+        "eligible": false,
+        "prior_provenance": null
+      }
+    ],
+    "historical_comparables": [
+      {
+        "market_id": "polymarket:75",
+        "question": "Will the Ethereum 2.0 Genesis Event happen successfully on December 1st, 2020?",
+        "similarity_score": 0.038,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.01
+      },
+      {
+        "market_id": "polymarket:100",
+        "question": "Will indoor dining be prohibited in NYC at any point before 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:120",
+        "question": "Will Mike Tyson win his boxing match against Roy Jones Jr?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:13107",
+        "question": "Will Joe Biden be inaugurated as President of the USA on January 20th, 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832661",
+        "question": "Pharos FDV above $200M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832662",
+        "question": "Pharos FDV above $300M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832663",
+        "question": "Pharos FDV above $500M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832664",
+        "question": "Pharos FDV above $800M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832665",
+        "question": "Pharos FDV above $1B one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832666",
+        "question": "Pharos FDV above $1.5B one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      }
+    ],
+    "evidence_summary": {},
+    "discarded_evidence": []
+  },
+  {
+    "question": "Will the Fed increase interest rates by 25 bps after the September 2026 meeting?",
+    "market_id": "polymarket:2252245",
+    "independent_prob": 0.3981,
+    "final_prob": 0.3981,
+    "edge": -0.0669,
+    "confidence": 72.6,
+    "data_quality": 65.1,
+    "status": "BASELINE_ONLY",
+    "contributions": [
+      {
+        "source": "history",
+        "available": true,
+        "estimated_yes_probability": 0.3981,
+        "weight_share": 1.0,
+        "detail": "126 gewichtete Vergleichsf\u00e4lle (Gesamtgewicht=3.79, effektive Stichprobengr\u00f6\u00dfe=125.93), gewichteter Basiswert=39.81% (Konfidenzstufe: usable). 95%-Wilson-Intervall: [31.68%, 48.54%] (Breite=16.86%).",
+        "eligible": null,
+        "prior_provenance": "DATA_FITTED"
+      },
+      {
+        "source": "momentum",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Zu wenige Preis-Snapshots f\u00fcr Momentum-/Reversion-Analyse (< 3) \u2014 kein eigenst\u00e4ndiges Signal m\u00f6glich.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "news",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine auswertbaren, verkn\u00fcpften Nachrichten mit erkennbarer Tonalit\u00e4t gefunden.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "independent_evidence",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "keine unabh\u00e4ngige Sch\u00e4tzung m\u00f6glich \u2014 nur 0 Nachrichtentreffer mit erkennbarem Bezug zur Resolution-Bedingung (mindestens 2 n\u00f6tig), von 4 verkn\u00fcpften Quellen insgesamt.",
+        "eligible": null,
+        "prior_provenance": "FALLBACK"
+      },
+      {
+        "source": "event_relations",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine gespeicherten Event-Beziehungen f\u00fcr diesen Markt.",
+        "eligible": null,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "macro",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Macro model eligible for this market but unavailable (see routing reasons above).",
+        "eligible": true,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "quant",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Quant model not eligible for this market's event_type ('rate_hike').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "politics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Politics model not eligible for this market's event_type ('rate_hike').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "geopolitics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Geopolitics model not eligible for this market's event_type ('rate_hike').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "sports",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Sports model not eligible for this market's event_type ('rate_hike').",
+        "eligible": false,
+        "prior_provenance": null
+      }
+    ],
+    "historical_comparables": [
+      {
+        "market_id": "polymarket:75",
+        "question": "Will the Ethereum 2.0 Genesis Event happen successfully on December 1st, 2020?",
+        "similarity_score": 0.038,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.01
+      },
+      {
+        "market_id": "polymarket:100",
+        "question": "Will indoor dining be prohibited in NYC at any point before 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:120",
+        "question": "Will Mike Tyson win his boxing match against Roy Jones Jr?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:13107",
+        "question": "Will Joe Biden be inaugurated as President of the USA on January 20th, 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832661",
+        "question": "Pharos FDV above $200M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832662",
+        "question": "Pharos FDV above $300M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832663",
+        "question": "Pharos FDV above $500M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832664",
+        "question": "Pharos FDV above $800M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832665",
+        "question": "Pharos FDV above $1B one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      },
+      {
+        "market_id": "polymarket:1832666",
+        "question": "Pharos FDV above $1.5B one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0079
+      }
+    ],
+    "evidence_summary": {},
+    "discarded_evidence": []
+  },
+  {
+    "question": "Will J.D. Vance win the 2028 Republican presidential nomination?",
+    "market_id": "polymarket:561974",
+    "independent_prob": 0.3406,
+    "final_prob": 0.3857,
+    "edge": -0.0258,
+    "confidence": 69.1,
+    "data_quality": 64.7,
+    "status": "BASELINE_ONLY",
+    "contributions": [
+      {
+        "source": "history",
+        "available": true,
+        "estimated_yes_probability": 0.3857,
+        "weight_share": 0.8421,
+        "detail": "126 gewichtete Vergleichsf\u00e4lle (Gesamtgewicht=4.69, effektive Stichprobengr\u00f6\u00dfe=50.18), gewichteter Basiswert=38.57% (Konfidenzstufe: usable). 95%-Wilson-Intervall: [26.37%, 52.38%] (Breite=26.01%).",
+        "eligible": null,
+        "prior_provenance": "DATA_FITTED"
+      },
+      {
+        "source": "momentum",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Zu wenige Preis-Snapshots f\u00fcr Momentum-/Reversion-Analyse (< 3) \u2014 kein eigenst\u00e4ndiges Signal m\u00f6glich.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "news",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine auswertbaren, verkn\u00fcpften Nachrichten mit erkennbarer Tonalit\u00e4t gefunden.",
+        "eligible": null,
+        "prior_provenance": null
+      },
+      {
+        "source": "independent_evidence",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "keine unabh\u00e4ngige Sch\u00e4tzung m\u00f6glich \u2014 nur 0 Nachrichtentreffer mit erkennbarem Bezug zur Resolution-Bedingung (mindestens 2 n\u00f6tig), von 2 verkn\u00fcpften Quellen insgesamt.",
+        "eligible": null,
+        "prior_provenance": "FALLBACK"
+      },
+      {
+        "source": "event_relations",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Keine gespeicherten Event-Beziehungen f\u00fcr diesen Markt.",
+        "eligible": null,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "politics",
+        "available": true,
+        "estimated_yes_probability": 0.1,
+        "weight_share": 0.1579,
+        "detail": "Politics model: only nominated \u2014 appointment not yet confirmed (confidence: 35%)",
+        "eligible": true,
+        "prior_provenance": "UNKNOWN"
+      },
+      {
+        "source": "quant",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Quant model not eligible for this market's event_type ('appointment').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "macro",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Macro model not eligible for this market's event_type ('appointment').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "geopolitics",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Geopolitics model not eligible for this market's event_type ('appointment').",
+        "eligible": false,
+        "prior_provenance": null
+      },
+      {
+        "source": "sports",
+        "available": false,
+        "estimated_yes_probability": null,
+        "weight_share": null,
+        "detail": "Sports model not eligible for this market's event_type ('appointment').",
+        "eligible": false,
+        "prior_provenance": null
+      }
+    ],
+    "historical_comparables": [
+      {
+        "market_id": "polymarket:29919",
+        "question": "Will Trump complete his first term?",
+        "similarity_score": 0.33,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0704
+      },
+      {
+        "market_id": "polymarket:3971",
+        "question": "Will Donald Trump pardon Julian Assange?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0704
+      },
+      {
+        "market_id": "polymarket:59",
+        "question": "Will there be a federal charge filed against Hunter Biden before 2021?",
+        "similarity_score": 0.33,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0704
+      },
+      {
+        "market_id": "polymarket:75",
+        "question": "Will the Ethereum 2.0 Genesis Event happen successfully on December 1st, 2020?",
+        "similarity_score": 0.038,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0081
+      },
+      {
+        "market_id": "polymarket:100",
+        "question": "Will indoor dining be prohibited in NYC at any point before 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0064
+      },
+      {
+        "market_id": "polymarket:120",
+        "question": "Will Mike Tyson win his boxing match against Roy Jones Jr?",
+        "similarity_score": 0.03,
+        "outcome": "No",
+        "resolution_status": "resolved",
+        "weight_share": 0.0064
+      },
+      {
+        "market_id": "polymarket:13107",
+        "question": "Will Joe Biden be inaugurated as President of the USA on January 20th, 2021?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0064
+      },
+      {
+        "market_id": "polymarket:1832661",
+        "question": "Pharos FDV above $200M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0064
+      },
+      {
+        "market_id": "polymarket:1832662",
+        "question": "Pharos FDV above $300M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0064
+      },
+      {
+        "market_id": "polymarket:1832663",
+        "question": "Pharos FDV above $500M one day after launch?",
+        "similarity_score": 0.03,
+        "outcome": "Yes",
+        "resolution_status": "resolved",
+        "weight_share": 0.0064
+      }
+    ],
+    "evidence_summary": {},
+    "discarded_evidence": []
+  }
+]

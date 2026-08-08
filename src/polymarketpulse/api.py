@@ -1239,6 +1239,59 @@ def command_center(storage: Storage = Depends(get_storage)) -> dict:
     }
 
 
+
+@app.get("/provider-health")
+def get_provider_health_all(storage: Storage = Depends(get_storage)) -> dict:
+    """Get health status for all registered data sources.
+    
+    Returns a comprehensive overview of every data source's current state:
+      - LIVE: Provider operational, data fresh
+      - DEGRADED: Provider operational but quality reduced
+      - STALE: Provider returned data but too old
+      - OFFLINE: Provider not reachable or not responding
+      - UNKNOWN: No information yet
+    """
+    health_list = storage.get_all_provider_health()
+    
+    # Count by state
+    state_counts = {}
+    for h in health_list:
+        state = h.get("state", "UNKNOWN")
+        state_counts[state] = state_counts.get(state, 0) + 1
+    
+    return {
+        "abgerufen_am": datetime.now(UTC).isoformat(),
+        "provider": health_list,
+        "zusammenfassung": state_counts,
+    }
+
+
+@app.get("/provider-health/{source_id}")
+def get_provider_health_single(source_id: str, storage: Storage = Depends(get_storage)) -> dict:
+    """Get detailed health status for a specific data source."""
+    health = storage.get_provider_health(source_id)
+    
+    if health is None:
+        # Check if it is a known source in our registry
+        from .data_sources import get_source_metadata
+        metadata = get_source_metadata(source_id)
+        if metadata:
+            # Source exists in registry but has no health data yet
+            return {
+                "source_id": source_id,
+                "name": metadata.name,
+                "domain": metadata.domain,
+                "state": "UNKNOWN",
+                "detail": "No health data yet - this source has not been used.",
+            }
+        raise HTTPException(status_code=404, detail=f"Unknown source_id: {source_id}")
+    
+    return {
+        "abgerufen_am": datetime.now(UTC).isoformat(),
+        **health,
+    }
+
+
 @app.post("/scan")
 def trigger_scan(provider: str | None = None, limit: int | None = None, storage: Storage = Depends(get_storage)) -> dict:
     """Runs a real, on-demand market scan from the dashboard — the same
