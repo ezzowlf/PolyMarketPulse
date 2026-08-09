@@ -243,6 +243,33 @@ class Storage:
             return None
         return data_sources.row_to_provider_health(row)
 
+    def save_macro_snapshot(self, snapshot) -> None:
+        """Persists the (series_id, observation_date, value) points behind a
+        real (or realistically-mocked) providers/fred.py MacroSnapshot into
+        macro_observations, with a fetch timestamp for freshness scoring.
+        Best-effort/additive only — callers should not depend on this for
+        correctness of the live forecast path (mirrors the fact that
+        providers/coingecko.py's quant data is also fetched fresh on every
+        call rather than read back from storage)."""
+        now = datetime.now(UTC).isoformat()
+        rows = [
+            ("FEDFUNDS", snapshot.policy_rate_as_of.isoformat(), snapshot.policy_rate),
+            ("CPIAUCSL_YOY", snapshot.as_of_date.isoformat(), snapshot.cpi_yoy),
+            ("UNRATE", snapshot.as_of_date.isoformat(), snapshot.unemployment_rate),
+        ]
+        for series_id, observation_date, value in rows:
+            self.connection.execute(
+                """
+                INSERT INTO macro_observations (series_id, observation_date, value, fetched_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(series_id, observation_date) DO UPDATE SET
+                    value = excluded.value,
+                    fetched_at = excluded.fetched_at
+                """,
+                (series_id, observation_date, value, now),
+            )
+        self.connection.commit()
+
     # --- last snapshot lookup (for change-detection / signal deltas) ------
 
     def get_previous_snapshot(self, provider: str, provider_market_id: str) -> PreviousSnapshot | None:

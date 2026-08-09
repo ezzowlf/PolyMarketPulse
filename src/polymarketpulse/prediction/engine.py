@@ -23,6 +23,7 @@ from ..data_gaps import calculate_data_gaps
 from ..data_sources import row_to_provider_health
 from ..price_analytics import PricePoint
 from ..providers.coingecko import fetch_price_and_volatility, resolve_coingecko_id
+from ..providers.fred import fetch_macro_snapshot
 from .bayesian import bayesian_update
 from .confidence import (
     compute_confidence,
@@ -137,6 +138,32 @@ def _load_resolution_date(conn: sqlite3.Connection, market_id: str) -> datetime 
         return datetime.fromisoformat(row[0])
     except ValueError:
         return None
+
+
+def _persist_macro_snapshot(conn: sqlite3.Connection, snapshot) -> None:
+    """Best-effort persistence of a fetched FRED macro snapshot into
+    macro_observations (migration 019), for freshness scoring. Tolerates a
+    minimal test schema without the table (same pattern as
+    _load_resolution_date above)."""
+    if not _table_exists(conn, "macro_observations"):
+        return
+    now = datetime.now(UTC).isoformat()
+    rows = [
+        ("FEDFUNDS", snapshot.policy_rate_as_of.isoformat(), snapshot.policy_rate),
+        ("CPIAUCSL_YOY", snapshot.as_of_date.isoformat(), snapshot.cpi_yoy),
+        ("UNRATE", snapshot.as_of_date.isoformat(), snapshot.unemployment_rate),
+    ]
+    for series_id, observation_date, value in rows:
+        conn.execute(
+            """
+            INSERT INTO macro_observations (series_id, observation_date, value, fetched_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(series_id, observation_date) DO UPDATE SET
+                value = excluded.value, fetched_at = excluded.fetched_at
+            """,
+            (series_id, observation_date, value, now),
+        )
+    conn.commit()
 
 
 def _load_price_points(conn: sqlite3.Connection, market_id: str, limit: int = 60) -> list[PricePoint]:
@@ -279,6 +306,7 @@ def compute_prediction(
     resolution_rules_present: bool,
     question: str = "",
     resolution_text: str | None = None,
+    classified_category: str | None = None,
 ) -> PredictionResult:
     reasoning: list[str] = []
     now = datetime.now(UTC)
@@ -418,12 +446,29 @@ def compute_prediction(
                 quant_current_price = price_data.current_price
                 quant_daily_volatility = price_data.daily_volatility
 
+    # Same pattern as the CoinGecko fetch above, for macro.py's real FRED-
+    # derived quantitative rate-decision signal: only spend the HTTP calls
+    # when the proposition could plausibly need it (rate_cut/rate_hike/
+    # rate_hold — the three event types macro.py's quantitative fallback
+    # actually uses; see macro.py's _QUANTITATIVE_EVENT_TYPES).
+    macro_snapshot = None
+    if proposition.event_type in ("rate_cut", "rate_hike", "rate_hold"):
+        macro_snapshot = fetch_macro_snapshot()
+        if macro_snapshot is not None:
+            try:
+                _persist_macro_snapshot(conn, macro_snapshot)
+            except sqlite3.Error:
+                # Best-effort persistence only (freshness-scoring cache);
+                # never let a storage hiccup break the live forecast path.
+                pass
+
     routing = route_to_specialized_model(
         proposition, question,
         current_price=quant_current_price,  # real price from CoinGecko free tier, or None if unavailable
         historical_volatility=quant_daily_volatility,  # real realized daily vol from CoinGecko history, or None
         resolution_date=resolution_date,  # real ISO end_date from markets table, not the regex-parsed
                                            # proposition.deadline text (see route_to_specialized_model docstring)
+        macro_snapshot=macro_snapshot,  # real (or None if unfetchable) FRED snapshot, forwarded to macro.py
     )
     reasoning.extend(routing.reasons)
 
@@ -747,10 +792,18 @@ def compute_prediction(
     # placeholders. Purely diagnostic/additive: it is computed from values
     # already used elsewhere in this function and never feeds back into
     # estimated_yes/independent_probability/confidence.
+    # Use the Phase-C classified taxonomy value (CENTRAL_BANKS/GEOPOLITICS/
+    # POLITICS/...) here, NOT the raw `category` param — that's the
+    # unfiltered `markets.category` DB column, which for real markets is
+    # frequently junk (sometimes literally the question text). calculate_
+    # data_gaps gates its NEWS_PRIMARY/STRUCTURED_DATA gap messages on exact
+    # matches against the classified enum, so passing the raw column meant
+    # those gaps could never fire. Falls back to `category` only if no
+    # classification exists yet, so this stays backward compatible.
     data_gaps = calculate_data_gaps(
         market_id=market_id,
         question=question or "",
-        market_category=category,
+        market_category=classified_category or category,
         event_type=proposition.event_type,
         source_health=_load_source_health(conn),
         historical_comparables_count=comparable_sample_size,

@@ -995,6 +995,29 @@ def _migration_018_claim_extraction_and_verification(conn: sqlite3.Connection) -
     """)
 
 
+def _migration_019_macro_observations(conn: sqlite3.Connection) -> None:
+    """Additive: persists real FRED macro observations (FEDFUNDS/CPIAUCSL/
+    UNRATE) fetched by providers/fred.py, with a fetch timestamp so
+    freshness can be scored later. Mirrors the provider_health pattern
+    (upsert-by-key, never drops/truncates). Not yet consulted as a read-
+    through cache by the live fetch path (same precedent as CoinGecko,
+    which also fetches fresh on every call rather than caching) — this
+    table exists so a fetched snapshot survives the process and its
+    freshness is auditable, which is the additive goal for this round."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS macro_observations (
+            series_id TEXT NOT NULL,
+            observation_date TEXT NOT NULL,
+            value REAL NOT NULL,
+            fetched_at TEXT NOT NULL,
+            PRIMARY KEY (series_id, observation_date)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_macro_observations_fetched_at
+        ON macro_observations(fetched_at);
+    """)
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1014,6 +1037,7 @@ MIGRATIONS: list[Migration] = [
     (16, "shadow_forecast_calibration_fields", _migration_016_shadow_forecast_calibration_fields),
     (17, "provider_health_tracking", _migration_017_provider_health_tracking),
     (18, "claim_extraction_and_verification", _migration_018_claim_extraction_and_verification),
+    (19, "macro_observations", _migration_019_macro_observations),
 ]
 
 

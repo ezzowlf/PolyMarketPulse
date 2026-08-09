@@ -279,7 +279,7 @@ def _load_market_row(storage: Storage, market_id: str) -> dict | None:
     row = storage.connection.execute(
         """
         SELECT market_id, provider, provider_market_id, question, category, resolution_source,
-               end_date, last_seen_at
+               end_date, last_seen_at, classified_category
         FROM markets WHERE market_id = ?
         """,
         (market_id,),
@@ -287,7 +287,7 @@ def _load_market_row(storage: Storage, market_id: str) -> dict | None:
     if row is None:
         return None
     cols = ("market_id", "provider", "provider_market_id", "question", "category",
-            "resolution_source", "end_date", "last_seen_at")
+            "resolution_source", "end_date", "last_seen_at", "classified_category")
     return dict(zip(cols, row, strict=True))
 
 
@@ -518,6 +518,7 @@ def get_prediction(storage: Storage, market_id: str) -> PredictionResult:
         provider=market["provider"],
         provider_market_id=market["provider_market_id"],
         category=market["category"],
+        classified_category=market.get("classified_category"),
         market_yes_price=yes_price,
         liquidity=liquidity,
         data_quality_report_score=dq_score,
@@ -558,6 +559,7 @@ def explain_recommendation(
         provider=market["provider"],
         provider_market_id=market["provider_market_id"],
         category=market["category"],
+        classified_category=market.get("classified_category"),
         market_yes_price=yes_price,
         liquidity=liquidity,
         data_quality_report_score=dq_score,

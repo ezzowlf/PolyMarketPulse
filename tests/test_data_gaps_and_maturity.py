@@ -102,6 +102,35 @@ def test_geopolitics_market_with_no_provider_health_shows_news_primary_gap(conn)
     assert result.data_gaps.high_gaps >= 1
 
 
+def test_raw_junk_category_with_real_classified_category_still_shows_news_primary_gap(conn) -> None:
+    # Real-world bug (this round): `markets.category` is often junk for real
+    # providers (e.g. literally the question text, "Fed Decision in
+    # September?"), while `markets.classified_category` holds the real
+    # Phase-C taxonomy enum (GEOPOLITICS/POLITICS/CENTRAL_BANKS/...).
+    # calculate_data_gaps gates NEWS_PRIMARY on an exact match against
+    # ("GEOPOLITICS", "WAR_PEACE", "POLITICS"), so passing the raw junk
+    # category meant this gap could never fire for a real geopolitics
+    # market. Passing `classified_category` (the real enum) must restore
+    # the gap; the raw junk `category` value alone must NOT trigger it.
+    _seed_resolved(conn, n_yes=2, n_no=1, category="Will there be a ceasefire?")
+    junk_category = "Will there be a ceasefire?"
+
+    # Without the fix: only the raw junk category is available -> no gap.
+    result_without_classification = compute_prediction(
+        conn, "gap-m5", "polymarket", "gap-m5", junk_category, 0.5, 50000, 90, 0, None, True
+    )
+    categories_without = {g.category for g in result_without_classification.data_gaps.gaps}
+    assert "NEWS_PRIMARY" not in categories_without
+
+    # With the fix: classified_category is the real taxonomy value -> gap fires.
+    result_with_classification = compute_prediction(
+        conn, "gap-m6", "polymarket", "gap-m6", junk_category, 0.5, 50000, 90, 0, None, True,
+        classified_category="GEOPOLITICS",
+    )
+    categories_with = {g.category for g in result_with_classification.data_gaps.gaps}
+    assert "NEWS_PRIMARY" in categories_with
+
+
 def test_data_gaps_diagnostic_only_probability_unchanged(conn) -> None:
     # Two markets identical except one triggers many more gaps (GEOPOLITICS
     # with thin history) than the other (well-covered esports category) —
