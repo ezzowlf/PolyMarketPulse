@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from ..security import MAX_RESPONSE_BYTES, SSRFError, assert_safe_url
+from ..security import MAX_RESPONSE_BYTES, SSRFError, assert_safe_url, get_ssl_context
 from .base import NewsEvent
 
 GDELT_DOC_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
@@ -54,6 +54,7 @@ def fetch_gdelt(
         response = httpx.get(
             GDELT_DOC_URL, params=params, timeout=timeout,
             headers={"User-Agent": "PolymarketPulse/0.2"},
+            verify=get_ssl_context(),
         )
         response.raise_for_status()
         if len(response.content) > MAX_RESPONSE_BYTES:

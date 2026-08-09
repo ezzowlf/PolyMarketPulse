@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from ..security import MAX_RESPONSE_BYTES, SSRFError, assert_safe_url
+from ..security import MAX_RESPONSE_BYTES, SSRFError, assert_safe_url, get_ssl_context
 
 CLOB_BOOK_URL = "https://clob.polymarket.com/book"
 DATA_API_TRADES_URL = "https://data-api.polymarket.com/trades"
@@ -84,7 +84,10 @@ def _get_with_retry(url: str, params: dict, timeout: float) -> httpx.Response | 
     last_exc: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
         try:
-            response = httpx.get(url, params=params, timeout=timeout, headers={"User-Agent": "PolymarketPulse/0.2"})
+            response = httpx.get(
+                url, params=params, timeout=timeout, headers={"User-Agent": "PolymarketPulse/0.2"},
+                verify=get_ssl_context(),
+            )
             if response.status_code == 429 or response.status_code >= 500:
                 last_exc = httpx.HTTPStatusError("retryable status", request=response.request, response=response)
                 time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))

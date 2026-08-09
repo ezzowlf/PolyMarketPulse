@@ -42,7 +42,7 @@ from datetime import UTC, date, datetime
 
 import httpx
 
-from ..security import MAX_RESPONSE_BYTES, SSRFError, assert_safe_url
+from ..security import MAX_RESPONSE_BYTES, SSRFError, assert_safe_url, get_ssl_context
 
 _CSV_BASE_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 
@@ -126,7 +126,8 @@ def _fetch_series_csv(series_id: str, timeout: float = 10.0) -> list[tuple[date,
 
     try:
         response = httpx.get(
-            url, timeout=timeout, headers={"User-Agent": "PolymarketPulse/0.2"}
+            url, timeout=timeout, headers={"User-Agent": "PolymarketPulse/0.2"},
+            verify=get_ssl_context(),
         )
         response.raise_for_status()
     except httpx.HTTPError:

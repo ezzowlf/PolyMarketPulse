@@ -21,7 +21,7 @@ def test_fetch_feed_parses_rss_items(monkeypatch) -> None:
 
     import httpx
 
-    def fake_get(url, timeout=20.0, headers=None):
+    def fake_get(url, timeout=20.0, headers=None, **kwargs):
         request = httpx.Request("GET", url)
         return httpx.Response(200, text=rss_xml, request=request)
 
@@ -37,7 +37,7 @@ def test_fetch_feed_parses_rss_items(monkeypatch) -> None:
 def test_fetch_feed_returns_empty_on_malformed_xml(monkeypatch) -> None:
     import httpx
 
-    def fake_get(url, timeout=20.0, headers=None):
+    def fake_get(url, timeout=20.0, headers=None, **kwargs):
         request = httpx.Request("GET", url)
         return httpx.Response(200, text="not xml at all <<<", request=request)
 

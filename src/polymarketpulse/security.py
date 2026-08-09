@@ -8,9 +8,15 @@ before making a request.
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
 import socket
+import ssl
+import tempfile
+import threading
 from urllib.parse import urlparse
+
+import certifi
 
 ALLOWED_SCHEMES = {"http", "https"}
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5 MB — generous for RSS/JSON, blocks runaway downloads
@@ -61,6 +67,88 @@ def assert_safe_url(url: str) -> None:
         raise SSRFError("Zugriff auf localhost blockiert.")
     if _is_private_or_reserved(parsed.hostname):
         raise SSRFError(f"Zugriff auf private/reservierte Adresse blockiert: {parsed.hostname}")
+
+
+_ca_bundle_lock = threading.Lock()
+_ca_bundle_cache: str | None = None
+_ca_bundle_cache_key: tuple[str | None, str | None, str | None] | None = None
+
+# Well-known environment variables used by many tools/languages (Node.js's
+# NODE_EXTRA_CA_CERTS, OpenSSL's SSL_CERT_FILE, and requests/urllib3's
+# REQUESTS_CA_BUNDLE) to add an extra, OS-already-trusted root CA to the
+# default trust store. We honor the same convention here rather than
+# inventing a project-specific one.
+_EXTRA_CA_ENV_VARS = ("NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE")
+
+
+def get_ca_bundle() -> str:
+    """Returns a filesystem path to use as the `verify=` CA bundle for all
+    outbound HTTPS requests in this project.
+
+    Why this exists: corporate/AV software (e.g. antivirus products that do
+    local TLS interception for malware scanning) install their own root CA
+    into the OS trust store and re-sign outbound HTTPS traffic with it. The
+    OS and browsers trust that root CA, but Python's `certifi` bundle is a
+    fixed snapshot of public CAs and knows nothing about it, so `httpx`/
+    `requests` calls fail with SSL: CERTIFICATE_VERIFY_FAILED even though
+    the connection is genuinely fine. This is a very common environment,
+    not specific to any one vendor or machine.
+
+    This helper NEVER weakens verification and NEVER hardcodes a vendor or
+    path. It only *adds* trust for one extra CA when the operator has
+    explicitly pointed to it via a well-known, standard environment
+    variable (NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, or REQUESTS_CA_BUNDLE —
+    conventions already used by Node.js, OpenSSL, and requests/urllib3 for
+    exactly this scenario). If none of those variables are set, or the
+    file they point to doesn't exist/isn't readable, this returns plain
+    certifi with no behavior change at all — the default, safe path.
+
+    Certificate verification (`verify=...`) is always performed; this
+    function only chooses *which* trusted bundle to verify against.
+    """
+    global _ca_bundle_cache, _ca_bundle_cache_key
+
+    extra_path = None
+    for var in _EXTRA_CA_ENV_VARS:
+        candidate = os.environ.get(var)
+        if candidate and os.path.isfile(candidate):
+            extra_path = candidate
+            break
+
+    certifi_path = certifi.where()
+    if extra_path is None:
+        return certifi_path
+
+    cache_key = (certifi_path, extra_path, str(os.path.getmtime(extra_path)))
+    with _ca_bundle_lock:
+        if _ca_bundle_cache is not None and _ca_bundle_cache_key == cache_key:
+            return _ca_bundle_cache
+        try:
+            with open(certifi_path, "rb") as f:
+                base = f.read()
+            with open(extra_path, "rb") as f:
+                extra = f.read()
+        except OSError:
+            # Extra CA file became unreadable between the check above and
+            # now — fail safe to plain certifi rather than erroring out.
+            return certifi_path
+
+        fd, combined_path = tempfile.mkstemp(prefix="polymarketpulse_cabundle_", suffix=".pem")
+        with os.fdopen(fd, "wb") as f:
+            f.write(base)
+            f.write(b"\n")
+            f.write(extra)
+
+        _ca_bundle_cache = combined_path
+        _ca_bundle_cache_key = cache_key
+        return combined_path
+
+
+def get_ssl_context() -> ssl.SSLContext:
+    """Same trust decision as `get_ca_bundle()`, wrapped as an `ssl.SSLContext`
+    for passing to `httpx`'s `verify=` (avoids httpx's deprecation warning for
+    passing a bare path string, without changing which CAs are trusted)."""
+    return ssl.create_default_context(cafile=get_ca_bundle())
 
 
 def mask_secret(value: str | None) -> str:

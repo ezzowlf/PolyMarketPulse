@@ -15,6 +15,7 @@ except ImportError:  # pragma: no cover - truststore is a declared dependency
     pass
 
 from ..models import Market, ResolutionStatus
+from ..security import get_ssl_context
 from .base import (
     Page,
     PredictionMarketProvider,
@@ -251,7 +252,10 @@ class PolymarketProvider(PredictionMarketProvider):
     )
 
     def __init__(self, timeout: float = 20.0) -> None:
-        self._client = httpx.Client(timeout=timeout, headers={"User-Agent": "PolymarketPulse/0.2"})
+        self._client = httpx.Client(
+            timeout=timeout, headers={"User-Agent": "PolymarketPulse/0.2"},
+            verify=get_ssl_context(),
+        )
         self._health: data_sources.ProviderHealth | None = None
 
     def close(self) -> None:

@@ -17,7 +17,7 @@ from itertools import pairwise
 
 import httpx
 
-from ..security import MAX_RESPONSE_BYTES, SSRFError, assert_safe_url
+from ..security import MAX_RESPONSE_BYTES, SSRFError, assert_safe_url, get_ssl_context
 
 _BASE_URL = "https://api.coingecko.com/api/v3"
 
@@ -69,7 +69,8 @@ def fetch_price_and_volatility(
 
     try:
         response = httpx.get(
-            url, timeout=timeout, headers={"User-Agent": "PolymarketPulse/0.2"}
+            url, timeout=timeout, headers={"User-Agent": "PolymarketPulse/0.2"},
+            verify=get_ssl_context(),
         )
         response.raise_for_status()
     except httpx.HTTPError:

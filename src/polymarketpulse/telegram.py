@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 
 from .models import Market, Signal
+from .security import get_ssl_context
 
 DISCLAIMER = (
     "Research-Hinweis – keine Wettaufforderung, kein sicherer Gewinn. "
@@ -62,5 +63,6 @@ def send_message(token: str, chat_id: str, text: str) -> None:
         f"https://api.telegram.org/bot{token}/sendMessage",
         json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
         timeout=20.0,
+        verify=get_ssl_context(),
     )
     response.raise_for_status()
