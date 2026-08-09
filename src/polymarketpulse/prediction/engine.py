@@ -34,7 +34,7 @@ from .confidence import (
 from .cross_market import compute_cross_market_relations
 from .deadline import classify_deadline_phase, deadline_weights_for
 from .divergence import DIVERGENCE_THRESHOLD_PP
-from .divergence_audit import DivergenceAuditContext, audit_divergence
+from .divergence_audit import DivergenceAuditContext, audit_divergence, classify_divergence_support
 from .ensemble import combine_submodels, quality_scaled_weight
 from .event_relations import collect_event_relation_signals, compute_event_relation_estimate
 from .evidence import compute_independent_evidence
@@ -732,6 +732,7 @@ def compute_prediction(
         submodel_estimates=tuple(all_submodels),
     )
     divergence_audit = audit_divergence(audit_context)
+    divergence_support = classify_divergence_support(divergence_audit)
     forecast_suppression_reason: str | None = None
     if divergence_audit.verdict == "REJECT":
         forecast_suppression_reason = (
@@ -820,6 +821,7 @@ def compute_prediction(
     world_state = assemble_world_state(
         proposition=proposition, resolution_date=resolution_date, now=now,
         independent_evidence=independent_evidence,
+        classified_category=classified_category,
     )
 
     scenarios = build_scenarios(
@@ -870,6 +872,7 @@ def compute_prediction(
         contribution_breakdown=contribution_breakdown,
         forecast_suppression_reason=forecast_suppression_reason,
         divergence_audit=divergence_audit,
+        divergence_support=divergence_support,
         historical_comparables=(
             tuple(history_uncertainty.top_comparable_cases) if history_uncertainty is not None else ()
         ),

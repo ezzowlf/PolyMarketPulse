@@ -410,3 +410,46 @@ def _resolve_verdict(checks: list[AuditCheck]) -> Verdict:
     if any(c.verdict == "WARN" for c in checks):
         return "WARN"
     return "PASS"
+
+
+# ---------------------------------------------------------------------------
+# Part 4 (this round): divergence-support classification.
+#
+# Deliberately a thin, honest relabeling of the verdict this module already
+# computes above, NOT a second independent judgment — audit_divergence's
+# PASS/WARN/REJECT verdict already IS the "is this divergence backed by real
+# evidence" question (see `evidentiary_sufficiency`, the hard-fail check
+# that mirrors Phase B4's old evidence_is_strong gate, plus every other
+# per-dimension check folded into `_resolve_verdict`). Re-deriving a
+# separate notion of "strong evidence" here would either (a) duplicate that
+# logic and risk drifting out of sync, or (b) contradict it, which would be
+# actively confusing (a divergence could be "REJECT" yet "SUPPORTED" at the
+# same time). So the mapping is exactly:
+#   verdict == PASS   -> SUPPORTED_DIVERGENCE   (evidentiary_sufficiency PASS
+#                         + no other hard-fail/REJECT-tier check fired)
+#   verdict == WARN   -> WEAKLY_SUPPORTED_DIVERGENCE (stands, but flagged)
+#   verdict == REJECT -> UNSUPPORTED_DIVERGENCE (forecast is suppressed by
+#                         engine.py precisely because of this)
+#   triggered == False / verdict is None -> None (the audit never ran —
+#                         the gap didn't exceed DIVERGENCE_THRESHOLD_PP, so
+#                         "is this divergence supported" isn't even a
+#                         meaningful question for this market).
+# ---------------------------------------------------------------------------
+
+DivergenceSupport = Literal["SUPPORTED_DIVERGENCE", "WEAKLY_SUPPORTED_DIVERGENCE", "UNSUPPORTED_DIVERGENCE"]
+
+_SUPPORT_BY_VERDICT: dict[Verdict, DivergenceSupport] = {
+    "PASS": "SUPPORTED_DIVERGENCE",
+    "WARN": "WEAKLY_SUPPORTED_DIVERGENCE",
+    "REJECT": "UNSUPPORTED_DIVERGENCE",
+}
+
+
+def classify_divergence_support(result: DivergenceAuditResult) -> DivergenceSupport | None:
+    """Map an already-computed DivergenceAuditResult's PASS/WARN/REJECT
+    verdict onto a divergence-support label. None whenever the divergence
+    check never triggered (result.triggered is False / verdict is None) —
+    honestly "not applicable", not a guessed label."""
+    if not result.triggered or result.verdict is None:
+        return None
+    return _SUPPORT_BY_VERDICT[result.verdict]

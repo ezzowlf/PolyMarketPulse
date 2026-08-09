@@ -314,6 +314,11 @@ class PredictionResult:
     # only when the gap never triggered the audit at all. See
     # prediction/divergence_audit.py.
     divergence_audit: DivergenceAuditResult | None = None
+    # --- Part 4 (this round): thin relabeling of divergence_audit's own
+    # PASS/WARN/REJECT verdict — see divergence_audit.classify_divergence_
+    # support for why this is a mapping, not a second independent judgment.
+    # None whenever divergence_audit is None or never triggered.
+    divergence_support: str | None = None
 
     # --- K1b: honest calibration status (additive) -----------------------
     # Always "UNCALIBRATED" today — see DEFAULT_CONFIDENCE_CALIBRATION_STATUS
@@ -422,6 +427,7 @@ class PredictionResult:
             "forecast_suppression_reason": self.forecast_suppression_reason,
             "confidence_calibration_status": self.confidence_calibration_status,
             "divergence_audit": self.divergence_audit.as_dict() if self.divergence_audit else None,
+            "divergence_support": self.divergence_support,
             "data_quality_composite": self.data_quality_composite.as_dict() if self.data_quality_composite else None,
             "confidence_composite": self.confidence_composite.as_dict() if self.confidence_composite else None,
             "historical_comparables": list(self.historical_comparables),
