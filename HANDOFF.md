@@ -3,7 +3,7 @@
 Checkpoint file per the project owner's steering instruction. Not a roadmap — update after coherent milestones only.
 
 ## CURRENT HEAD
-`<pending local commit — see bottom of this file after commit>` (not pushed; previous local head was `e93c22d`; previous pushed head was `efb5c4e`)
+`b5058fb` (not pushed; previous local head was `e93c22d`; previous pushed head was `efb5c4e`)
 
 ## COMPLETED
 - Phases A–P of the original mega-brief (semantic proposition parsing, event extraction, evidence relation classification, base rates + extraordinary-event guard + divergence suppression, market classification taxonomy, historical backfill + weighted comparable baseline with Wilson intervals, specialized models geopolitics/macro/politics/quant(real CoinGecko)/sports(honestly unavailable) routed via a real event_type detector, quality-weighted market-blind ensemble, mocked-only LLM semantic assist (off by default), structured event persistence, real data_quality/confidence composites, prior provenance tagging, negation-robust semantics, itemized divergence red-team audit (PASS/WARN/REJECT), shadow forecast snapshot persistence with look-ahead protection, calibration-metrics framework (UNCALIBRATED), frontend explainability).
