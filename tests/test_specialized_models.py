@@ -455,6 +455,67 @@ def test_quant_model_route_via_engine():
     assert "quant" in result.reasons[0]
 
 
+def test_at_deadline_phrasing_populates_deadline_string_not_just_semantics():
+    """Regression test for a real bug: parse_market_proposition's
+    "on/at/as of <date>" branch (_AT_DEADLINE_PATTERN) previously set
+    deadline_semantics="at_deadline" but left proposition.deadline as None
+    (deadline was only ever assigned from the "by <date>" branch). Every
+    at_deadline-phrased price-threshold question (the exact phrasing real
+    BTC markets in data/polymarketpulse.db use, e.g. "Bitcoin above $60,000
+    on August 7") therefore always produced deadline=None, which meant
+    quant.py's analyze_quant always fell into "missing_time_horizon" and
+    returned available=False, regardless of whether price/volatility data
+    was otherwise available — the root cause of quant being eligible on 4
+    real BTC markets but actually_used 0/4 times."""
+    proposition = parse_market_proposition(
+        "Will the price of Bitcoin be above $60,000 on August 7?", None
+    )
+    assert proposition.deadline_semantics == "at_deadline"
+    assert proposition.deadline == "August 7"
+
+
+def test_router_uses_real_resolution_date_not_unparseable_proposition_deadline():
+    """Regression test: proposition.deadline is only ever a best-effort
+    natural-language string pulled from the question text by a regex (e.g.
+    "August 7", no year, never ISO-formatted). quant.py's analyze_quant
+    calls datetime.fromisoformat(deadline), which always raises on that
+    text, silently discarding the time horizon and leaving quant
+    unavailable even when real price/volatility data is present. The real
+    fix threads the market's actual `resolution_date` (a real datetime
+    loaded from the `markets.end_date` column, ISO-formatted) through
+    route_to_specialized_model so quant receives a deadline it can
+    actually parse."""
+    from datetime import UTC, datetime, timedelta
+
+    proposition = parse_market_proposition(
+        "Will the price of Bitcoin be above $60,000 on August 7?", None
+    )
+    assert proposition.deadline_semantics == "at_deadline"
+
+    future_date = datetime.now(UTC) + timedelta(days=30)
+    result = route_to_specialized_model(
+        proposition,
+        proposition.yes_condition,
+        current_price=50_000.0,  # below threshold, so quant must actually use the time horizon
+        historical_volatility=0.03,
+        resolution_date=future_date,
+    )
+    assert "quant" in result.used_models
+    quant_result = result.model_results[0]
+    assert quant_result["available"] is True
+    assert quant_result["probability"] is not None
+    # Sanity: without a real resolution_date, the regex-parsed deadline
+    # string still fails to parse and quant stays unavailable (documents
+    # the bug this test guards against, so a future regression is obvious).
+    result_no_real_date = route_to_specialized_model(
+        proposition,
+        proposition.yes_condition,
+        current_price=50_000.0,
+        historical_volatility=0.03,
+    )
+    assert "quant" not in result_no_real_date.used_models
+
+
 def test_politics_model_route_via_engine():
     """Politics model is selected for office_departure events, via the real
     router. Trump/Nevada protection itself is verified separately in

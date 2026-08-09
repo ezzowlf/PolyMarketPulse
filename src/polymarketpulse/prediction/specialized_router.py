@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
+from datetime import datetime
 
 from .geopolitics import GeopoliticsResult, analyze_geopolitics
 from .macro import MacroResult, analyze_macro
@@ -312,6 +313,7 @@ def route_to_specialized_model(
     text: str,
     current_price: float | None = None,
     historical_volatility: float | None = None,
+    resolution_date: datetime | None = None,
 ) -> ModelRoutingResult:
     """Main entry point: route proposition to appropriate specialized model(s).
 
@@ -320,12 +322,27 @@ def route_to_specialized_model(
         text: The proposition text to analyze
         current_price: Current underlying price (for quant models)
         historical_volatility: Historical volatility (for quant models)
+        resolution_date: The market's real end_date (a datetime, loaded from
+            the `markets` table's `end_date` column by engine.py's
+            `_load_resolution_date`), if available. `proposition.deadline`
+            is only a best-effort natural-language string pulled out of the
+            question text by a regex (e.g. "August 7", with no year and not
+            ISO-formatted) — quant.py's analyze_quant calls
+            `datetime.fromisoformat(deadline)` on whatever string it is
+            given, which ALWAYS raises on that regex-extracted text. When a
+            real `resolution_date` is available, its ISO string is used
+            instead so quant actually gets a parseable deadline; falls back
+            to `proposition.deadline` (which will still fail to parse, same
+            as before) only when no real resolution_date exists at all.
 
     Returns:
         ModelRoutingResult with routing decision and model outputs."""
     event_type = proposition.event_type
     category = None  # Can be added later if needed
     proposition_status = proposition.proposition_status
+    effective_deadline = (
+        resolution_date.isoformat() if resolution_date is not None else proposition.deadline
+    )
 
     # Get eligible models
     eligible_models = _get_eligible_models(event_type, category)
@@ -373,7 +390,14 @@ def route_to_specialized_model(
         historical_volatility=historical_volatility,
         subject=proposition.subject,
         location=proposition.location,
-        deadline=proposition.deadline,
+        deadline=effective_deadline,
+        # Bug fix: deadline_semantics was never forwarded here at all, even
+        # though quant.py's analyze_quant requires it (it refuses to guess
+        # terminal-vs-barrier and returns available=False with reason
+        # "ambiguous_deadline_semantics" whenever it's None) — this alone
+        # made quant permanently unavailable for every real price-threshold
+        # market regardless of price/volatility/deadline availability.
+        deadline_semantics=proposition.deadline_semantics,
     )
 
     if available and result:

@@ -422,6 +422,8 @@ def compute_prediction(
         proposition, question,
         current_price=quant_current_price,  # real price from CoinGecko free tier, or None if unavailable
         historical_volatility=quant_daily_volatility,  # real realized daily vol from CoinGecko history, or None
+        resolution_date=resolution_date,  # real ISO end_date from markets table, not the regex-parsed
+                                           # proposition.deadline text (see route_to_specialized_model docstring)
     )
     reasoning.extend(routing.reasons)
 

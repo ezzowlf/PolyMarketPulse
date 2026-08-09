@@ -262,6 +262,75 @@ function _divergenceAuditHtml(p) {
   `;
 }
 
+const DATA_GAP_CATEGORY_LABEL_DE = {
+  HISTORICAL_COMPARABLE: "Historische Vergleichsfälle",
+  TIME_HORIZON: "Zeithorizont-Kompatibilität",
+  SOURCE_HEALTH: "Quellenverfügbarkeit",
+  STRUCTURED_DATA: "Strukturierte Daten",
+  EVENT_GRAPH: "Event-Beziehungen",
+};
+
+const DATA_GAP_SEVERITY_BADGE = { CRITICAL: "red", HIGH: "red", MEDIUM: "yellow", LOW: "" };
+
+// World State (yes/no condition, deadline, remaining time, counter-evidence)
+// — purely diagnostic fields computed by prediction/world_state.py, exposed
+// on PredictionResult.world_state but previously never rendered anywhere in
+// the frontend. Shown whenever a market has a real deadline/condition to
+// report; renders "keine Daten" per-field rather than hiding the whole
+// section, per the same honesty convention as the rest of this page.
+function _worldStateHtml(p) {
+  const ws = p && p.world_state;
+  if (!ws) return "";
+  const statusCounts = ws.claim_status_counts && Object.keys(ws.claim_status_counts).length
+    ? Object.entries(ws.claim_status_counts).map(([k, v]) => `${k}: ${v}`).join(", ")
+    : "keine Daten";
+  return `
+    <h3>Weltzustand</h3>
+    <div class="widget-grid">
+      ${widgetCard({ title: "YES-Bedingung", value: ws.yes_condition || "keine Daten" })}
+      ${widgetCard({ title: "NEIN-Bedingung", value: ws.no_condition || "keine Daten" })}
+      ${widgetCard({ title: "Deadline", value: ws.deadline || "keine Daten" })}
+      ${widgetCard({ title: "Verbleibende Zeit", value: fmtDeadline(ws.time_remaining_hours) })}
+      ${widgetCard({ title: "Widerspruchs-Evidenz", value: String(ws.counter_evidence_count ?? 0) })}
+      ${widgetCard({ title: "Claim-Status", value: statusCounts })}
+    </div>
+    ${
+      ws.most_recent_evidence_headline
+        ? `<p class="sub">Letzte Evidenz: ${ws.most_recent_evidence_headline} (${fmtDate(ws.most_recent_evidence_published_at)})</p>`
+        : ""
+    }
+  `;
+}
+
+// Data Gaps — the severity-tagged list from data_gaps.py's real gap
+// detection, computed every run but previously never surfaced in the UI.
+// Distinguishes "computed, zero gaps found" from "not computed at all"
+// (data_gaps is None) rather than collapsing both into one empty state.
+function _dataGapsHtml(p) {
+  const dg = p && p.data_gaps;
+  if (!dg) {
+    return `<h3>Daten-Lücken</h3><div class="empty-state">Nicht berechnet für diesen Lauf.</div>`;
+  }
+  if (!dg.gaps || !dg.gaps.length) {
+    return `<h3>Daten-Lücken</h3><div class="empty-state">Keine Lücken gefunden (0 von 0).</div>`;
+  }
+  const rows = dg.gaps.map((g) => `
+    <tr>
+      <td>${DATA_GAP_CATEGORY_LABEL_DE[g.category] || g.category}</td>
+      <td><span class="badge ${DATA_GAP_SEVERITY_BADGE[g.severity] || ""}">${g.severity}</span></td>
+      <td class="sub">${g.description}</td>
+    </tr>
+  `).join("");
+  const s = dg.summary || {};
+  return `
+    <h3>Daten-Lücken <span class="sub">(${s.total ?? dg.gaps.length} gesamt — ${s.kritisch ?? 0} kritisch, ${s.hoch ?? 0} hoch, ${s.mittel ?? 0} mittel, ${s.niedrig ?? 0} niedrig)</span></h3>
+    <table>
+      <thead><tr><th>Kategorie</th><th>Schweregrad</th><th>Beschreibung</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
 // I3: real historical comparable cases behind the history submodel's
 // weighted baseline (question / similarity / outcome / weight).
 function _historicalComparablesHtml(p) {
@@ -415,7 +484,7 @@ function _evidenceSectionHtml(p) {
   // I3/I4 (historical comparables, divergence audit) are independent of
   // whether independent-evidence itself was available — always append them
   // so they're never silently hidden just because news evidence was thin.
-  const extras = `${_historicalComparablesHtml(p)}${_divergenceAuditHtml(p)}`;
+  const extras = `${_worldStateHtml(p)}${_dataGapsHtml(p)}${_historicalComparablesHtml(p)}${_divergenceAuditHtml(p)}`;
   if (!ie) {
     return `<h3>Unabhängige Evidenz</h3><div class="empty-state">Keine unabhängige Schätzung möglich — keine unabhängige Evidenz-Infrastruktur verfügbar.</div>${extras}`;
   }
@@ -477,6 +546,8 @@ function _evidenceSectionHtml(p) {
     ${_crossMarketHtml(p.cross_market)}
     ${_reactionLagHtml(p.reaction_lag)}
     ${_marketFlowHtml(p)}
+    ${_worldStateHtml(p)}
+    ${_dataGapsHtml(p)}
     ${_historicalComparablesHtml(p)}
     ${_divergenceAuditHtml(p)}
   `;

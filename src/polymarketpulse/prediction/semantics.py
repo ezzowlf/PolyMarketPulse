@@ -434,12 +434,25 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
         ambiguity_flags.append("no_event_type_detected")
 
     deadline_match = _DEADLINE_PATTERN.search(primary_text) or _DEADLINE_PATTERN.search(question)
-    deadline = deadline_match.group(1) if deadline_match else None
+    at_deadline_match = _AT_DEADLINE_PATTERN.search(primary_text) or _AT_DEADLINE_PATTERN.search(question)
     deadline_semantics: Literal["by_deadline", "at_deadline"] | None = None
     if deadline_match:
+        # "by <date>" phrasing: barrier/touch semantics.
+        deadline = deadline_match.group(1)
         deadline_semantics = "by_deadline"
-    elif _AT_DEADLINE_PATTERN.search(primary_text) or _AT_DEADLINE_PATTERN.search(question):
+    elif at_deadline_match:
+        # "on/at/as of <date>" phrasing: terminal semantics. Bug fix: this
+        # branch previously only set deadline_semantics and left `deadline`
+        # (the actual date string) as None, since `deadline` was only ever
+        # assigned from deadline_match above — every at_deadline-phrased
+        # proposition (e.g. "BTC above $60,000 on August 7") silently lost
+        # its deadline date, which meant quant.py's analyze_quant always saw
+        # deadline=None -> "missing_time_horizon" -> unavailable, regardless
+        # of whether price/volatility data was otherwise available.
+        deadline = at_deadline_match.group(1)
         deadline_semantics = "at_deadline"
+    else:
+        deadline = None
 
     threshold_match = _THRESHOLD_PATTERN.search(primary_text)
     threshold: float | None = None
