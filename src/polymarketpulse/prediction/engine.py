@@ -15,9 +15,12 @@ history, linked news) are queried internally from `market_id` /
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace as _dataclass_replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from ..data_gaps import calculate_data_gaps
+from ..data_sources import row_to_provider_health
 from ..price_analytics import PricePoint
 from ..providers.coingecko import fetch_price_and_volatility, resolve_coingecko_id
 from .bayesian import bayesian_update
@@ -37,6 +40,7 @@ from .evidence import compute_independent_evidence
 from .history import compute_history_estimate
 from .manipulation import compute_manipulation_risk
 from .market_flow import load_flow_metrics_from_db
+from .maturity import classify_forecast_maturity
 from .momentum import compute_momentum_estimate
 from .news import collect_news_evidence, compute_news_estimate
 from .reaction_lag import STATUS_REACTED, compute_market_reaction_lag
@@ -148,6 +152,32 @@ def _load_price_points(conn: sqlite3.Connection, market_id: str, limit: int = 60
     ]
     points.reverse()  # chronological order, as price_analytics expects
     return points
+
+
+def _load_source_health(conn: sqlite3.Connection) -> dict[str, dict] | None:
+    """Real provider-health rows (Phase O's `provider_health` table),
+    shaped the same way data_gaps.calculate_data_gaps expects
+    (`source_health[source_id]["state"]`/`["source_id"]`). Returns None
+    (not {}) when the table doesn't exist at all — genuinely "we don't
+    track provider health here" is a different fact than "we tracked it
+    and every source is unhealthy", and calculate_data_gaps treats a bare
+    {} the same as None for its NEWS_PRIMARY check, so this distinction is
+    for callers/tests, not a behavior difference in the gap calculation.
+    """
+    if not _table_exists(conn, "provider_health"):
+        return None
+    rows = conn.execute(
+        "SELECT source_id, last_success, last_failure, last_failure_reason, "
+        "last_http_status, last_latency_ms, consecutive_failures, "
+        "data_age_seconds, items_fetched, parse_failures FROM provider_health"
+    ).fetchall()
+    if not rows:
+        return None
+    health_by_source: dict[str, dict] = {}
+    for row in rows:
+        health = row_to_provider_health(row)
+        health_by_source[health.source_id] = {"source_id": health.source_id, "state": health.state().value}
+    return health_by_source
 
 
 def _forecast_status(
@@ -702,13 +732,42 @@ def compute_prediction(
         if name not in _named_in_breakdown
     )
 
+    # --- Data Gap Engine (Phase O, connected) ------------------------------
+    # calculate_data_gaps (data_gaps.py) is Qwen's real gap-detection logic;
+    # it existed but was only ever wired into a standalone, dead API endpoint
+    # (`GET /data-gaps/{market_id}`, which fed it hardcoded placeholders —
+    # comparable_count=0, has_event_relations=False, event_type=None — and
+    # called a Storage method, `get_all_provider_health`, that does not
+    # exist, so that endpoint would crash if ever hit). Here it is fed the
+    # engine's own real, already-computed values instead, so the report
+    # reflects this specific prediction run rather than fabricated
+    # placeholders. Purely diagnostic/additive: it is computed from values
+    # already used elsewhere in this function and never feeds back into
+    # estimated_yes/independent_probability/confidence.
+    data_gaps = calculate_data_gaps(
+        market_id=market_id,
+        question=question or "",
+        market_category=category,
+        event_type=proposition.event_type,
+        source_health=_load_source_health(conn),
+        historical_comparables_count=comparable_sample_size,
+        # Not tracked anywhere in the engine today (no per-market horizon-
+        # compatibility computation exists yet — history.py's similarity
+        # scoring blends horizon into one composite score rather than
+        # exposing a standalone bool) — honestly reported as unknown rather
+        # than guessed at.
+        time_horizon_compatible=None,
+        has_structured_data=len(specialized_available) > 0,
+        has_event_relations=len(event_relation_signals) > 0,
+    )
+
     scenarios = build_scenarios(
         estimated_yes_probability=estimated_yes, submodel_estimates=all_submodels,
         news_evidence=news_evidence, comparable_sample_size=comparable_sample_size,
         recommendation=recommendation,
     )
 
-    return PredictionResult(
+    result = PredictionResult(
         market_id=market_id,
         market_yes_probability=market_yes,
         market_no_probability=market_no,
@@ -753,4 +812,10 @@ def compute_prediction(
         historical_comparables=(
             tuple(history_uncertainty.top_comparable_cases) if history_uncertainty is not None else ()
         ),
+        data_gaps=data_gaps,
     )
+    # Forecast Maturity is classified from the fully-assembled result (it
+    # reads confidence/data_quality/data_gaps/divergence_audit, all of which
+    # only exist once `result` is built) — see maturity.py for the exact
+    # rules. dataclasses.replace keeps PredictionResult frozen/immutable.
+    return _dataclass_replace(result, forecast_maturity=classify_forecast_maturity(result))

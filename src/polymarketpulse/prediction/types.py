@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from ..data_gaps import DataGapReport
     from .cross_market import CrossMarketResult
     from .divergence_audit import DivergenceAuditResult
     from .event_relations import RelationSignal
@@ -50,6 +51,22 @@ ForecastStatus = Literal[
     # without evidence strong enough to justify it — suppressed rather than
     # reported as a fabricated-looking number. See prediction/divergence.py.
     "FORECAST_SUPPRESSED",
+]
+
+# Forecast Maturity taxonomy (steering point 14): a coarse, honest label
+# for "how much should a reader trust this specific forecast", derived from
+# signals the engine already computes (forecast_status, confidence/data-
+# quality composites, evidence-tier mix, divergence-audit verdict, data-gap
+# severity). See prediction/maturity.py for the exact thresholds and the
+# EXPERT_HEURISTIC provenance note (no resolved-outcome history exists yet
+# to calibrate these cutoffs against).
+ForecastMaturity = Literal[
+    "NO_FORECAST",
+    "CONTEXT_ONLY",
+    "HYPOTHESIS",
+    "PARTIAL_FORECAST",
+    "SUPPORTED_FORECAST",
+    "MATURE_FORECAST",
 ]
 
 PREDICTION_VERSION = "v2"
@@ -328,6 +345,23 @@ class PredictionResult:
     # probability estimate sits from 50%.
     confidence_composite: QualityComposite | None = None
 
+    # --- Data Gap Engine (Phase O, connected) ------------------------------
+    # Real gap-detection output (data_gaps.py, calculated from this same
+    # prediction run's own category/event_type/comparable-count/evidence-
+    # relations values — see engine.py). None only when the gap calculation
+    # itself could not run at all (it always can today; kept Optional for
+    # forward-compatibility and so tests can distinguish "never computed"
+    # from "computed, zero gaps found"). Diagnostic/explanatory only — never
+    # feeds back into any probability field above.
+    data_gaps: DataGapReport | None = None
+
+    # --- Forecast Maturity (steering point 14, additive) -------------------
+    # See ForecastMaturity literal above and prediction/maturity.py for the
+    # classification function and documented thresholds. EXPERT_HEURISTIC
+    # provenance (like PriorProvenance) — not fitted against resolved-
+    # outcome history, which doesn't exist yet.
+    forecast_maturity: ForecastMaturity = "NO_FORECAST"
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -380,4 +414,6 @@ class PredictionResult:
             "data_quality_composite": self.data_quality_composite.as_dict() if self.data_quality_composite else None,
             "confidence_composite": self.confidence_composite.as_dict() if self.confidence_composite else None,
             "historical_comparables": list(self.historical_comparables),
+            "data_gaps": self.data_gaps.as_dict() if self.data_gaps else None,
+            "forecast_maturity": self.forecast_maturity,
         }

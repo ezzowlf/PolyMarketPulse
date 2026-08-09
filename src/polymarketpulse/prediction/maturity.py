@@ -1,0 +1,155 @@
+"""Forecast Maturity classification (steering point 14).
+
+A single, coarse label answering "how much should a reader trust THIS
+specific forecast" — built entirely from signals the engine already
+computes (forecast_status, the K1/J2 confidence/data-quality composites,
+the real evidence-tier mix behind independent_evidence, the divergence
+red-team audit's verdict, and the Data Gap Engine's severity counts). It
+invents no new probability-affecting signal; it only reads and buckets
+values PredictionResult already carries.
+
+PriorProvenance-style honesty note: the thresholds below are
+EXPERT_HEURISTIC, exactly like base_rates.py's manually-authored table and
+K3's PriorProvenance tagging elsewhere in this codebase — reasoned and
+documented, but NOT fitted against resolved-outcome history, because no
+real out-of-sample resolved-forecast dataset exists yet (that is Phase N2's
+job). Treat the cutoffs as a defensible starting point, not a calibrated
+model. Revisit once real Brier/reliability data exists.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from .types import ForecastMaturity
+
+if TYPE_CHECKING:
+    from .types import PredictionResult
+
+
+def _direct_tier_evidence_count(result: PredictionResult) -> int:
+    """How many independent-evidence items are DIRECT_YES/DIRECT_NO tier
+    (semantics.classify_evidence_relation's strongest, on-topic-and-
+    explicit tier) — the closest thing this codebase has to "hard
+    evidence" vs. "weak/contextual evidence" for a market."""
+    if result.independent_evidence is None:
+        return 0
+    all_items = (*result.independent_evidence.evidence_for_yes, *result.independent_evidence.evidence_for_no)
+    return sum(1 for e in all_items if e.relation_label in ("DIRECT_YES", "DIRECT_NO"))
+
+
+def _weak_or_context_only(result: PredictionResult) -> bool:
+    """True when independent evidence exists but none of it clears WEAK/
+    CONTEXT tier — i.e. there is *something* on the page, but nothing an
+    honest reader would call real evidence for the specific proposition."""
+    if result.independent_evidence is None or not result.independent_evidence.available:
+        return False
+    all_items = (*result.independent_evidence.evidence_for_yes, *result.independent_evidence.evidence_for_no)
+    if not all_items:
+        return False
+    strong_tiers = ("DIRECT_YES", "DIRECT_NO", "SUPPORTS_YES", "SUPPORTS_NO")
+    return not any(e.relation_label in strong_tiers for e in all_items)
+
+
+def classify_forecast_maturity(result: PredictionResult) -> ForecastMaturity:
+    """Classify a completed PredictionResult into the Forecast Maturity
+    taxonomy. Pure function of already-computed fields — never recomputes
+    or second-guesses the probability itself.
+
+    Exact rules (evaluated top to bottom, first match wins):
+
+    1. NO_FORECAST
+       independent_probability is None. Either nothing independent was
+       computed at all, or the divergence red-team audit REJECTed the
+       forecast (engine.py sets independent_probability=None on REJECT) —
+       either way, there is no independent number to stand behind.
+
+    2. CONTEXT_ONLY
+       An independent_probability exists but the evidence behind it is
+       thin in a specific way: no DIRECT-tier evidence AND (evidence that
+       exists is entirely WEAK/CONTEXT tier, OR the only real support is
+       a single historical comparable case (comparable_sample_size <= 1)
+       with no independent evidence at all). This is "we have a page, not
+       a forecast" — a single weak data point dressed up as a number.
+
+    3. HYPOTHESIS
+       A real but low-confidence independent estimate: confidence_score
+       < 40, or fewer than 3 historical comparables AND no DIRECT-tier
+       evidence. A genuine estimate exists, but it would be misleading to
+       call it more than a hypothesis.
+
+    4. PARTIAL_FORECAST
+       Moderate evidence/confidence (confidence_score 40..70, or DIRECT
+       evidence present but data_quality is mediocre) while REAL,
+       unresolved data gaps remain (data_gaps.critical_gaps > 0 or
+       data_gaps.high_gaps > 0). The forecast is real but visibly
+       incomplete — exactly the case the Data Gap Engine exists to
+       surface.
+
+    5. SUPPORTED_FORECAST
+       Solid evidence + confidence + data quality (confidence_score >= 70
+       and data_quality_composite.score >= 60) with no HIGH/CRITICAL data
+       gaps remaining, and the divergence audit (if it ran at all) did not
+       REJECT.
+
+    6. MATURE_FORECAST
+       The strongest real case: confidence_score >= 85 AND
+       data_quality_composite.score >= 75 AND (at least one DIRECT-tier
+       evidence item OR comparable_sample_size >= 20) AND zero data gaps
+       of any severity (data_gaps.total_gaps == 0, or data_gaps is None
+       meaning the calculation itself found nothing to flag) AND the
+       divergence audit verdict is PASS whenever it was triggered at all.
+       Expected to be rare/hard to reach with the data currently available
+       locally — see maturity acceptance notes in HANDOFF.md; that is
+       reported honestly rather than loosened to make the bucket non-empty.
+    """
+    # --- 1. NO_FORECAST ---------------------------------------------------
+    if result.independent_probability is None:
+        return "NO_FORECAST"
+
+    confidence = result.confidence_score
+    dq_score = result.data_quality_composite.score if result.data_quality_composite is not None else None
+    direct_count = _direct_tier_evidence_count(result)
+    comparable_n = result.comparable_sample_size
+
+    gaps = result.data_gaps
+    critical_gaps = gaps.critical_gaps if gaps is not None else 0
+    high_gaps = gaps.high_gaps if gaps is not None else 0
+    total_gaps = gaps.total_gaps if gaps is not None else 0
+
+    divergence_verdict = result.divergence_audit.verdict if result.divergence_audit is not None else None
+
+    # --- 2. CONTEXT_ONLY ---------------------------------------------------
+    thin_single_case = comparable_n <= 1 and (
+        result.independent_evidence is None or not result.independent_evidence.available
+    )
+    if direct_count == 0 and (_weak_or_context_only(result) or thin_single_case):
+        return "CONTEXT_ONLY"
+
+    # --- 3. HYPOTHESIS ------------------------------------------------------
+    if confidence < 40 or (comparable_n < 3 and direct_count == 0):
+        return "HYPOTHESIS"
+
+    # --- 6. MATURE_FORECAST (checked before 4/5 since it is a strict
+    # superset of SUPPORTED_FORECAST's conditions) -------------------------
+    if (
+        confidence >= 85
+        and dq_score is not None and dq_score >= 75
+        and (direct_count >= 1 or comparable_n >= 20)
+        and total_gaps == 0
+        and divergence_verdict in (None, "PASS")
+    ):
+        return "MATURE_FORECAST"
+
+    # --- 5. SUPPORTED_FORECAST ----------------------------------------------
+    if (
+        confidence >= 70
+        and dq_score is not None and dq_score >= 60
+        and critical_gaps == 0 and high_gaps == 0
+        and divergence_verdict != "REJECT"
+    ):
+        return "SUPPORTED_FORECAST"
+
+    # --- 4. PARTIAL_FORECAST (everything else with a real, non-thin,
+    # non-hypothesis-tier estimate) ------------------------------------------
+    return "PARTIAL_FORECAST"
