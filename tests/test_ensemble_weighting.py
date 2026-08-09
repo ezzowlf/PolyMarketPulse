@@ -48,7 +48,7 @@ def storage(tmp_path: Path) -> Storage:
 
 def _seed_history(
     storage: Storage, n_yes: int, n_no: int, category: str, provider: str = "polymarket",
-    question_prefix: str = "Historical comparable market",
+    question_prefix: str = "Historical comparable market", event_type: str | None = None,
 ) -> None:
     """Directly populates the real `markets` / `market_resolutions` tables
     (post-migration schema) with resolved comparable cases sharing
@@ -59,15 +59,24 @@ def _seed_history(
     classify_market() would actually assign to the *target* question (e.g.
     "CRYPTO", "GEOPOLITICS", "OTHER") — not an arbitrary free-text label —
     since that's what history.py's candidate scorer compares against (see
-    classification.py's category constants)."""
+    classification.py's category constants).
+
+    `event_type` (Part 1 correctness fix, 2026-08): history.py's
+    compatibility gate now requires category match AND (event_type match OR
+    entity overlap) before a candidate is even scored — a category-only
+    match ("both CRYPTO") is no longer enough by itself. Callers that want
+    their seeded comparables to actually be usable (not silently
+    gate-rejected to zero weight) must pass the same event_type the target
+    question will parse to (e.g. "price_above" for a BTC/threshold
+    question)."""
     now = datetime.now(UTC).isoformat()
     for i in range(n_yes):
         pmid = f"{question_prefix}-yes-{i}"
         storage.connection.execute(
             "INSERT INTO markets (market_id, provider, provider_market_id, condition_id, question, slug, "
-            "category, classified_category, url, first_seen_at, last_seen_at) "
-            "VALUES (?, ?, ?, '', ?, ?, ?, ?, 'https://x', ?, ?)",
-            (pmid, provider, pmid, f"{question_prefix} {i}?", pmid, category, category, now, now),
+            "category, classified_category, event_type, url, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, 'https://x', ?, ?)",
+            (pmid, provider, pmid, f"{question_prefix} {i}?", pmid, category, category, event_type, now, now),
         )
         storage.connection.execute(
             "INSERT INTO market_resolutions (provider, provider_market_id, status, winning_outcome, resolved_at, detected_at) "
@@ -78,9 +87,9 @@ def _seed_history(
         pmid = f"{question_prefix}-no-{i}"
         storage.connection.execute(
             "INSERT INTO markets (market_id, provider, provider_market_id, condition_id, question, slug, "
-            "category, classified_category, url, first_seen_at, last_seen_at) "
-            "VALUES (?, ?, ?, '', ?, ?, ?, ?, 'https://x', ?, ?)",
-            (pmid, provider, pmid, f"{question_prefix} {i}?", pmid, category, category, now, now),
+            "category, classified_category, event_type, url, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, 'https://x', ?, ?)",
+            (pmid, provider, pmid, f"{question_prefix} {i}?", pmid, category, category, event_type, now, now),
         )
         storage.connection.execute(
             "INSERT INTO market_resolutions (provider, provider_market_id, status, winning_outcome, resolved_at, detected_at) "
@@ -192,7 +201,10 @@ def test_quant_routed_market_incorporates_quant_estimate(storage: Storage, monke
         "polymarketpulse.prediction.engine.fetch_price_and_volatility",
         lambda coingecko_id: PriceData(current_price=50000.0, daily_volatility=0.03, days_of_history=90),
     )
-    _seed_history(storage, n_yes=15, n_no=5, category="CRYPTO", question_prefix="crypto-hist")
+    _seed_history(
+        storage, n_yes=15, n_no=5, category="CRYPTO", question_prefix="crypto-hist",
+        event_type="price_above",
+    )
     question = "Will Bitcoin reach $40,000 by December 31, 2030?"
     result = compute_prediction(
         storage.connection, "m1", "polymarket", "m1", "crypto", 0.5, 100000, 90, 0, None, True,
@@ -359,7 +371,10 @@ def test_independent_probability_market_blind_quant_routed(tmp_path: Path, monke
     results = []
     for i, price in enumerate((0.05, 0.25, 0.50, 0.75, 0.95)):
         storage = Storage(tmp_path / f"quant-{i}.db")
-        _seed_history(storage, n_yes=10, n_no=5, category="CRYPTO", question_prefix="crypto-hist")
+        _seed_history(
+            storage, n_yes=10, n_no=5, category="CRYPTO", question_prefix="crypto-hist",
+            event_type="price_above",
+        )
         results.append(
             compute_prediction(
                 storage.connection, "m1", "polymarket", "m1", "crypto", price, 100000, 90, 0, None, True,
@@ -430,6 +445,19 @@ def test_independent_probability_market_blind_evidence_based_claims_connected(
 # ---------------------------------------------------------------------------
 
 def test_ineligible_market_falls_back_to_history_evidence_only(storage: Storage) -> None:
+    # Part 1/4 correctness fix (2026-08): "win the qualifier" doesn't match
+    # any recognized event_type vocabulary (semantics.py's sport pattern
+    # only matches "win the tournament"/"championship"/etc — and every
+    # event_type the parser DOES recognize maps to some specialized model
+    # per specialized_router._EVENT_TYPE_TO_MODEL, so there is no longer a
+    # fixture that is both "specialized-model-ineligible" AND
+    # "proposition-parseable"). This is exactly the reported-bug shape:
+    # History as the ONLY contributing submodel with an unparseable target
+    # proposition (event_type=None). Part 4's explicit history-only safety
+    # rule now correctly demotes this to NO_FORECAST rather than publishing
+    # a quantitative independent_probability from History alone — this test
+    # now asserts THAT is what happens, instead of the old (incorrect)
+    # expectation that History alone could carry a real forecast here.
     _seed_history(storage, n_yes=15, n_no=5, category="OTHER", question_prefix="esports-hist")
     question = "Will Team Alpha win the qualifier?"
     result = compute_prediction(
@@ -440,8 +468,10 @@ def test_ineligible_market_falls_back_to_history_evidence_only(storage: Storage)
     for specialized_name in ("quant", "macro", "politics", "geopolitics", "sports"):
         assert by_source[specialized_name].eligible is False
         assert by_source[specialized_name].available is False
-    assert result.independent_probability is not None
-    assert by_source["history"].available is True
+    assert result.independent_probability is None
+    assert result.forecast_status == "NO_FORECAST"
+    assert result.recommendation != "STRONG_YES"
+    assert result.recommendation != "STRONG_NO"
 
 
 # ---------------------------------------------------------------------------

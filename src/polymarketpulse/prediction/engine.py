@@ -48,7 +48,7 @@ from .reaction_lag import STATUS_REACTED, compute_market_reaction_lag
 from .reliability import compute_market_reliability
 from .resolution_edge import compute_resolution_edge
 from .scenarios import build_scenarios
-from .semantics import parse_market_proposition
+from .semantics import MarketProposition, parse_market_proposition
 from .specialized_router import ALL_SPECIALIZED_MODEL_NAMES, route_to_specialized_model
 from .types import (
     ContributionEntry,
@@ -211,6 +211,7 @@ def _load_source_health(conn: sqlite3.Connection) -> dict[str, dict] | None:
 def _forecast_status(
     estimated_yes: float | None, independent_probability: float | None,
     submodel_estimates: list[SubmodelEstimate], confidence: float,
+    proposition: MarketProposition | None = None,
 ) -> ForecastStatus:
     """Six distinguishable states, per the product requirement that the UI
     never show a bare probability without saying what kind of forecast it
@@ -222,6 +223,17 @@ def _forecast_status(
       BLENDED_FORECAST      the above, further mixed with market-price-
                              anchored submodels (momentum/news/event-relations)
       LOW_DATA              something combined, but confidence is too low to trust it
+
+    Part 4 (correctness pass, 2026-08): explicit "History-only safety rule".
+    Belt-and-suspenders on top of history.py's own comparable-gating
+    (Parts 1-3): even if history.py somehow still produced an
+    `available=True` estimate, when History is the ONLY contributing
+    submodel and the target market's own proposition is unparseable
+    (event_type unknown and/or proposition_status == AMBIGUOUS), this
+    forces NO_FORECAST rather than BASELINE_ONLY. A quantitative-looking
+    probability must never be published for a market whose own resolution
+    semantics were never understood, no matter how the historical baseline
+    was computed.
     """
     if estimated_yes is None:
         return "NO_FORECAST"
@@ -229,10 +241,16 @@ def _forecast_status(
     independent_names = available_names & {"history", "independent_evidence"}
     price_anchored_names = available_names & {"momentum", "news", "event_relations"}
 
+    specialized_names = available_names & set(ALL_SPECIALIZED_MODEL_NAMES)
+
     if independent_probability is None or not independent_names:
         return "BLENDED_FORECAST" if price_anchored_names else "NO_FORECAST"
 
-    if independent_names == {"history"} and not price_anchored_names:
+    if independent_names == {"history"} and not price_anchored_names and not specialized_names:
+        if proposition is not None and (
+            proposition.event_type is None or proposition.proposition_status == "AMBIGUOUS"
+        ):
+            return "NO_FORECAST"
         return "BASELINE_ONLY"
     if independent_names == {"independent_evidence"} and not price_anchored_names:
         return "EVIDENCE_ONLY"
@@ -679,7 +697,38 @@ def compute_prediction(
         trust = max(0.3, min(1.0, confidence / 100))
         calibrated_probability = round(0.5 + (blended_probability - 0.5) * trust, 4)
 
-    forecast_status = _forecast_status(estimated_yes, independent_probability, all_submodels, confidence)
+    _prior_forecast_status_available_names = {s.name for s in all_submodels if s.available}
+    _prior_forecast_status_was_history_only = (
+        _prior_forecast_status_available_names & {"history", "independent_evidence"} == {"history"}
+        and not (
+            _prior_forecast_status_available_names
+            & ({"momentum", "news", "event_relations"} | set(ALL_SPECIALIZED_MODEL_NAMES))
+        )
+    )
+    # Part 4's history-only safety rule only applies when a real target
+    # question was actually supplied (production callers — ai/service.py —
+    # always pass real question text; `question` defaults to "" only for
+    # legacy/back-compat callers and tests that predate proposition
+    # parsing entirely and never intended to exercise it). With an empty
+    # question there is nothing to have failed to parse, so `proposition`
+    # is passed as None to _forecast_status in that case rather than
+    # treating "no question was given" as "the question was ambiguous".
+    _proposition_for_status = proposition if question else None
+    forecast_status = _forecast_status(
+        estimated_yes, independent_probability, all_submodels, confidence, _proposition_for_status
+    )
+    if forecast_status == "NO_FORECAST" and _prior_forecast_status_was_history_only and estimated_yes is not None:
+        # History-only-safety-rule fired (Part 4): don't let a quantitative
+        # probability survive as estimated_yes/independent_probability once
+        # the forecast has been demoted to NO_FORECAST for this reason —
+        # downstream recommendation logic must see "nothing to recommend",
+        # not a number that happens to be unlabeled.
+        independent_probability = None
+        estimated_yes = None
+        blended_probability = None
+        calibrated_probability = None
+        recommendation = "INSUFFICIENT_DATA"
+        uncertainty_lower = uncertainty_upper = None
 
     # K3: prior provenance per submodel, surfaced in contribution_breakdown
     # so a future frontend can visibly distinguish "computed from real
@@ -749,6 +798,14 @@ def compute_prediction(
             f"Divergence audit WARN (not suppressed): {divergence_audit.summary} "
             f"Flagged checks: {[c.name for c in divergence_audit.checks if c.verdict == 'WARN']}."
         )
+
+    # Part 5 (correctness pass, 2026-08): structural gate re-applied here
+    # (after divergence_audit may have just set FORECAST_SUPPRESSED) — a
+    # STRONG_YES/STRONG_NO recommendation must be structurally impossible
+    # whenever forecast_status is NO_FORECAST/FORECAST_SUPPRESSED, no matter
+    # how `recommendation` was derived earlier from net_edge/confidence.
+    if forecast_status in ("NO_FORECAST", "FORECAST_SUPPRESSED") and recommendation in ("STRONG_YES", "STRONG_NO"):
+        recommendation = "INSUFFICIENT_DATA"
 
     total_available_weight = sum(s.weight for s in all_submodels if s.available)
     contribution_breakdown = tuple(

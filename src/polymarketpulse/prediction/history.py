@@ -148,6 +148,42 @@ class ComparableCandidate:
         }
 
 
+# Hard compatibility gate (Part 1 correctness fix, 2026-08): a candidate
+# that fails this gate is NEVER scored — it gets similarity 0.0 and is
+# therefore excluded from the weighted baseline entirely, regardless of how
+# much token/time/geo overlap it happens to share by coincidence. Before
+# this gate existed, an unrelated candidate (no category match, no
+# event_type match, no entity overlap) could still accumulate a nonzero
+# score purely from token_overlap/time_horizon/resolution_structure/geo —
+# e.g. two totally unrelated binary markets of similar duration and both
+# "CLEAR" resolution structure could land near
+# _WEIGHT_TIME_HORIZON + _WEIGHT_RESOLUTION_STRUCTURE + partial token
+# overlap, which is how a "Strait of Hormuz" market could end up with
+# ~33%-similarity "comparables" like an NYC indoor-dining market or a
+# celebrity-divorce market: neither category nor event_type nor entities
+# ever matched, but the softer signals summed to a deceptively
+# plausible-looking score anyway.
+def _passes_compatibility_gate(
+    target_proposition: MarketProposition,
+    target_classification: MarketClassification,
+    target_entities: set[str],
+    candidate: ComparableCandidate,
+) -> bool:
+    category_match = bool(
+        candidate.category and target_classification.category
+        and candidate.category == target_classification.category
+    )
+    if not category_match:
+        return False
+
+    event_type_match = bool(
+        candidate.event_type and target_proposition.event_type
+        and candidate.event_type == target_proposition.event_type
+    )
+    entity_overlap = _jaccard(target_entities, set(candidate.entities)) > 0.0
+    return event_type_match or entity_overlap
+
+
 def _score_candidate(
     target_proposition: MarketProposition,
     target_classification: MarketClassification,
@@ -155,6 +191,9 @@ def _score_candidate(
     target_tokens: set[str],
     candidate: ComparableCandidate,
 ) -> float:
+    if not _passes_compatibility_gate(target_proposition, target_classification, target_entities, candidate):
+        return 0.0
+
     score = 0.0
 
     if candidate.category and target_classification.category and candidate.category == target_classification.category:
@@ -325,6 +364,12 @@ class WeightedBaselineResult:
     lower_bound: float | None = None
     upper_bound: float | None = None
     uncertainty_width: float | None = None
+    # Part 2 (correctness pass): explicit candidate accounting so the UI/
+    # API can show how many candidates were even considered vs how many
+    # actually passed the compatibility gate and fed the baseline.
+    candidate_count: int = 0
+    accepted_count: int = 0
+    rejected_count: int = 0
     # I3 (additive): the actual comparable cases that fed the weighted
     # baseline above (resolved, binary YES/NO, positive similarity weight),
     # sorted by descending similarity — so the UI can show real
@@ -355,14 +400,17 @@ def compute_weighted_baseline(
     usable: list[tuple[float, float]] = []  # (weight, outcome)
     usable_cases: list[dict] = []  # I3: same rows, with display fields, for top_comparable_cases
     excluded = 0
+    candidate_count = len(comparable_cases_with_scores)
+    gate_rejected = 0
     for candidate, weight in comparable_cases_with_scores:
+        if weight <= 0:
+            gate_rejected += 1
+            continue
         if candidate.resolution_status != "resolved":
             excluded += 1
             continue
         if not candidate.winning_outcome or candidate.winning_outcome.lower() not in ("yes", "no"):
             excluded += 1
-            continue
-        if weight <= 0:
             continue
         outcome = 1.0 if candidate.winning_outcome.lower() == "yes" else 0.0
         usable.append((weight, outcome))
@@ -380,6 +428,7 @@ def compute_weighted_baseline(
             case_count=0, tier=TIER_UNAVAILABLE,
             detail="Keine gewichtbaren, aufgelösten YES/NO-Vergleichsfälle gefunden.",
             excluded_non_binary_count=excluded,
+            candidate_count=candidate_count, accepted_count=0, rejected_count=gate_rejected + excluded,
         )
 
     total_weight = sum(w for w, _ in usable)
@@ -426,6 +475,7 @@ def compute_weighted_baseline(
         upper_bound=upper,
         uncertainty_width=width,
         top_comparable_cases=top_cases,
+        candidate_count=candidate_count, accepted_count=len(usable), rejected_count=gate_rejected + excluded,
     )
 
 
@@ -477,6 +527,29 @@ def _compute_history_estimate_weighted(
 
     sample_size = result.case_count
     observed_yes_rate = result.baseline_yes_probability
+
+    # Part 3 (correctness pass): if the TARGET market's own event_type is
+    # None/unclassified, the quantitative History baseline must not feed
+    # independent_probability even if some comparables superficially
+    # matched on category alone (the compatibility gate above still
+    # required event_type match OR entity overlap per-candidate, but an
+    # unclassified target can still accumulate entity-overlap-only
+    # "matches" that are not a real predicate match). History is reported
+    # as unavailable for quantitative use in this case; the underlying
+    # weighted-baseline numbers stay in `result` for non-quantitative
+    # research-context display.
+    if not target_proposition.event_type:
+        return (
+            SubmodelEstimate(
+                name="history", estimated_yes_probability=observed_yes_rate, weight=0.0, available=False,
+                detail=(
+                    "event_type des Zielmarkts konnte nicht bestimmt werden — History wird nicht als "
+                    "quantitative Schätzung verwendet (nur als Forschungskontext, falls vorhanden). "
+                    + result.detail
+                ),
+            ),
+            sample_size, observed_yes_rate, result,
+        )
 
     if result.tier == TIER_UNAVAILABLE:
         return (
