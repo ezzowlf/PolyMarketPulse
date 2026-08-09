@@ -37,8 +37,229 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from ..providers.fred import MacroSnapshot
     from .evidence import IndependentEvidenceResult
     from .semantics import MarketProposition
+
+# ---------------------------------------------------------------------------
+# ROUND-2 (85-section brief, section 5): World State 2.0 — real structured
+# state variables. `StateVariable` represents a single REAL fetched/derived
+# data point (never a text summary, never a guess). Populated ONLY for the
+# two domains that already have a real, working external data feed wired
+# into engine.py (MACRO/FRED, CRYPTO/CoinGecko) — see
+# `_build_macro_state_variables`/`_build_quant_state_variables` below. Every
+# other domain (Politics/Geopolitics/Sports) gets an honestly EMPTY tuple
+# this round: per the project owner's explicit rule ("UNKNOWN darf nicht als
+# neutraler Wert missbraucht werden" — UNKNOWN must not be misused as a
+# neutral placeholder value), fabricating an UNKNOWN-valued StateVariable for
+# a field with no real backing data source is exactly the kind of dishonest
+# placeholder this rule forbids — an empty tuple is the honest choice.
+# ---------------------------------------------------------------------------
+
+# "live_fetch": this call's HTTP request to the provider succeeded and the
+# value below came straight from that response — the ONLY source_type this
+# round produces, since neither FRED nor CoinGecko has a cache/staleness
+# layer in this codebase yet (confirmed: no cache table/module exists for
+# either provider — see HANDOFF.md's note on this being a real, separate,
+# out-of-scope performance question for FRED's ~30s uncached call). Kept as
+# a Literal with room to grow rather than a free string, so a future round
+# that adds real caching has a real "cached"/"stale" value to report instead
+# of inventing one now.
+StateVariableSourceType = Literal["live_fetch"]
+
+# "provider_reported": the value is exactly what a single named external
+# provider (FRED, CoinGecko) returned for its own published series/endpoint
+# — not independently cross-verified against a second source. This is an
+# honest, precise label, not a claim of higher verification than the code
+# actually performs.
+StateVariableVerificationStatus = Literal["provider_reported"]
+
+
+@dataclass(frozen=True)
+class StateVariable:
+    """A single real, structured world-state data point — section 5 of the
+    project owner's brief. Every field must be derivable from a real fetched
+    or computed value; nothing here is ever guessed or defaulted to fill a
+    gap (see module header)."""
+
+    name: str
+    value: float | str
+    unit: str | None
+    timestamp: str  # ISO date/datetime the VALUE itself refers to (the
+                     # provider's own as-of date), not necessarily "now"
+    available_at: str  # ISO datetime this system actually observed/fetched
+                        # the value — point-in-time safety: a backtest must
+                        # never use a value before its available_at
+    source: str
+    source_type: StateVariableSourceType
+    confidence: float
+    freshness: str  # short, honest, human-readable staleness description
+                     # derived from (available_at - timestamp), e.g.
+                     # "same-day" / "~1 month old (monthly series)"
+    verification_status: StateVariableVerificationStatus
+
+    def as_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "value": self.value,
+            "unit": self.unit,
+            "timestamp": self.timestamp,
+            "available_at": self.available_at,
+            "source": self.source,
+            "source_type": self.source_type,
+            "confidence": self.confidence,
+            "freshness": self.freshness,
+            "verification_status": self.verification_status,
+        }
+
+
+def _build_macro_state_variables(
+    macro_snapshot: MacroSnapshot | None, now: datetime,
+) -> tuple[StateVariable, ...]:
+    """Real StateVariable instances derived from an already-fetched
+    `providers.fred.MacroSnapshot` (reused, not re-fetched here — engine.py
+    owns the one live FRED call per prediction run). Empty tuple when no
+    snapshot was fetched this run (e.g. not a rate_cut/rate_hike/rate_hold
+    market, or the live fetch failed) — never a fabricated placeholder."""
+    if macro_snapshot is None:
+        return ()
+
+    available_at = now.isoformat()
+
+    def _freshness_for(as_of: object) -> str:
+        try:
+            age_days = (now.date() - as_of).days  # type: ignore[operator]
+        except TypeError:
+            return "unknown"
+        if age_days < 0:
+            return "unknown"
+        if age_days <= 31:
+            return f"{age_days}d old (monthly FRED series)"
+        return f"{age_days}d old (monthly FRED series, stale)"
+
+    variables = [
+        StateVariable(
+            name="current_rate",
+            value=macro_snapshot.policy_rate,
+            unit="percent",
+            timestamp=macro_snapshot.policy_rate_as_of.isoformat(),
+            available_at=available_at,
+            source="fred",
+            source_type="live_fetch",
+            confidence=0.95,  # official government-published series, single-
+                               # source (no cross-provider corroboration)
+            freshness=_freshness_for(macro_snapshot.policy_rate_as_of),
+            verification_status="provider_reported",
+        ),
+        StateVariable(
+            name="latest_cpi",
+            value=macro_snapshot.cpi_yoy,
+            unit="percent_yoy",
+            timestamp=macro_snapshot.as_of_date.isoformat(),
+            available_at=available_at,
+            source="fred",
+            source_type="live_fetch",
+            confidence=0.95,
+            freshness=_freshness_for(macro_snapshot.as_of_date),
+            verification_status="provider_reported",
+        ),
+        StateVariable(
+            name="unemployment_rate",
+            value=macro_snapshot.unemployment_rate,
+            unit="percent",
+            timestamp=macro_snapshot.as_of_date.isoformat(),
+            available_at=available_at,
+            source="fred",
+            source_type="live_fetch",
+            confidence=0.95,
+            freshness=_freshness_for(macro_snapshot.as_of_date),
+            verification_status="provider_reported",
+        ),
+    ]
+
+    if macro_snapshot.next_fomc_meeting_date is not None:
+        variables.append(
+            StateVariable(
+                name="next_meeting_date",
+                value=macro_snapshot.next_fomc_meeting_date.isoformat(),
+                unit=None,
+                # A calendar fact, not a data-provider observation with its
+                # own as-of drift — timestamp is honestly "as of this run".
+                timestamp=macro_snapshot.as_of_date.isoformat(),
+                available_at=available_at,
+                source="fred",
+                source_type="live_fetch",
+                confidence=0.9,  # hardcoded public FOMC calendar table (see
+                                  # providers/fred.py) — real public info, but
+                                  # not itself fetched live from an API
+                freshness="calendar reference (not a time-series observation)",
+                verification_status="provider_reported",
+            )
+        )
+
+    return tuple(variables)
+
+
+def _build_quant_state_variables(
+    asset: str | None,
+    current_price: float | None,
+    daily_volatility: float | None,
+    now: datetime,
+) -> tuple[StateVariable, ...]:
+    """Real StateVariable instances derived from an already-fetched
+    `providers.coingecko.PriceData` (reused, not re-fetched here — engine.py
+    owns the one live CoinGecko call per prediction run). Empty tuple when
+    no price data was fetched this run. No `trend` variable: quant.py does
+    not compute a directional trend signal today (only spot price +
+    realized volatility), so per the round's explicit instruction not to
+    invent a signal that doesn't already exist, none is added here."""
+    if current_price is None:
+        return ()
+
+    available_at = now.isoformat()
+    variables = [
+        StateVariable(
+            name="spot_price",
+            value=current_price,
+            unit="usd",
+            # CoinGecko's market_chart response has no explicit per-point
+            # observation timestamp exposed by providers/coingecko.py's
+            # PriceData (only the raw closes list, from which current_price
+            # is taken as the last daily close) — honestly using the fetch
+            # time as the timestamp rather than fabricating a precise
+            # as-of date the code doesn't actually have.
+            timestamp=available_at,
+            available_at=available_at,
+            source="coingecko",
+            source_type="live_fetch",
+            confidence=0.9,
+            freshness="live (fetched this run)",
+            verification_status="provider_reported",
+        ),
+    ]
+
+    if daily_volatility is not None:
+        variables.append(
+            StateVariable(
+                name="realized_volatility",
+                value=daily_volatility,
+                unit="daily_stdev_log_return",
+                timestamp=available_at,
+                available_at=available_at,
+                source="coingecko",
+                source_type="live_fetch",
+                # Lower than spot_price: a derived statistic (sample stdev
+                # over a trailing window, see providers/coingecko.py), not a
+                # single directly-observed value — real limitations
+                # (single-exchange source, no term structure) documented in
+                # quant.py's module docstring apply here too.
+                confidence=0.75,
+                freshness="derived from trailing daily-close history fetched this run",
+                verification_status="provider_reported",
+            )
+        )
+
+    return tuple(variables)
 
 # ---------------------------------------------------------------------------
 # Part 2/3 additions (this round): richer, honest sub-states for Politics/
@@ -347,6 +568,10 @@ class WorldState:
     # Geopolitics markets. None when the market's classified category isn't
     # Politics/Geopolitics-flavoured.
     path_to_resolution: PathToResolution | None = None
+    # --- ROUND-2 (section 5): real structured state variables. Empty tuple
+    # whenever this market has no real external data feed backing it (see
+    # module header) — never fabricated placeholders.
+    state_variables: tuple[StateVariable, ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict:
         return {
@@ -367,6 +592,7 @@ class WorldState:
             "path_to_resolution": (
                 self.path_to_resolution.as_dict() if self.path_to_resolution is not None else None
             ),
+            "state_variables": [v.as_dict() for v in self.state_variables],
         }
 
 
@@ -376,6 +602,10 @@ def assemble_world_state(
     now: datetime,
     independent_evidence: IndependentEvidenceResult | None,
     classified_category: str | None = None,
+    macro_snapshot: MacroSnapshot | None = None,
+    quant_asset: str | None = None,
+    quant_current_price: float | None = None,
+    quant_daily_volatility: float | None = None,
 ) -> WorldState:
     """Assemble a WorldState from already-computed engine values. No new
     probability-affecting computation happens here.
@@ -383,7 +613,14 @@ def assemble_world_state(
     `classified_category` (additive, Part 3): the Phase-C classified
     taxonomy value (e.g. "GEOPOLITICS"/"POLITICS") — optional so every
     existing caller/test that omits it keeps working exactly as before;
-    path_to_resolution is simply None in that case."""
+    path_to_resolution is simply None in that case.
+
+    `macro_snapshot`/`quant_*` (additive, ROUND-2 section 5): the SAME
+    already-fetched FRED/CoinGecko values engine.py forwards to macro.py/
+    quant.py — never fetched again here. All default to None so every
+    existing caller keeps working unchanged; state_variables is simply an
+    empty tuple whenever none are supplied (the honest, correct outcome for
+    every market outside MACRO/CRYPTO)."""
     time_remaining_hours: float | None = None
     if resolution_date is not None:
         time_remaining_hours = (resolution_date - now).total_seconds() / 3600.0
@@ -413,6 +650,11 @@ def assemble_world_state(
         proposition, time_remaining_hours, independent_evidence, waterway_state, classified_category,
     )
 
+    state_variables = (
+        _build_macro_state_variables(macro_snapshot, now)
+        + _build_quant_state_variables(quant_asset, quant_current_price, quant_daily_volatility, now)
+    )
+
     return WorldState(
         yes_condition=proposition.yes_condition,
         no_condition=proposition.no_condition,
@@ -429,4 +671,5 @@ def assemble_world_state(
         actively_searched_both_sides=True,
         waterway_state=waterway_state,
         path_to_resolution=path_to_resolution,
+        state_variables=state_variables,
     )

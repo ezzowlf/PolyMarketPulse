@@ -891,6 +891,15 @@ def compute_prediction(
         proposition=proposition, resolution_date=resolution_date, now=now,
         independent_evidence=independent_evidence,
         classified_category=classified_category,
+        # ROUND-2 (section 5): the SAME already-fetched FRED/CoinGecko
+        # values forwarded to macro.py/quant.py above — not fetched again.
+        # Both are None for every market outside MACRO/CRYPTO (see the
+        # gating around their original fetch calls above), which correctly
+        # produces an empty state_variables tuple for those markets.
+        macro_snapshot=macro_snapshot,
+        quant_asset=proposition.asset,
+        quant_current_price=quant_current_price,
+        quant_daily_volatility=quant_daily_volatility,
     )
 
     scenarios = build_scenarios(

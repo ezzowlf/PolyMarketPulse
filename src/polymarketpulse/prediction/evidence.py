@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..claims import ExtractedClaim
 
+from ..claims import group_claims_by_normalization
 from .base_rates import EXTRAORDINARY_EVENT_TYPES, get_base_rate
 from .bayesian import bayesian_update
 from .news import _trust_for_source, score_sentiment
@@ -376,6 +377,14 @@ def compute_independent_evidence(
 
     factors: list[EvidenceFactor] = []
     collected_claims: list = []
+    # ROUND-2 (section 6, Event Intelligence): parallel to collected_claims
+    # above, but keyed by which side of the proposition each successfully-
+    # extracted claim supports — needed below to dedupe "N syndicated
+    # articles about the same underlying event" down to their real distinct
+    # event count before they reach confirmation_count. See the dedup
+    # block after this loop for the full rationale.
+    claims_for_yes: list = []
+    claims_for_no: list = []
     for event_id, title, source, published_at, link_confidence, source_url in rows:
         from urllib.parse import urlparse
 
@@ -438,6 +447,11 @@ def compute_independent_evidence(
                 entailment=relation.entailment, relation_weight=relation_weight,
             )
         )
+        if extracted_claim is not None:
+            if matched_condition == "yes":
+                claims_for_yes.append(extracted_claim)
+            elif matched_condition == "no":
+                claims_for_no.append(extracted_claim)
 
     # Persist/dedup claims collected from all linked articles regardless of
     # whether an independent probability ends up computable below — this is
@@ -455,7 +469,31 @@ def compute_independent_evidence(
     yes_domains = {f.source_domain or f.source for f in evidence_for_yes}
     no_domains = {f.source_domain or f.source for f in evidence_for_no}
     contradiction = bool(yes_domains) and bool(no_domains)
-    confirmation_count = max(len(yes_domains), len(no_domains))
+    # ROUND-2 (section 6, Event Intelligence): domain count alone answers
+    # "how many distinct outlets published a yes/no-matched article", not
+    # "how many genuinely distinct underlying events/claims were reported" —
+    # a single wire story syndicated verbatim to N different domains would
+    # otherwise inflate confirmation_count (and, downstream, the Bayesian
+    # update's confidence and information_edge_score) to N even though it is
+    # ONE real-world event, not N independent confirmations. Audit finding:
+    # claims.py's group_claims_by_normalization/ClaimGroup already computes
+    # exactly this real per-event dedup and IS invoked on every call
+    # (_persist_claim_groups, above) — but its output was previously only
+    # used for persistence side effects (claim_status_counts) and silently
+    # discarded otherwise, never reaching this confirmation_count. Fixed
+    # here by capping each side's domain-based count at its real distinct-
+    # claim-group count whenever claims were actually extracted for that
+    # side (extract_claim_from_event only succeeds for a subset of event
+    # actions — see claims.py — so this is a conservative MIN, never an
+    # increase past the domain count, and never invents a count when no
+    # claims were extracted at all).
+    yes_event_count = (
+        len(group_claims_by_normalization(tuple(claims_for_yes))) if claims_for_yes else len(yes_domains)
+    )
+    no_event_count = (
+        len(group_claims_by_normalization(tuple(claims_for_no))) if claims_for_no else len(no_domains)
+    )
+    confirmation_count = max(min(len(yes_domains), yes_event_count), min(len(no_domains), no_event_count))
 
     scored = [f for f in factors if f.matched_condition is not None]
     if len(scored) < MIN_EVIDENCE_ITEMS_FOR_ESTIMATE:
