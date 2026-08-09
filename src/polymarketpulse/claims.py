@@ -78,7 +78,13 @@ class Claim:
     entities: tuple[str, ...] = field(default_factory=tuple)
     location: str | None = None
     raw_reference: str | None = None  # Original text excerpt
-    
+    # Additive: mirrors the `claims` table's event_type/direction columns
+    # (migrations.py) and storage.save_claim's INSERT — without these,
+    # save_claim raised AttributeError on every real call, which is why
+    # claim persistence was never actually exercised end-to-end before.
+    event_type: str | None = None
+    direction: Literal["positive", "negative", "neutral"] = "neutral"
+
     def as_dict(self) -> dict:
         return {
             "claim_id": self.claim_id,
@@ -94,6 +100,8 @@ class Claim:
             "entities": list(self.entities),
             "location": self.location,
             "raw_reference": self.raw_reference,
+            "event_type": self.event_type,
+            "direction": self.direction,
         }
     
     def normalized(self) -> str:
@@ -213,6 +221,8 @@ class ExtractedClaim:
             entities=self.entities,
             location=self.location,
             raw_reference=self.raw_reference,
+            event_type=self.event_type,
+            direction=self.direction,
         )
     
     def _confidence(self) -> float:
@@ -501,7 +511,13 @@ def group_claims_by_normalization(
     groups: dict[str, list[ExtractedClaim]] = defaultdict(list)
     
     for claim in claims:
-        normalized = claim.normalized()
+        # Bug fix: this used to call claim.normalized(), but the input here
+        # is always ExtractedClaim (per the type signature), which has no
+        # such method — only the post-conversion Claim does. Every real
+        # call raised AttributeError, so grouping (the module's core
+        # dedup feature) never actually ran. normalize_for_dedup already
+        # handles both ExtractedClaim and Claim.
+        normalized = normalize_for_dedup(claim)
         groups[normalized].append(claim)
     
     # Convert to ClaimGroups
@@ -517,7 +533,12 @@ def group_claims_by_normalization(
         }.get(c.certainty, 0), reverse=True)
         
         canonical = claims_list[0]
-        canonical_claim = canonical.to_claim(f"claim_{hash(normalized.lower()) % 1000000:06d}")
+        # Use the deterministic sha256-based id (_stable_claim_id), not
+        # Python's builtin hash() — that is salted per-process
+        # (PYTHONHASHSEED) and would give the "same" claim a different
+        # claim_id on every restart, breaking the ON CONFLICT(claim_id)
+        # dedup in storage.save_claim/save_claim_group across runs.
+        canonical_claim = canonical.to_claim(_stable_claim_id(normalized))
         
         # Determine verification status
         verification_status: VerificationStatus = "SINGLE_SOURCE"

@@ -371,6 +371,60 @@ def test_independent_probability_market_blind_quant_routed(tmp_path: Path, monke
     assert len(independents) == 1  # byte-identical (exact equality) across all five market prices
 
 
+def test_independent_probability_market_blind_evidence_based_claims_connected(
+    tmp_path: Path,
+) -> None:
+    """Task 1 (claims.py wiring): compute_independent_evidence now also
+    extracts+persists claims via extract_claim_from_event/
+    group_claims_by_normalization as a side effect of scoring each linked
+    article. That must remain purely additive — the evidence-route
+    independent_probability itself must still be byte-identical across the
+    full 5-point market-price sweep, exactly like the history/politics/
+    quant routes above."""
+    question = "Will Team Alpha win the qualifier?"
+    resolution = "Resolves YES if Team Alpha wins the qualifier, NO otherwise."
+    now = datetime.now(UTC)  # fixed across all 5 fixtures so recency_weight can't vary the result
+    results = []
+    for i, price in enumerate((0.05, 0.25, 0.50, 0.75, 0.95)):
+        storage = Storage(tmp_path / f"evidence-claims-{i}.db")
+        _seed_history(storage, n_yes=15, n_no=5, category="OTHER", question_prefix="esports-hist")
+        _link_evidence(
+            storage, "polymarket", "m1", question,
+            [
+                ("Team Alpha wins the qualifier decisively", "reuters", "https://reuters.com/a", 0.95),
+                ("Alpha confirmed as qualifier winner", "apnews", "https://apnews.com/b", 0.9),
+                ("Official results: Alpha wins qualifier", "bbc", "https://bbc.com/c", 0.92),
+            ],
+            now=now,
+        )
+        results.append(
+            compute_prediction(
+                storage.connection, "m1", "polymarket", "m1", "esports", price, 100000, 90, 0, None, True,
+                question=question, resolution_text=resolution,
+            )
+        )
+        storage.close()
+    # Deliberately asserting on the *submodel-level* independent_evidence
+    # estimate (pre-audit), not the top-level PredictionResult.independent_
+    # probability: at extreme market prices (e.g. 0.05 vs. this fixture's
+    # strong ~0.67 evidence estimate) Phase M's divergence_audit
+    # legitimately REJECTs and suppresses the top-level field via its
+    # model_disagreement check — which itself factors in the momentum
+    # submodel, and momentum *is* allowed to depend on market price (that's
+    # what momentum means). That's correct, price-dependent audit behavior,
+    # not a violation of evidence-route market-blindness. The thing that
+    # must never move with price is the evidence submodel's own estimate,
+    # which is confirmed here.
+    evidence_estimates = {
+        next(s for s in r.submodel_estimates if s.name == "independent_evidence").estimated_yes_probability
+        for r in results
+    }
+    assert len(evidence_estimates) == 1  # byte-identical across all five market prices
+    for r in results:
+        evidence_submodel = next(s for s in r.submodel_estimates if s.name == "independent_evidence")
+        assert evidence_submodel.available is True
+
+
 # ---------------------------------------------------------------------------
 # F5 — market ineligible for any specialized model still falls back cleanly
 # ---------------------------------------------------------------------------

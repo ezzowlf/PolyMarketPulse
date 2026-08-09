@@ -120,7 +120,9 @@ def _scan_one_provider(
         storage.save_quality_reports(run_id, quality_reports)
         duration_ms = int((time.monotonic() - started) * 1000)
         
-        # Save provider health metrics
+        # Save provider health metrics. A success always resets
+        # consecutive_failures to 0 — no need to read the previous row for
+        # this branch.
         health = data_sources.ProviderHealth(
             source_id=provider_name,
             last_success=datetime.now(UTC),
@@ -148,15 +150,23 @@ def _scan_one_provider(
     except ProviderError as exc:
         duration_ms = int((time.monotonic() - started) * 1000)
         
-        # Save provider health metrics for failure
+        # Save provider health metrics for failure. Bug fix: this used to
+        # hardcode consecutive_failures=1 on every single failure, so a
+        # provider that had already failed 5 times in a row would be
+        # reported as having failed only once — masking real outages from
+        # ProviderHealth.state()'s "consecutive_failures >= 3 -> OFFLINE"
+        # check. Read the existing stored row for this source and
+        # increment instead.
+        previous_health = storage.get_provider_health(provider_name)
+        previous_failures = previous_health.consecutive_failures if previous_health else 0
         health = data_sources.ProviderHealth(
             source_id=provider_name,
-            last_success=None,
+            last_success=previous_health.last_success if previous_health else None,
             last_failure=datetime.now(UTC),
             last_failure_reason=str(exc),
             last_http_status=None,
             last_latency_ms=duration_ms,
-            consecutive_failures=1,
+            consecutive_failures=previous_failures + 1,
             data_age_seconds=None,
             items_fetched=0,
             parse_failures=0,

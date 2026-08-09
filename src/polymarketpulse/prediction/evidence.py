@@ -21,6 +21,10 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..claims import ExtractedClaim
 
 from .base_rates import EXTRAORDINARY_EVENT_TYPES, get_base_rate
 from .bayesian import bayesian_update
@@ -202,6 +206,78 @@ def _persist_extracted_event(
         pass
 
 
+def _persist_claims_for_event(
+    conn: sqlite3.Connection,
+    event: object,
+    news_event_id: int,
+    source: str | None,
+    source_url: str | None,
+    published_at: str | None,
+) -> ExtractedClaim | None:
+    """Additive-only: convert the already-computed ExtractedEvent into an
+    ExtractedClaim (claims.py) and return it for later grouping/persistence.
+
+    This never influences the probability math above — it is purely a
+    side-channel into the `claims`/`claim_groups`/`claim_sources` tables so
+    claims get stable IDs and future verification-status tracking, exactly
+    like `_persist_extracted_event` does for the `events` table. Any
+    failure (older DB missing the claims migration, extraction returning
+    None, etc.) degrades to a no-op and must never break evidence scoring.
+    """
+    from polymarketpulse.claims import extract_claim_from_event
+
+    try:
+        timestamp = None
+        if published_at:
+            try:
+                timestamp = datetime.fromisoformat(published_at)
+            except ValueError:
+                timestamp = None
+        return extract_claim_from_event(
+            event, source_id=source or "unknown", source_url=source_url, timestamp=timestamp
+        )
+    except (AttributeError, TypeError, ValueError):
+        # Purely additive infrastructure — never let claim extraction
+        # break the real evidence-scoring path above.
+        return None
+
+
+def _persist_claim_groups(conn: sqlite3.Connection, extracted_claims: list) -> None:
+    """Group and persist claims collected across all linked articles for
+    one market (real deduplication when the same underlying claim shows up
+    from multiple sources) — additive only, wrapped so a storage-layer
+    issue never propagates into evidence scoring."""
+    if not extracted_claims:
+        return
+    try:
+        from types import SimpleNamespace
+
+        from polymarketpulse.claims import group_claims_by_normalization
+        from polymarketpulse.storage import Storage
+
+        groups = group_claims_by_normalization(tuple(extracted_claims))
+        store = SimpleNamespace(connection=conn)
+        for group in groups:
+            Storage.save_claim(store, group.canonical_claim)
+            Storage.save_claim_group(store, group)
+            # Only the canonical claim's own source has a known URL/timestamp
+            # here — ClaimGroup.republishing_sources is just source-id
+            # strings (no per-source URL), so don't misattribute the
+            # canonical claim's URL to other sources' rows.
+            Storage.save_claim_source(
+                store, group.claim_id, group.canonical_claim.source_id,
+                group.canonical_claim.source_url,
+                group.canonical_claim.timestamp.isoformat() if group.canonical_claim.timestamp else None,
+            )
+            for src in group.republishing_sources:
+                Storage.save_claim_source(store, group.claim_id, src, None, None)
+        conn.commit()
+    except (sqlite3.Error, AttributeError, TypeError, ValueError):
+        # Storage-layer or extraction-shape issue — additive persistence
+        # only, must never propagate into evidence scoring.
+        pass
+
+
 def _first_reported_at(rows: list[tuple]) -> datetime | None:
     timestamps = []
     for row in rows:
@@ -261,6 +337,7 @@ def compute_independent_evidence(
     proposition = parse_market_proposition(question, resolution_text)
 
     factors: list[EvidenceFactor] = []
+    collected_claims: list = []
     for event_id, title, source, published_at, link_confidence, source_url in rows:
         from urllib.parse import urlparse
 
@@ -276,6 +353,13 @@ def compute_independent_evidence(
         # scored for (provenance: source, certainty, timestamp) — purely
         # additive, does not affect any of the scoring below.
         _persist_extracted_event(conn, provider, provider_market_id, title, event, event_id, published_at, source)
+        # Additive claims-wiring (Task 1): convert the same already-computed
+        # event into a claim, collected here and grouped/persisted once
+        # below (real cross-article dedup) — never consumed by the
+        # scoring math in this function.
+        extracted_claim = _persist_claims_for_event(conn, event, event_id, source, source_url, published_at)
+        if extracted_claim is not None:
+            collected_claims.append(extracted_claim)
 
         # Sentiment is never allowed to promote a relation past the WEAK
         # tier here — classify_evidence_relation already enforces this
@@ -316,6 +400,12 @@ def compute_independent_evidence(
                 entailment=relation.entailment, relation_weight=relation_weight,
             )
         )
+
+    # Persist/dedup claims collected from all linked articles regardless of
+    # whether an independent probability ends up computable below — this is
+    # evidence infrastructure (stable IDs, future verification tracking),
+    # not a probability input, so it must not gate on the scoring outcome.
+    _persist_claim_groups(conn, collected_claims)
 
     evidence_for_yes = tuple(f for f in factors if f.matched_condition == "yes")
     evidence_for_no = tuple(f for f in factors if f.matched_condition == "no")
