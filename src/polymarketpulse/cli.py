@@ -9,6 +9,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from . import data_sources
 from .config import Settings
 from .data_quality import assess_market
 from .performance import compute_performance
@@ -118,6 +119,22 @@ def _scan_one_provider(
         snapshots_saved = storage.save(run_id, batch)
         storage.save_quality_reports(run_id, quality_reports)
         duration_ms = int((time.monotonic() - started) * 1000)
+        
+        # Save provider health metrics
+        health = data_sources.ProviderHealth(
+            source_id=provider_name,
+            last_success=datetime.now(UTC),
+            last_failure=None,
+            last_failure_reason=None,
+            last_http_status=200,
+            last_latency_ms=duration_ms // len(markets) if markets else 0,
+            consecutive_failures=0,
+            data_age_seconds=0,
+            items_fetched=len(markets),
+            parse_failures=0,
+        )
+        storage.save_provider_health(health)
+        
         storage.finish_run(
             run_id,
             status="completed",
@@ -130,6 +147,22 @@ def _scan_one_provider(
         return len(markets), snapshots_saved, 0, all_signals, new_shadow_setups
     except ProviderError as exc:
         duration_ms = int((time.monotonic() - started) * 1000)
+        
+        # Save provider health metrics for failure
+        health = data_sources.ProviderHealth(
+            source_id=provider_name,
+            last_success=None,
+            last_failure=datetime.now(UTC),
+            last_failure_reason=str(exc),
+            last_http_status=None,
+            last_latency_ms=duration_ms,
+            consecutive_failures=1,
+            data_age_seconds=None,
+            items_fetched=0,
+            parse_failures=0,
+        )
+        storage.save_provider_health(health)
+        
         storage.finish_run(
             run_id,
             status="failed",

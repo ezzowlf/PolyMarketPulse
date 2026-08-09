@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import data_sources
 from .migrations import current_schema_version, run_migrations
 from .models import Market, ResolutionStatus, Signal
 from .prediction.classification import classify_market
@@ -196,6 +197,51 @@ class Storage:
             ),
         )
         self.connection.commit()
+
+    # --- provider health tracking -----------------------------------------
+
+    def save_provider_health(self, health: data_sources.ProviderHealth) -> None:
+        """Save provider health metrics to the database."""
+        row = data_sources.provider_health_to_row(health)
+        now = datetime.now(UTC).isoformat()
+        self.connection.execute(
+            """
+            INSERT INTO provider_health (
+                source_id, last_success, last_failure, last_failure_reason,
+                last_http_status, last_latency_ms, consecutive_failures,
+                data_age_seconds, items_fetched, parse_failures, last_check_timestamp
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_id) DO UPDATE SET
+                last_success = excluded.last_success,
+                last_failure = excluded.last_failure,
+                last_failure_reason = excluded.last_failure_reason,
+                last_http_status = excluded.last_http_status,
+                last_latency_ms = excluded.last_latency_ms,
+                consecutive_failures = excluded.consecutive_failures,
+                data_age_seconds = excluded.data_age_seconds,
+                items_fetched = excluded.items_fetched,
+                parse_failures = excluded.parse_failures,
+                last_check_timestamp = excluded.last_check_timestamp
+            """,
+            row + (now,),
+        )
+        self.connection.commit()
+
+    def get_provider_health(self, source_id: str) -> data_sources.ProviderHealth | None:
+        """Load provider health metrics from the database."""
+        row = self.connection.execute(
+            """
+            SELECT source_id, last_success, last_failure, last_failure_reason,
+                   last_http_status, last_latency_ms, consecutive_failures,
+                   data_age_seconds, items_fetched, parse_failures
+            FROM provider_health
+            WHERE source_id = ?
+            """,
+            (source_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return data_sources.row_to_provider_health(row)
 
     # --- last snapshot lookup (for change-detection / signal deltas) ------
 
@@ -1628,6 +1674,111 @@ class Storage:
         if updated:
             self.connection.commit()
         return updated
+
+    # --- Phase O: Claims API --- #
+    # These methods support the claims.py module for claim extraction,
+    # deduplication, and verification.
+
+    def save_claim(self, claim: object) -> bool:
+        """Save an extracted claim to the database.
+        
+        Returns True if the claim was newly inserted, False if it already existed.
+        """
+        from polymarketpulse.claims import Claim
+        
+        if not isinstance(claim, Claim):
+            return False
+        
+        now = datetime.now(UTC).isoformat()
+        try:
+            self.connection.execute(
+                """
+                INSERT INTO claims (
+                    claim_id, subject, predicate, object, speaker, source_id,
+                    source_url, timestamp, verification_status, confidence,
+                    entities_json, location, raw_reference, event_type, direction, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(claim_id) DO NOTHING
+                """,
+                (
+                    claim.claim_id, claim.subject, claim.predicate, claim.object, claim.speaker,
+                    claim.source_id, claim.source_url,
+                    claim.timestamp.isoformat() if claim.timestamp else None,
+                    claim.verification_status, claim.confidence,
+                    json.dumps(list(claim.entities)) if claim.entities else None,
+                    claim.location, claim.raw_reference, claim.event_type, claim.direction, now,
+                ),
+            )
+            self.connection.commit()
+            return self.connection.total_changes > 0
+        except (sqlite3.Error, ValueError):
+            return False
+
+    def save_claim_group(self, group: object) -> bool:
+        """Save a claim group (deduplicated claims).
+        
+        Returns True if the group was newly inserted, False if it already existed.
+        """
+        from polymarketpulse.claims import ClaimGroup
+        
+        if not isinstance(group, ClaimGroup):
+            return False
+        
+        now = datetime.now(UTC).isoformat()
+        try:
+            self.connection.execute(
+                """
+                INSERT INTO claim_groups (
+                    claim_id, canonical_claim_id, republishing_sources_json,
+                    independent_sources, confirmation_count, verification_status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(claim_id) DO NOTHING
+                """,
+                (
+                    group.claim_id, group.canonical_claim.claim_id,
+                    json.dumps(list(group.republishing_sources)) if group.republishing_sources else None,
+                    group.independent_sources, group.confirmation_count,
+                    group.verification_status, now,
+                ),
+            )
+            self.connection.commit()
+            return self.connection.total_changes > 0
+        except (sqlite3.Error, ValueError):
+            return False
+
+    def save_claim_source(self, claim_id: str, source_id: str, source_url: str | None = None, timestamp: str | None = None) -> None:
+        """Record that a source contributed to a claim (for deduplication tracking)."""
+        try:
+            self.connection.execute(
+                """
+                INSERT OR IGNORE INTO claim_sources (claim_id, source_id, source_url, timestamp)
+                VALUES (?, ?, ?, ?)
+                """,
+                (claim_id, source_id, source_url, timestamp),
+            )
+            self.connection.commit()
+        except sqlite3.Error:
+            pass
+
+    def save_counter_evidence(
+        self, claim_id: str, contradicts_claim_id: str,
+        source_id: str | None = None, source_url: str | None = None,
+        confidence: float | None = None,
+    ) -> None:
+        """Record that one claim contradicts another."""
+        try:
+            now = datetime.now(UTC).isoformat()
+            self.connection.execute(
+                """
+                INSERT INTO claim_counter_evidence (
+                    claim_id, contradicts_claim_id, source_id, source_url, timestamp, confidence, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (claim_id, contradicts_claim_id, source_id, source_url, now, confidence, now),
+            )
+            self.connection.commit()
+        except sqlite3.Error:
+            pass
 
     def close(self) -> None:
         self.connection.close()

@@ -24,6 +24,11 @@ from .base import (
     ProviderTimeoutError,
 )
 
+try:
+    from .. import data_sources
+except ImportError:
+    data_sources = None
+
 GAMMA_URL = "https://gamma-api.polymarket.com"
 
 # Fields checked for presence/quality. Missing ones are recorded on the
@@ -247,9 +252,18 @@ class PolymarketProvider(PredictionMarketProvider):
 
     def __init__(self, timeout: float = 20.0) -> None:
         self._client = httpx.Client(timeout=timeout, headers={"User-Agent": "PolymarketPulse/0.2"})
+        self._health: data_sources.ProviderHealth | None = None
 
     def close(self) -> None:
         self._client.close()
+
+    def get_health(self) -> data_sources.ProviderHealth | None:
+        """Return the last fetch health metrics, if available."""
+        return self._health
+
+    def set_health(self, health: data_sources.ProviderHealth) -> None:
+        """Set health metrics (typically called by the scanner after a fetch)."""
+        self._health = health
 
     def normalize_market(self, raw: dict[str, Any]) -> Market:
         return parse_market(raw)

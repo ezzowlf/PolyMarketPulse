@@ -887,6 +887,114 @@ def _migration_016_shadow_forecast_calibration_fields(conn: sqlite3.Connection) 
     _add_column(conn, "prediction_snapshots", "divergence_verdict", "TEXT")
 
 
+def _migration_017_provider_health_tracking(conn: sqlite3.Connection) -> None:
+    """Phase O: provider health tracking infrastructure for live data
+    source monitoring. Adds the provider_health table that stores metrics
+    for every data source: last success/failure, latency, data age, fetch
+    counts, etc. Used by the UI to distinguish LIVE/DEGRADED/STALE/OFFLINE
+    provider states and by the scanning pipeline to decide whether to retry
+    or skip problematic sources.
+
+    All metrics are additive only — no column is ever dropped or truncated.
+    Health records are upserted on every fetch attempt, so the table always
+    reflects the most recent provider behavior."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS provider_health (
+            source_id TEXT PRIMARY KEY,
+            last_success TEXT,
+            last_failure TEXT,
+            last_failure_reason TEXT,
+            last_http_status INTEGER,
+            last_latency_ms INTEGER,
+            consecutive_failures INTEGER NOT NULL DEFAULT 0,
+            data_age_seconds INTEGER,
+            items_fetched INTEGER NOT NULL DEFAULT 0,
+            parse_failures INTEGER NOT NULL DEFAULT 0,
+            last_check_timestamp TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_provider_health_check
+        ON provider_health(last_check_timestamp);
+    """)
+
+
+def _migration_018_claim_extraction_and_verification(conn: sqlite3.Connection) -> None:
+    """Phase O: Claim extraction, deduplication, and verification foundation.
+    
+    Adds tables for structured claim tracking:
+      - claims: individual claims extracted from articles
+      - claim_groups: deduplicated groups of equivalent claims
+      - claim_sources: mapping between claims and their sources
+    
+    These tables support:
+      - Multi-claim articles (one article may contain multiple claims)
+      - Claim deduplication (Reuters + Yahoo copy = 1 claim, not 2)
+      - Verification states (UNVERIFIED, SINGLE_SOURCE, MULTI_SOURCE, etc.)
+      - Counterevidence tracking (contradicting claims)
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS claims (
+            claim_id TEXT PRIMARY KEY,
+            subject TEXT NOT NULL,
+            predicate TEXT NOT NULL,
+            object TEXT,
+            speaker TEXT,
+            source_id TEXT,
+            source_url TEXT,
+            timestamp TEXT,
+            verification_status TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            entities_json TEXT,
+            location TEXT,
+            raw_reference TEXT,
+            event_type TEXT,
+            direction TEXT,
+            created_at TEXT NOT NULL
+        );
+        
+        CREATE TABLE IF NOT EXISTS claim_groups (
+            claim_id TEXT PRIMARY KEY,
+            canonical_claim_id TEXT NOT NULL,
+            republishing_sources_json TEXT,
+            independent_sources INTEGER DEFAULT 1,
+            confirmation_count INTEGER DEFAULT 1,
+            verification_status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (canonical_claim_id) REFERENCES claims(claim_id)
+        );
+        
+        CREATE TABLE IF NOT EXISTS claim_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            claim_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            source_url TEXT,
+            timestamp TEXT,
+            FOREIGN KEY (claim_id) REFERENCES claims(claim_id),
+            UNIQUE(claim_id, source_id)
+        );
+        
+        CREATE TABLE IF NOT EXISTS claim_counter_evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            claim_id TEXT NOT NULL,
+            contradicts_claim_id TEXT NOT NULL,
+            source_id TEXT,
+            source_url TEXT,
+            timestamp TEXT,
+            confidence REAL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (claim_id) REFERENCES claims(claim_id),
+            FOREIGN KEY (contradicts_claim_id) REFERENCES claims(claim_id)
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_claims_subject ON claims(subject);
+        CREATE INDEX IF NOT EXISTS idx_claims_source_id ON claims(source_id);
+        CREATE INDEX IF NOT EXISTS idx_claims_verification_status ON claims(verification_status);
+        CREATE INDEX IF NOT EXISTS idx_claim_groups_canonical ON claim_groups(canonical_claim_id);
+        CREATE INDEX IF NOT EXISTS idx_claim_sources_claim ON claim_sources(claim_id);
+        CREATE INDEX IF NOT EXISTS idx_claim_counter_evidence_claim ON claim_counter_evidence(claim_id);
+    """)
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -904,6 +1012,8 @@ MIGRATIONS: list[Migration] = [
     (14, "comparable_baseline_history", _migration_014_comparable_baseline_history),
     (15, "extracted_event_persistence", _migration_015_extracted_event_persistence),
     (16, "shadow_forecast_calibration_fields", _migration_016_shadow_forecast_calibration_fields),
+    (17, "provider_health_tracking", _migration_017_provider_health_tracking),
+    (18, "claim_extraction_and_verification", _migration_018_claim_extraction_and_verification),
 ]
 
 

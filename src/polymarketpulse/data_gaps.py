@@ -134,20 +134,21 @@ def calculate_data_gaps(
     
     # News gaps
     # If market is in geopolitical/politics category and we have no primary news evidence
-    if market_category in ("GEOPOLITICS", "WAR_PEACE", "POLITICS"):
-        if source_health is None or not any(
-            h.get("state") == "LIVE" 
+    if market_category in ("GEOPOLITICS", "WAR_PEACE", "POLITICS") and (
+        source_health is None or not any(
+            h.get("state") == "LIVE"
             for h in source_health.values()
             if h.get("source_id") in ("gdelt", "un_news", "white_house")
-        ):
-            gaps.append(DataGap(
-                category="NEWS_PRIMARY",
-                severity="HIGH",
-                description="Keine verifizierten Primärquellen (Regierungserklärungen, offizielle Pressemitteilungen).",
-                priority=GapPriority.HIGH,
-                impact_on_confidence=0.15,
-                recommended_sources=("gdelt", "un_news", "white_house"),
-            ))
+        )
+    ):
+        gaps.append(DataGap(
+            category="NEWS_PRIMARY",
+            severity="HIGH",
+            description="Keine verifizierten Primärquellen (Regierungserklärungen, offizielle Pressemitteilungen).",
+            priority=GapPriority.HIGH,
+            impact_on_confidence=0.15,
+            recommended_sources=("gdelt", "un_news", "white_house"),
+        ))
     
     # Historical comparables gap
     if historical_comparables_count < 10:
