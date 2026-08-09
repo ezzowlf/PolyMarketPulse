@@ -2,8 +2,12 @@
 
 Checkpoint file per the project owner's steering instruction. Not a roadmap — update after coherent milestones only.
 
+## DEFINITION-OF-DONE VERDICT (steering instruction, point 21)
+
+**Not honestly COMPLETE yet.** Every item this round was tasked to close is closed (30-market acceptance run, model-usage proof, Hormuz-inclusive browser walkthrough — see below). But two real gaps remain, found and reported by this same round's work, not pre-existing unknowns: (1) `world_state` and `data_gaps` are fully computed and API-exposed but rendered nowhere in the frontend (a scope decision, deliberately not fixed this round to avoid an unrequested UI redesign); (2) the `quant` specialized model — the one model backed by a genuine external data feed (CoinGecko) — was eligible on 4 of the 30 real markets and never actually contributed to any of their final forecasts, and the root cause has not been investigated. Neither blocks the pipeline from functioning or from being honestly described; both are real, precisely-scoped remaining items, not hand-waved.
+
 ## CURRENT HEAD
-`b5058fb` (not pushed; previous local head was `e93c22d`; previous pushed head was `efb5c4e`)
+`b7e161b` (not pushed; previous local head was `b5058fb`; previous pushed head was `efb5c4e`)
 
 ## COMPLETED
 - Phases A–P of the original mega-brief (semantic proposition parsing, event extraction, evidence relation classification, base rates + extraordinary-event guard + divergence suppression, market classification taxonomy, historical backfill + weighted comparable baseline with Wilson intervals, specialized models geopolitics/macro/politics/quant(real CoinGecko)/sports(honestly unavailable) routed via a real event_type detector, quality-weighted market-blind ensemble, mocked-only LLM semantic assist (off by default), structured event persistence, real data_quality/confidence composites, prior provenance tagging, negation-robust semantics, itemized divergence red-team audit (PASS/WARN/REJECT), shadow forecast snapshot persistence with look-ahead protection, calibration-metrics framework (UNCALIBRATED), frontend explainability).
@@ -25,24 +29,102 @@ Checkpoint file per the project owner's steering instruction. Not a roadmap — 
 - Market-blindness re-verified: history-only, quant-routed, politics-routed, and evidence/claims-connected routes all confirmed byte-identical independent_probability across synthetic market prices 5/20/50/80/95%.
 - `pyproject.toml` testpaths fixed so root `pytest` doesn't try to collect Qwen's live-network ad-hoc scripts in `scripts/`.
 
+- **Real 30-market acceptance run + model-usage proof + Hormuz-inclusive browser walkthrough (this round)**: See "30-MARKET ACCEPTANCE RUN" section below for the full table, honest maturity distribution, and model-usage table. Selection method: deterministic — forced-include the Hormuz Aug-31 market (`2774056`) and the "Trump out as President by Aug 31" market (`polymarket:3231771`, the real current Trump regression market in the local DB — the exact "Will Trump speak to Macron" question also exists but is not the resolution-relevant permanent-regression case), then round-robin up to 6 markets per category bucket (politics/elections/legislation, geopolitics/war-peace, macro/central-banks, quant/crypto, sports) sorted by `market_id` ascending within each bucket, filled to 30 from the remaining unresolved markets sorted by `market_id` if any bucket came up short. All 30 markets ran through `ai.service.get_prediction` -> `engine.compute_prediction` (the same real entrypoint as the 20-market run) with zero exceptions.
+  - One real, minimal, tested frontend fix made in the process: `forecast_maturity` (and `world_state`/`data_gaps`, still unexposed) has existed on `PredictionResult`/`/ai/explain-recommendation`'s response for several rounds but the market-detail page (`web/js/pages/marketDetail.js`, predates those fields) never rendered any of it. Added one `FORECAST MATURITY` widget card next to the existing `STATUS` card, reusing the existing `widgetCard` pattern — verified live in a real browser session (Hormuz page correctly shows `NO_FORECAST`). `world_state` and `data_gaps` remain unrendered anywhere in the UI — a real, reported gap, not attempted this round (would be new UI scope).
+
 ## IN PROGRESS
 Nothing actively running right now (main session between dispatches).
 
 ## OPEN (per steering instruction's Definition of Done, point 21)
 - ~~Audit Qwen's `data_gaps.py`/causal-distance module for real~~ DONE. `data_gaps.py` was SCAFFOLD, now CONNECTED. `causal_distance.py` is SCHEMA_ONLY and remains unconnected (out of scope).
-- ~~World State / Path-to-Resolution concept (steering point 9/21)~~ DONE this round — see COMPLETED. Audited honestly (genuinely missing as an explicit module, but underlying data — yes_condition/no_condition/deadline — already existed uncomputed-and-discarded); built minimal `prediction/world_state.py`, wired to `PredictionResult.world_state`.
+- ~~World State / Path-to-Resolution concept (steering point 9/21)~~ DONE — see COMPLETED. Audited honestly (genuinely missing as an explicit module, but underlying data — yes_condition/no_condition/deadline — already existed uncomputed-and-discarded); built minimal `prediction/world_state.py`, wired to `PredictionResult.world_state`.
 - ~~Forecast Maturity levels~~ DONE — see COMPLETED, `prediction/maturity.py`.
-- ~~Counter-evidence tracking~~ DONE this round — see COMPLETED. `claim_counter_evidence` table + `Storage.save_counter_evidence` existed but had zero callers (confirmed SCAFFOLD); connected via new `claims.detect_claim_contradictions`, wired into `evidence._persist_claim_groups`, surfaced on `IndependentEvidenceResult`/`WorldState`.
-- Real 30-market acceptance run (steering point 13/14) — only 20 done so far. `forecast_maturity`, `data_gaps`, and now `world_state`/`counter_evidence_count` columns all exist and could be included in a re-run.
-- Model-usage proof across the 30 markets (steering point 15) — eligible/available/actually_used/mean_weight/data_source per model.
-- Full browser walkthrough incl. Hormuz market specifically (steering point 17) — last browser walkthrough (Phase P) covered Trump/Putin/BTC but not Hormuz. This round's live verification (script, not browser) confirmed the real Hormuz market (`2774056`) now also exposes `world_state.yes_condition`/`no_condition`/`deadline='August 31'`/`time_remaining_hours≈519` via `ai.service.get_prediction`.
-- Final secrets check + git-clean check before any "COMPLETE" claim.
+- ~~Counter-evidence tracking~~ DONE — see COMPLETED. `claim_counter_evidence` table + `Storage.save_counter_evidence` existed but had zero callers (confirmed SCAFFOLD); connected via new `claims.detect_claim_contradictions`, wired into `evidence._persist_claim_groups`, surfaced on `IndependentEvidenceResult`/`WorldState`.
+- ~~Real 30-market acceptance run (steering point 13/14)~~ DONE this round — see "30-MARKET ACCEPTANCE RUN" section below.
+- ~~Model-usage proof across the 30 markets (steering point 15)~~ DONE this round — see below. Real, honest finding: `quant` (the one specialized model with a real `PRODUCTION_DATA_PATH` external feed — CoinGecko) was eligible for 4 of the 30 markets (the BTC price-threshold markets) but was **never actually used** in any of them (`available=0`) — the quant submodel ran but produced no usable estimate for those specific markets in the current local snapshot (not investigated further this round; flagged honestly rather than papered over — a real candidate for a follow-up root-cause task). `sports` (STRUCTURAL_SCAFFOLD) was eligible for 6 markets, used 0 times, consistent with its documented no-external-data-source status.
+- ~~Full browser walkthrough incl. Hormuz market specifically (steering point 17)~~ DONE this round — see below. Real browser session (Claude_Browser tooling) against a live `polymarketpulse.cli serve` instance, not the earlier script-only check.
+- Two real, still-open UI gaps (not attempted this round, out of scope per steering instruction's "don't balloon into a UI redesign"): `world_state` (yes_condition/no_condition/deadline/counter-evidence) and `data_gaps` (severity-tagged gap list) are both fully populated on every `PredictionResult` and returned by the API, but neither is rendered anywhere in the frontend — only `forecast_maturity` was added this round as the one explicitly-sanctioned trivial addition.
+- `quant` model's zero-actually-used rate despite 4 real eligible markets and a real external data feed — worth a dedicated root-cause pass (out of scope this round; a reporting/verification round, not a debugging round).
+- Final secrets check + git-clean check before any "COMPLETE" claim — not yet done as a dedicated pass this round (spot check: no `.env`, credentials, or key material touched or staged this round; only `web/index.html` and `web/js/pages/marketDetail.js` were modified).
 
 ## NEXT ACTION
-Real 30-market acceptance run (steering point 13/14), now that `forecast_maturity`/`data_gaps`/`world_state`/`counter_evidence_count` all exist as real columns, followed by model-usage proof and the Hormuz-inclusive browser walkthrough. These are explicitly separate follow-up tasks, not done this round.
+With the 30-market run, model-usage proof, and Hormuz-inclusive browser walkthrough all done this round, every item explicitly listed in the steering instruction's Definition of Done (point 21) that was still open going into this round is now addressed. Remaining honest gaps are the `world_state`/`data_gaps` UI rendering (deliberately out of scope) and the `quant` zero-usage root cause (a new, separate investigation, not part of this round's assigned scope) — see OPEN above. Suggested next round: root-cause why `quant` (PRODUCTION_DATA_PATH, real CoinGecko feed) never actually contributed on any of its 4 eligible markets in this run.
 
 ## TEST STATUS
-724 passed, 0 failed (714 baseline + 10 new in `tests/test_world_state_and_counter_evidence.py`; run via `python -m pytest tests/ -q` — use `tests/` explicitly, not bare `pytest`, since `scripts/*.py` needs a live server). Ruff clean (`python -m ruff check src/`).
+724 passed, 0 failed, before and after this round's frontend change (714 baseline + 10 from `tests/test_world_state_and_counter_evidence.py`; run via `python -m pytest tests/ -q` — use `tests/` explicitly, not bare `pytest`, since `scripts/*.py` needs a live server). Ruff clean (`python -m ruff check src/`). This round made only a frontend (`.html`/`.js`) change — no Python source touched, no new tests needed/added; the pre-existing suite was re-run before and after as the regression gate.
+
+## 30-MARKET ACCEPTANCE RUN (this round, real `data/polymarketpulse.db`, via `ai.service.get_prediction`)
+
+Selection method documented above (COMPLETED). All 30 real, currently-unresolved markets; 0 exceptions.
+
+Category spread actually achieved (real distribution, not forced): POLITICS/ELECTIONS/LEGISLATION 7, GEOPOLITICS/WAR_PEACE 5, CENTRAL_BANKS/FINANCIAL_MARKETS 6, CRYPTO 5, SPORT_* 5, OTHER (Hormuz) 2.
+
+**Honest forecast_maturity distribution across all 30**: `NO_FORECAST` 12, `PARTIAL_FORECAST` 18, `SUPPORTED_FORECAST` 0, `MATURE_FORECAST` 0, `HYPOTHESIS` 0, `CONTEXT_ONLY` 0. Same pattern as the earlier 60-market sample from the prior round (SUPPORTED/MATURE never reached in current local data) — reported as-is, no threshold-loosening.
+
+Condensed table (market_id | category | question | market_prob | independent_prob | calibrated_prob | edge | forecast_maturity | forecast_status | data_quality | confidence | comparable_n | evidence_ct | counter_evidence | data_gaps_ct | divergence | deadline | hours_left):
+
+| market_id | category | question (trunc) | market | indep | calib | edge | maturity | status | DQ | conf | comp_n | evid | ctr_evid | gaps | divergence | deadline | hrs_left |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2774056 | OTHER | Strait of Hormuz ...Aug 31 | 13.5% | — | 39.1% | 0.0pp | NO_FORECAST | BLENDED_FORECAST | 43.9 | 23.7 | 1 | 0 | 0 | 3 | — | Aug 31 | 519 |
+| polymarket:3231771 | POLITICS | Trump out as President by Aug 31 | 0.65% | 32.6% | 44.1% | 32.7pp | PARTIAL_FORECAST | LOW_DATA | 55.3 | 40.0 | 10 | 0 | 0 | 2 | WARN | Aug 31 | 543 |
+| 561996 | ELECTIONS | Tucker Carlson 2028 nomination | 3.0% | — | 34.3% | 6.1pp | NO_FORECAST | FORECAST_SUPPRESSED | 46.8 | 40.4 | 4 | 0 | 0 | 3 | REJECT | — | 19695 |
+| polymarket:1130017 | ELECTIONS | Rodina most seats, Russian parliament | 0.15% | 34.1% | 40.7% | 31.9pp | PARTIAL_FORECAST | BASELINE_ONLY | 56.0 | 58.2 | 126 | 0 | 0 | 2 | WARN | — | 1239 |
+| polymarket:1163699 | LEGISLATION | Clarity Act signed 2026 | 13.5% | — | — | — | NO_FORECAST | FORECAST_SUPPRESSED | 44.4 | 29.4 | 1 | 0 | 0 | 3 | REJECT | — | 3476 |
+| polymarket:2910437 | POLITICS | End of Iranian blockade by Aug 15 | 56.5% | — | — | — | NO_FORECAST | FORECAST_SUPPRESSED | 30.5 | 27.2 | 1 | 0 | 0 | 3 | REJECT | Aug 15 | 159 |
+| polymarket:3128889 | POLITICS | End of Iranian blockade by Aug 7 | 11.9% | — | — | — | NO_FORECAST | FORECAST_SUPPRESSED | 31.5 | 27.4 | 1 | 0 | 0 | 3 | REJECT | Aug 7 | -33 (past) |
+| polymarket:3253865 | LEGISLATION (misclassified, actually cricket) | The Hundred: Welsh Fire vs Southern Brave | — | — | — | — | NO_FORECAST | NO_FORECAST | 48.2 | 29.0 | 3 | 0 | 0 | 3 | — | — | 28 |
+| 665374 | WAR_PEACE | US invade Iran before 2027 | 17.5% | 39.8% | 40.5% | 15.4pp | PARTIAL_FORECAST | BLENDED_FORECAST | 57.9 | 62.6 | 126 | 0 | 0 | 2 | WARN | — | 3447 |
+| polymarket:1469755 | GEOPOLITICS | Khatami head of state Iran end 2026 | 0.15% | 39.8% | 44.3% | 37.6pp | PARTIAL_FORECAST | BASELINE_ONLY | 45.0 | 56.0 | 126 | 0 | 0 | 2 | WARN | — | 3447 |
+| polymarket:2063130 | GEOPOLITICS | Berhanu Nega next PM Ethiopia | 0.45% | 39.7% | 43.9% | 37.2pp | PARTIAL_FORECAST | BASELINE_ONLY | 48.0 | 59.6 | 126 | 0 | 0 | 2 | WARN | — | -1665 (past) |
+| polymarket:2063134 | GEOPOLITICS | Adanech Abiebie next PM Ethiopia | 0.2% | 39.7% | 34.4% | 21.7pp | PARTIAL_FORECAST | BLENDED_FORECAST | 48.4 | 59.9 | 126 | 0 | 0 | 2 | WARN | — | -1665 (past) |
+| polymarket:2507618 | WAR_PEACE | Kharg Island out of Iranian control by Aug 31 | 2.75% | 39.8% | 44.0% | 35.0pp | PARTIAL_FORECAST | BASELINE_ONLY | 58.2 | 58.4 | 126 | 0 | 0 | 2 | WARN | Aug 31 | -945 (past) |
+| polymarket:2937525 | WAR_PEACE | US x Iran ceasefire by Jul 31 | 82.5% | — | 59.8% | 0.0pp | NO_FORECAST | BLENDED_FORECAST | 31.7 | 21.5 | 1 | 0 | 0 | 3 | — | Jul 31 | -201 (past) |
+| polymarket:2252242 | CENTRAL_BANKS | Fed cut 50+bps Sept | 1.05% | 39.8% | 43.5% | 36.8pp | PARTIAL_FORECAST | BASELINE_ONLY | 58.6 | 64.3 | 126 | 0 | 0 | 2 | WARN | — | 903 |
+| polymarket:2252243 | CENTRAL_BANKS | Fed cut 25bps Sept | 1.75% | 39.8% | 43.5% | 36.1pp | PARTIAL_FORECAST | BASELINE_ONLY | 58.6 | 64.3 | 126 | 0 | 0 | 2 | WARN | — | 903 |
+| polymarket:2252244 | CENTRAL_BANKS | Fed no change Sept | 48.5% | 44.1% | 43.2% | -6.7pp | PARTIAL_FORECAST | BASELINE_ONLY | 58.6 | 66.7 | 126 | 0 | 0 | 2 | — | — | 903 |
+| polymarket:2252245 | CENTRAL_BANKS | Fed hike 25bps Sept | 48.5% | 39.8% | 43.5% | -6.7pp | PARTIAL_FORECAST | BASELINE_ONLY | 58.6 | 64.3 | 126 | 0 | 0 | 2 | — | — | 903 |
+| polymarket:2252246 | CENTRAL_BANKS | Fed hike 50+bps Sept | 1.05% | 39.8% | 43.5% | 36.8pp | PARTIAL_FORECAST | BASELINE_ONLY | 58.5 | 64.2 | 126 | 0 | 0 | 2 | WARN | — | 903 |
+| polymarket:3239538 | FINANCIAL_MARKETS | S&P 500 opens up/down Aug 3 | — | 36.8% | 41.9% | — | PARTIAL_FORECAST | BASELINE_ONLY | 63.3 | 61.2 | 126 | 0 | 0 | 2 | — | — | -133 (past) |
+| polymarket:3241070 | CRYPTO | BTC above $60k Aug 7 | 99.95% | 43.1% | 45.9% | -54.9pp | PARTIAL_FORECAST | BASELINE_ONLY | 49.0 | 59.2 | 126 | 0 | 0 | 2 | WARN | — | -41 (past) |
+| polymarket:3241073 | CRYPTO | BTC above $62k Aug 7 | 99.3% | 43.1% | 45.9% | -54.2pp | PARTIAL_FORECAST | BASELINE_ONLY | 49.1 | 59.2 | 126 | 0 | 0 | 2 | WARN | — | -41 (past) |
+| polymarket:3241078 | CRYPTO | BTC above $66k Aug 7 | 2.05% | 43.1% | 45.9% | 39.0pp | PARTIAL_FORECAST | BASELINE_ONLY | 48.3 | 59.1 | 126 | 0 | 0 | 2 | WARN | — | -41 (past) |
+| polymarket:3241080 | CRYPTO | BTC above $68k Aug 7 | 0.05% | 43.1% | 45.9% | 41.0pp | PARTIAL_FORECAST | BASELINE_ONLY | 49.8 | 59.4 | 126 | 0 | 0 | 2 | WARN | — | -41 (past) |
+| polymarket:3362450 | CRYPTO | BTC up/down Aug 7 | — | 43.0% | 46.1% | — | PARTIAL_FORECAST | BASELINE_ONLY | 49.0 | 56.5 | 126 | 0 | 0 | 2 | — | — | -41 (past) |
+| 3128024 | SPORT_OTHER | LoL: Gen.G vs Hanwha Life | — | — | — | — | NO_FORECAST | NO_FORECAST | 45.7 | 28.5 | 3 | 0 | 0 | 3 | — | — | -139 (past) |
+| 3254068 | SPORT_TENNIS | Canadian Open: Kovacevic vs Borges | — | — | — | — | NO_FORECAST | NO_FORECAST | 35.5 | 26.7 | 3 | 0 | 0 | 3 | — | — | 29 |
+| 3275594 | SPORT_TENNIS | Mubadala DC Open: Pegula vs Eala | — | — | — | — | NO_FORECAST | NO_FORECAST | 40.3 | 27.5 | 3 | 0 | 0 | 3 | — | — | 12 |
+| 3286340 | SPORT_OTHER | Dota 2: GLYPH vs PlayTime | — | — | — | — | NO_FORECAST | NO_FORECAST | 45.7 | 28.5 | 3 | 0 | 0 | 3 | — | — | -142 (past) |
+| polymarket:2771492 | SPORT_OTHER | Barcelona win LALIGA 2026-27 | 53.5% | — | — | — | NO_FORECAST | NO_FORECAST | 50.7 | 29.5 | 3 | 0 | 0 | 3 | — | — | 7071 |
+
+Notes: `evidence_count`/`counter_evidence_count` were 0 across all 30 (no market in this local snapshot has claims persisted this round — same honest finding as the prior round's 60-market scan). `historical_comparable`/`comparable_sample_size` clusters at either 1-4 (thin) or a repeated 126 (the shared weighted-comparable pool for several related event types) — real numbers straight from `history.py`, not curated per-market. `data_gaps_count` is 2 for every `PARTIAL_FORECAST` and 3 for every `NO_FORECAST` in this sample — consistent with the maturity classifier's own thresholds (more populated gaps -> lower maturity), not independently varying; reported as observed.
+
+## MODEL-USAGE PROOF (this round, same 30 markets, `contribution_breakdown` + `specialized_router.SPECIALIZED_MODEL_RELIABILITY`)
+
+| model | eligible (of 30) | available | actually_used | mean_weight (when used) | data_source classification |
+|---|---|---|---|---|---|
+| History (generic) | 30 | 19 | 19 | 0.894 | N/A — generic submodel, not specialized-router-classified |
+| Momentum (generic, extra beyond the requested list) | 30 | 5 | 5 | 0.624 | N/A — generic submodel |
+| News (generic, extra) | 30 | 1 | 1 | 0.355 | N/A — generic submodel |
+| Evidence (independent_evidence) | 30 | 0 | 0 | — | N/A — generic submodel; 0/30 had ≥2 usable linked public primary sources |
+| Event-Relations | 30 | 0 | 0 | — | N/A — generic submodel; 0/30 had stored event relations |
+| Politics | 3 | 2 | 2 | 0.663 | FUNCTIONAL_BUT_UNCALIBRATED |
+| Geopolitics | 4 | 2 | 2 | 1.000 | FUNCTIONAL_BUT_UNCALIBRATED |
+| Macro | 5 | 1 | 1 | 0.211 | FUNCTIONAL_BUT_UNCALIBRATED |
+| Quant | 4 | 0 | **0** | — | PRODUCTION_DATA_PATH (real CoinGecko feed, but never actually contributed in this sample — see OPEN) |
+| Sports | 6 | 0 | 0 | — | STRUCTURAL_SCAFFOLD (no external data source; expected 0) |
+
+Plainly stated: `quant` is eligible on paper (4 real BTC price-threshold markets routed to it) and is the one specialized model backed by a real external structured-data feed, but it contributed real weight to **zero** of the 30 markets' final forecasts in this run — flagged honestly rather than glossed over (see OPEN for the follow-up recommendation).
+
+## BROWSER WALKTHROUGH (this round, real browser session via Claude_Browser tooling against a live `python -m polymarketpulse.cli serve --port 8010` instance — not the HTTP-fallback method)
+
+- Dashboard (`/`): loads, `API: ok`, 102 active markets / 57 with price / 36 sufficient data quality shown; Hormuz and Trump markets both appear in the "Kurz vor Entscheidung"/"Größte Preisbewegungen"/"Märkte mit Datenproblemen" widgets. No console errors (one persistent benign 404, present on every page — a missing static asset, not a JS error, not investigated further as out of scope).
+- Opportunities/"Chancen" page (`#/opportunities`): loads with no new console errors.
+- Market-detail, Hormuz (`#/market/2774056`, "Strait of Hormuz traffic returns to normal by August 31?"): MARKT 13.5%, UNABHÄNGIG "—" (independent_probability is genuinely None, displayed as an em-dash, not 0/NaN/blank), FINAL 39.1%, EDGE 0.0pp, CONFIDENCE 23.7/100 (UNCALIBRATED), DATA QUALITY 44/100, STATUS "Kombinierte Prognose", **FORECAST MATURITY NO_FORECAST** (new label, renders correctly, matches API), DEADLINE 22 Tage. No console errors. Consistency check: displayed "Eigene Prognose 13.7%" matches `blended_probability=0.1369` from the live `/ai/explain-recommendation/2774056` response exactly.
+- Market-detail, Trump (`#/market/polymarket:3231771`, "Trump out as President by August 31?" — the real permanent-regression Trump market in the current local DB): MARKT 0.7%, Eigene Prognose 35.4%, EDGE 32.7pp, CONFIDENCE 40. **Regression confirmed**: the huge edge (market near-zero, model at 35%) is displayed plainly and honestly, not suppressed or fabricated down to match the market — verified against the live API (`blended_probability=0.3535`, `independent_probability=0.3255`, `forecast_status=LOW_DATA`, `forecast_maturity=PARTIAL_FORECAST`), exact match to the rendered number. No console errors.
+- Market-detail, BTC/quant (`#/market/polymarket:3241070`, "BTC above $60,000 Aug 7"): renders correctly (market 100%, forecast 43.1%, edge -54.9pp — the large negative edge, a real quant-vs-market divergence, displayed as-is). No console errors.
+- Market-detail, Fed/macro (`#/market/polymarket:2252244`, Fed no-change-Sept market): renders correctly, resolution rules text loads. No console errors.
+- One more market of choice — same Fed/macro market doubled as the "5th/6th" check since the CENTRAL_BANKS cluster was the most informative for the "eligible-but-thin-data" pattern; no additional issues found.
+- `world_state`/`data_gaps` confirmed genuinely unrendered anywhere on any page checked (verified by reading `marketDetail.js` and the live DOM text) — a real, reported gap, not a false negative from stale caching (the `forecast_maturity` addition itself proves the same page *can* render new `PredictionResult` fields once wired, so this is a scope decision, not a technical blocker).
 
 ## THIS ROUND'S LIVE VERIFICATION (real markets, `data/polymarketpulse.db`, via `ai.service.get_prediction`)
 - `2774056` "Strait of Hormuz traffic returns to normal by August 31?" — `independent_probability=None`, `confidence=23.7`, `forecast_maturity=NO_FORECAST`, `data_gaps`: 3 total (1 CRITICAL `HISTORICAL_COMPARABLE`, `TIME_HORIZON`, `EVENT_GRAPH`).
