@@ -121,6 +121,17 @@ class IndependentEvidenceResult:
     # to guess why a number looks smaller than the raw evidence math implies.
     extraordinary_guard_applied: bool = False
     extraordinary_guard_detail: str | None = None
+    # Counter-evidence (additive, diagnostic-only): count of REAL claim-vs-
+    # claim contradictions detected among claims extracted from this
+    # market's linked evidence (claims.detect_claim_contradictions) and
+    # persisted into `claim_counter_evidence`. `claim_status_counts` is a
+    # verification_status -> count breakdown of the claim groups formed for
+    # this market (SINGLE_SOURCE/MULTI_SOURCE/PRIMARY_CONFIRMED/DISPUTED).
+    # Zero counter_evidence_count is the honest, common case (absence of
+    # contradiction) — this field must never be read as a positive signal,
+    # only its presence (> 0) is meaningful.
+    counter_evidence_count: int = 0
+    claim_status_counts: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
@@ -140,6 +151,8 @@ class IndependentEvidenceResult:
             "detail": self.detail,
             "extraordinary_guard_applied": self.extraordinary_guard_applied,
             "extraordinary_guard_detail": self.extraordinary_guard_detail,
+            "counter_evidence_count": self.counter_evidence_count,
+            "claim_status_counts": dict(self.claim_status_counts),
         }
 
 
@@ -242,20 +255,36 @@ def _persist_claims_for_event(
         return None
 
 
-def _persist_claim_groups(conn: sqlite3.Connection, extracted_claims: list) -> None:
+def _persist_claim_groups(conn: sqlite3.Connection, extracted_claims: list) -> dict:
     """Group and persist claims collected across all linked articles for
     one market (real deduplication when the same underlying claim shows up
     from multiple sources) — additive only, wrapped so a storage-layer
-    issue never propagates into evidence scoring."""
+    issue never propagates into evidence scoring.
+
+    Also detects REAL claim-vs-claim contradictions among the groups for
+    this market (see claims.detect_claim_contradictions) and persists them
+    into the `claim_counter_evidence` table (schema existed, migration
+    015-era, but nothing previously wrote to it — see storage.py's
+    save_counter_evidence, which had zero callers before this change).
+
+    Returns a small summary dict — never consumed by the probability math,
+    purely so the caller can surface real counts on IndependentEvidenceResult:
+      {"counter_evidence_count": int, "claim_status_counts": dict[str, int]}
+    """
+    summary = {"counter_evidence_count": 0, "claim_status_counts": {}}
     if not extracted_claims:
-        return
+        return summary
     try:
         from types import SimpleNamespace
 
-        from polymarketpulse.claims import group_claims_by_normalization
+        from polymarketpulse.claims import (
+            detect_claim_contradictions,
+            group_claims_by_normalization,
+        )
         from polymarketpulse.storage import Storage
 
         groups = group_claims_by_normalization(tuple(extracted_claims))
+        groups, contradiction_pairs = detect_claim_contradictions(groups)
         store = SimpleNamespace(connection=conn)
         for group in groups:
             Storage.save_claim(store, group.canonical_claim)
@@ -271,11 +300,20 @@ def _persist_claim_groups(conn: sqlite3.Connection, extracted_claims: list) -> N
             )
             for src in group.republishing_sources:
                 Storage.save_claim_source(store, group.claim_id, src, None, None)
+            summary["claim_status_counts"][group.verification_status] = (
+                summary["claim_status_counts"].get(group.verification_status, 0) + 1
+            )
+        for claim_id_a, claim_id_b in contradiction_pairs:
+            # Record both directions — each claim "contradicts" the other.
+            Storage.save_counter_evidence(store, claim_id_a, claim_id_b)
+            Storage.save_counter_evidence(store, claim_id_b, claim_id_a)
+        summary["counter_evidence_count"] = len(contradiction_pairs)
         conn.commit()
     except (sqlite3.Error, AttributeError, TypeError, ValueError):
         # Storage-layer or extraction-shape issue — additive persistence
         # only, must never propagate into evidence scoring.
         pass
+    return summary
 
 
 def _first_reported_at(rows: list[tuple]) -> datetime | None:
@@ -405,7 +443,7 @@ def compute_independent_evidence(
     # whether an independent probability ends up computable below — this is
     # evidence infrastructure (stable IDs, future verification tracking),
     # not a probability input, so it must not gate on the scoring outcome.
-    _persist_claim_groups(conn, collected_claims)
+    claim_summary = _persist_claim_groups(conn, collected_claims)
 
     evidence_for_yes = tuple(f for f in factors if f.matched_condition == "yes")
     evidence_for_no = tuple(f for f in factors if f.matched_condition == "no")
@@ -540,6 +578,8 @@ def compute_independent_evidence(
         detail=detail,
         extraordinary_guard_applied=extraordinary_guard_applied,
         extraordinary_guard_detail=extraordinary_guard_detail,
+        counter_evidence_count=claim_summary.get("counter_evidence_count", 0),
+        claim_status_counts=claim_summary.get("claim_status_counts", {}),
     )
 
 

@@ -57,6 +57,7 @@ from .types import (
     Recommendation,
     SubmodelEstimate,
 )
+from .world_state import assemble_world_state
 
 if TYPE_CHECKING:
     from .evidence import IndependentEvidenceResult
@@ -761,6 +762,11 @@ def compute_prediction(
         has_event_relations=len(event_relation_signals) > 0,
     )
 
+    world_state = assemble_world_state(
+        proposition=proposition, resolution_date=resolution_date, now=now,
+        independent_evidence=independent_evidence,
+    )
+
     scenarios = build_scenarios(
         estimated_yes_probability=estimated_yes, submodel_estimates=all_submodels,
         news_evidence=news_evidence, comparable_sample_size=comparable_sample_size,
@@ -813,6 +819,7 @@ def compute_prediction(
             tuple(history_uncertainty.top_comparable_cases) if history_uncertainty is not None else ()
         ),
         data_gaps=data_gaps,
+        world_state=world_state,
     )
     # Forecast Maturity is classified from the fully-assembled result (it
     # reads confidence/data_quality/data_gaps/divergence_audit, all of which

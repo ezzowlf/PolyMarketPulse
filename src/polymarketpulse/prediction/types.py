@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from .reaction_lag import ReactionLagResult
     from .reliability import MarketReliabilityResult
     from .resolution_edge import ResolutionEdgeResult
+    from .world_state import WorldState
 
 Recommendation = Literal[
     "STRONG_YES", "YES", "WATCH_YES", "NO_BET", "WATCH_NO", "NO", "STRONG_NO", "INSUFFICIENT_DATA"
@@ -362,6 +363,16 @@ class PredictionResult:
     # outcome history, which doesn't exist yet.
     forecast_maturity: ForecastMaturity = "NO_FORECAST"
 
+    # --- World State (steering point 9/21, additive) -----------------------
+    # See prediction/world_state.py for the audit conclusion and exact
+    # assembly logic. Assembled entirely from fields the engine already
+    # computed elsewhere this run (MarketProposition.yes_condition/
+    # no_condition/deadline, resolution_date-derived time remaining,
+    # IndependentEvidenceResult's claim/counter-evidence counts) — never a
+    # new probability-affecting signal. None only if the proposition itself
+    # could not be parsed (should not happen in practice today).
+    world_state: WorldState | None = None
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -416,4 +427,5 @@ class PredictionResult:
             "historical_comparables": list(self.historical_comparables),
             "data_gaps": self.data_gaps.as_dict() if self.data_gaps else None,
             "forecast_maturity": self.forecast_maturity,
+            "world_state": self.world_state.as_dict() if self.world_state else None,
         }

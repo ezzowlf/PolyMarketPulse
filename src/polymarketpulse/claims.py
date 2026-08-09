@@ -559,6 +559,72 @@ def group_claims_by_normalization(
     return claim_groups
 
 
+def detect_claim_contradictions(
+    groups: list[ClaimGroup],
+) -> tuple[list[ClaimGroup], tuple[tuple[str, str], ...]]:
+    """Detect REAL, structurally-evident contradictions between distinct
+    claim groups for the same market.
+
+    Two groups contradict each other only when ALL of the following hold —
+    a deliberately narrow bar so this never flags ordinary evidence
+    disagreement (e.g. two WEAK-tier signals of differing strength) as a
+    contradiction:
+      1. Both canonical claims have a non-None `event_type`, and it's the
+         SAME event_type (same underlying event family being described).
+      2. Both canonical claims have a non-None `subject`, normalized
+         (lowercased, whitespace-collapsed) equal (same actor/topic).
+      3. Their `direction` fields are opposite ("positive" vs "negative" —
+         `direction` is a real, independently-extracted signal, see
+         `_detect_claim_direction`/`extract_claim_from_event`, not derived
+         from confidence or tone).
+
+    This is a distinct concept from `semantics.classify_evidence_relation`'s
+    ENTAILS/CONTRADICTS/NEUTRAL tag: that classifies a single evidence item
+    against the MARKET's yes/no condition (evidence-vs-proposition).
+    `detect_claim_contradictions` classifies claim-vs-claim (two extracted
+    statements about the same underlying fact that disagree with each
+    other) — genuine counter-evidence, independent of what the market
+    proposition says.
+
+    Returns the groups list with any contradicted groups' verification_status
+    upgraded to "DISPUTED" (dataclasses are frozen, so contradicted groups
+    are replaced, not mutated), plus the list of (claim_id, claim_id) pairs
+    that were found to contradict each other (for persisting as counter-
+    evidence rows).
+    """
+    import dataclasses
+
+    contradicted_ids: set[str] = set()
+    pairs: list[tuple[str, str]] = []
+
+    for i in range(len(groups)):
+        a = groups[i].canonical_claim
+        if not a.event_type or not a.subject or a.direction == "neutral":
+            continue
+        for j in range(i + 1, len(groups)):
+            b = groups[j].canonical_claim
+            if not b.event_type or not b.subject or b.direction == "neutral":
+                continue
+            if a.event_type != b.event_type:
+                continue
+            if a.subject.strip().lower() != b.subject.strip().lower():
+                continue
+            if {a.direction, b.direction} != {"positive", "negative"}:
+                continue
+            pairs.append((groups[i].claim_id, groups[j].claim_id))
+            contradicted_ids.add(groups[i].claim_id)
+            contradicted_ids.add(groups[j].claim_id)
+
+    if not contradicted_ids:
+        return groups, ()
+
+    updated = [
+        dataclasses.replace(g, verification_status="DISPUTED") if g.claim_id in contradicted_ids else g
+        for g in groups
+    ]
+    return updated, tuple(pairs)
+
+
 def normalize_for_dedup(claim: ExtractedClaim | Claim) -> str:
     """Return a normalized string for claim deduplication."""
     if isinstance(claim, Claim):
