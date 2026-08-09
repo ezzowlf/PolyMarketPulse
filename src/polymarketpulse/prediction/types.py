@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     from .reaction_lag import ReactionLagResult
     from .reliability import MarketReliabilityResult
     from .resolution_edge import ResolutionEdgeResult
+    from .resolution_semantics import ResolutionSemantics
+    from .semantics import MarketProposition
     from .world_state import WorldState
 
 Recommendation = Literal[
@@ -388,6 +390,20 @@ class PredictionResult:
     # could not be parsed (should not happen in practice today).
     world_state: WorldState | None = None
 
+    # --- ROUND-1 additive fields (Market Understanding / Resolution Engine)
+    # `proposition`: the full parsed MarketProposition (semantics.py) for
+    # this market — previously computed internally by engine.py but never
+    # exposed on the result at all; a caller had no reachable field for the
+    # new subject_type/domain/contract_type/resolution_mechanism/
+    # semantic_confidence fields without this.
+    proposition: MarketProposition | None = None
+    # `resolution_semantics`: the Resolution Engine's structured output
+    # (resolution_semantics.py) — measurement/threshold/required_source/
+    # ambiguities/confidence. Diagnostic/explanatory only, like world_state;
+    # never an input to any probability field (confidence.py consumes its
+    # .confidence as one composite dimension among several, additively).
+    resolution_semantics: ResolutionSemantics | None = None
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -447,4 +463,6 @@ class PredictionResult:
             "data_gaps": self.data_gaps.as_dict() if self.data_gaps else None,
             "forecast_maturity": self.forecast_maturity,
             "world_state": self.world_state.as_dict() if self.world_state else None,
+            "proposition": self.proposition.as_dict() if self.proposition else None,
+            "resolution_semantics": self.resolution_semantics.as_dict() if self.resolution_semantics else None,
         }

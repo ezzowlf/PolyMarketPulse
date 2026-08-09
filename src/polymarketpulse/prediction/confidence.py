@@ -17,6 +17,7 @@ from .types import DataQualityBreakdown, QualityComposite, QualityDimension, Sub
 if TYPE_CHECKING:
     from .evidence import IndependentEvidenceResult
     from .history import WeightedBaselineResult
+    from .resolution_semantics import ResolutionSemantics
     from .semantics import MarketProposition
 
 # --- J2/K1: shared real-signal dimension helpers ---------------------------
@@ -198,6 +199,34 @@ def _provider_health_dimension() -> QualityDimension:
     )
 
 
+def _resolution_semantics_clarity_dimension(
+    resolution_semantics: ResolutionSemantics | None,
+) -> QualityDimension:
+    """ROUND-1 addition (section 4 of the 85-section brief): the Resolution
+    Engine's own `confidence` (0..1, see resolution_semantics.py) is a NEW
+    signal not previously consumed anywhere — this wires it in additively
+    so a market whose resolution mechanism/source/measurement is genuinely
+    unclear (populated `ambiguities` list, low confidence) measurably caps
+    both data_quality and confidence composites, not just proposition_
+    clarity's coarser CLEAR/AMBIGUOUS read. `available=False` (not a
+    fabricated mid-value) whenever no ResolutionSemantics was supplied at
+    all (e.g. legacy callers that don't yet compute it)."""
+    if resolution_semantics is None:
+        return QualityDimension(
+            name="resolution_semantics_clarity", raw_value=None, normalized_score=None, available=False,
+            reason="No ResolutionSemantics computed for this call.",
+        )
+    score = resolution_semantics.confidence * 100.0
+    return QualityDimension(
+        name="resolution_semantics_clarity", raw_value=resolution_semantics.confidence,
+        normalized_score=round(score, 1), available=True,
+        reason=(
+            f"Resolution Engine confidence={resolution_semantics.confidence:.2f}, "
+            f"{len(resolution_semantics.ambiguities)} ambiguity reason(s): {list(resolution_semantics.ambiguities)}."
+        ),
+    )
+
+
 def _freshness_dimension(aktualitaet: float) -> QualityDimension:
     return QualityDimension(
         name="freshness", raw_value=aktualitaet, normalized_score=aktualitaet, available=True,
@@ -358,16 +387,19 @@ def compute_data_quality_composite(
     specialized_estimates: list[SubmodelEstimate],
     eligible_specialized_models: tuple[str, ...],
     aktualitaet: float,
+    resolution_semantics: ResolutionSemantics | None = None,
 ) -> QualityComposite:
     """J2: the genuine data_quality composite. Weights (documented, not
     fitted — no resolved-forecast history yet to fit against, same honesty
     constraint as everything else in this module):
 
-      proposition_clarity            0.15  — CLEAR vs AMBIGUOUS + flag count
-      historical_coverage            0.20  — Kish ESS (or legacy case count)
-      evidence_relevance             0.20  — relation-tier scored, not just
+      proposition_clarity            0.13  — CLEAR vs AMBIGUOUS + flag count
+      resolution_semantics_clarity   0.08  — ROUND-1: Resolution Engine's own
+                                              confidence/ambiguities (section 4)
+      historical_coverage            0.18  — Kish ESS (or legacy case count)
+      evidence_relevance             0.18  — relation-tier scored, not just
                                               "evidence exists"
-      source_quality_independence    0.20  — trust table + distinct domains
+      source_quality_independence    0.18  — trust table + distinct domains
       structured_data_availability   0.15  — did an eligible specialized
                                               model actually get real data
       freshness                      0.10  — J1's real timestamp decay
@@ -376,12 +408,17 @@ def compute_data_quality_composite(
     see _provider_health_dimension) but is still reported in the breakdown
     for transparency. model_agreement is a K1-confidence-specific dimension,
     not part of data_quality (agreement is about the estimate's robustness,
-    not about how much/good data exists) — kept out of J2 deliberately."""
+    not about how much/good data exists) — kept out of J2 deliberately.
+    `resolution_semantics` is optional (defaults to None) so every existing
+    caller keeps working exactly as before; when omitted its dimension is
+    simply unavailable and its weight redistributes to the others (see
+    _weighted_composite)."""
     dims: list[tuple[QualityDimension, float]] = [
-        (_proposition_clarity_dimension(proposition), 0.15),
-        (_historical_coverage_dimension(comparable_sample_size, history_uncertainty), 0.20),
-        (_evidence_relevance_dimension(independent_evidence), 0.20),
-        (_source_quality_independence_dimension(independent_evidence), 0.20),
+        (_proposition_clarity_dimension(proposition), 0.13),
+        (_resolution_semantics_clarity_dimension(resolution_semantics), 0.08),
+        (_historical_coverage_dimension(comparable_sample_size, history_uncertainty), 0.18),
+        (_evidence_relevance_dimension(independent_evidence), 0.18),
+        (_source_quality_independence_dimension(independent_evidence), 0.18),
         (_structured_data_availability_dimension(specialized_estimates, eligible_specialized_models), 0.15),
         (_freshness_dimension(aktualitaet), 0.10),
     ]
@@ -404,6 +441,7 @@ def compute_confidence_composite(
     aktualitaet: float,
     deadline_phase_known: bool,
     legacy_data_quality: DataQualityBreakdown | None = None,
+    resolution_semantics: ResolutionSemantics | None = None,
 ) -> QualityComposite:
     """K1: the genuine confidence composite — deliberately built from ONLY
     data-robustness/quality signals, never from the probability estimate's
@@ -448,6 +486,7 @@ def compute_confidence_composite(
         (_model_agreement_dimension(all_submodel_estimates), 0.15),
         (_proposition_clarity_dimension(proposition), 0.05),
         (_specialized_model_reliability_dimension(specialized_estimates), 0.10),
+        (_resolution_semantics_clarity_dimension(resolution_semantics), 0.05),
     ]
     if legacy_data_quality is not None:
         dims.append((_legacy_signal_dimension(legacy_data_quality), 0.10))

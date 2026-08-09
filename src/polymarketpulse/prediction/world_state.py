@@ -176,6 +176,43 @@ POLITICS_GEOPOLITICS_CATEGORIES = frozenset(
 )
 
 
+# ROUND-1 (85-section brief, sections 9-10): richer per-transition-step
+# structure. `probability_status` is ALWAYS "UNKNOWN" today — there is no
+# real empirical/historical basis anywhere in this codebase for a fitted
+# state-to-state transition probability (no resolved-forecast dataset with
+# per-transition outcomes exists yet). This is the correct, honest state of
+# the system in this round, not a gap to fake-fill; `confidence` mirrors it
+# and stays None for the same reason. See
+# test_path_to_resolution_transition_steps.py::
+# test_probability_status_is_always_unknown_no_code_path_fabricates_a_number
+# for the explicit regression test locking this in.
+TransitionProbabilityStatus = Literal["UNKNOWN"]
+
+
+@dataclass(frozen=True)
+class TransitionStep:
+    state_from: str
+    state_to: str
+    required_event: str
+    supporting_evidence: tuple[str, ...] = field(default_factory=tuple)
+    counter_evidence: tuple[str, ...] = field(default_factory=tuple)
+    estimated_duration: str | None = None
+    probability_status: TransitionProbabilityStatus = "UNKNOWN"
+    confidence: float | None = None
+
+    def as_dict(self) -> dict:
+        return {
+            "state_from": self.state_from,
+            "state_to": self.state_to,
+            "required_event": self.required_event,
+            "supporting_evidence": list(self.supporting_evidence),
+            "counter_evidence": list(self.counter_evidence),
+            "estimated_duration": self.estimated_duration,
+            "probability_status": self.probability_status,
+            "confidence": self.confidence,
+        }
+
+
 @dataclass(frozen=True)
 class PathToResolution:
     current_state: str
@@ -185,6 +222,12 @@ class PathToResolution:
     required_transitions: tuple[str, ...] = field(default_factory=tuple)
     supporting_conditions: tuple[str, ...] = field(default_factory=tuple)
     blocking_conditions: tuple[str, ...] = field(default_factory=tuple)
+    # ROUND-1 addition: structured, per-step version of required_transitions
+    # above (kept, unchanged, for backward compatibility with any existing
+    # caller reading the plain-string form). Empty tuple whenever there is
+    # no real, evidence-derived transition to describe — never fabricated
+    # placeholder steps.
+    required_transition_steps: tuple[TransitionStep, ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict:
         return {
@@ -195,6 +238,7 @@ class PathToResolution:
             "required_transitions": list(self.required_transitions),
             "supporting_conditions": list(self.supporting_conditions),
             "blocking_conditions": list(self.blocking_conditions),
+            "required_transition_steps": [s.as_dict() for s in self.required_transition_steps],
         }
 
 
@@ -229,11 +273,34 @@ def _derive_path_to_resolution(
     # structurally-derived (not invented) statement of the one transition
     # still outstanding. Left empty otherwise (honest "don't know").
     required_transitions: tuple[str, ...] = ()
+    required_transition_steps: tuple[TransitionStep, ...] = ()
     if waterway_state is not None and current_state not in ("NORMAL", "UNKNOWN"):
         required_transitions = (
             (
                 f"waterway status must transition from {current_state} to NORMAL "
                 f"(currently backed by {waterway_state.basis_evidence_count} dated evidence item(s))"
+            ),
+        )
+        # ROUND-1: the structured per-step form of the same real transition
+        # described above — same underlying facts (current_state, the
+        # already-computed supporting/blocking evidence titles), just
+        # shaped per the target schema. probability_status is ALWAYS
+        # UNKNOWN (see TransitionStep's docstring) — no historical basis
+        # for a transition-probability number exists anywhere in this
+        # codebase yet, and none is invented here.
+        required_transition_steps = (
+            TransitionStep(
+                state_from=current_state,
+                state_to="NORMAL",
+                required_event=(
+                    f"waterway operational status returns to NORMAL "
+                    f"(currently backed by {waterway_state.basis_evidence_count} dated evidence item(s))"
+                ),
+                supporting_evidence=supporting_conditions,
+                counter_evidence=blocking_conditions,
+                estimated_duration=None,
+                probability_status="UNKNOWN",
+                confidence=None,
             ),
         )
 
@@ -245,6 +312,7 @@ def _derive_path_to_resolution(
         required_transitions=required_transitions,
         supporting_conditions=supporting_conditions,
         blocking_conditions=blocking_conditions,
+        required_transition_steps=required_transition_steps,
     )
 
 

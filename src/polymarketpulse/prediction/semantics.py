@@ -162,6 +162,19 @@ _ELECTION_TERMS = (
     "win the election", "wins the election", "win the presidency", "wins the presidency",
     "who will win", "election winner", "elected president", "wins re-election",
     "win re-election", "wins the primary", "win the primary", "wins the race", "win the race",
+    # ROUND-1 addition: "loses" phrasings were missing entirely — a market
+    # asking "Will Trump lose an election?" fell through to no event_type at
+    # all rather than being (correctly) classified as the same `election`
+    # event_type as its "wins" counterpart, just the opposite direction.
+    # Deliberately kept as its own explicit event_type (not folded into
+    # office_departure) — per the round-1 brief's disambiguation example,
+    # losing an election is a different real-world event than leaving office
+    # (an incumbent who loses in November doesn't leave office until
+    # inauguration, and an office_departure market can resolve YES via
+    # resignation/removal with no election involved at all).
+    "lose the election", "loses the election", "lose the presidency", "loses the presidency",
+    "lose re-election", "loses re-election", "lose the primary", "loses the primary",
+    "lose the race", "loses the race", "loses an election", "lose an election",
 )
 _APPOINTMENT_TERMS = (
     "nominate", "nominated", "nomination", "nominee", "sworn in", "confirmed by senate",
@@ -178,6 +191,10 @@ _SPORT_CONTEXT_TERMS = (
 _SPORT_TOURNAMENT_TERMS = (
     "win the tournament", "wins the tournament", "tournament winner", "win the championship",
     "wins the championship", "champion of the tournament",
+    # ROUND-1 addition: bare "wins tournament"/"win tournament" (no "the")
+    # is a real, common phrasing that the article-requiring phrases above
+    # miss entirely.
+    "win tournament", "wins tournament",
 )
 # "win the" ... "championship"/"tournament" often has intervening words in
 # real questions ("win the 2026-27 UEFA Champions League Championship") —
@@ -187,6 +204,21 @@ _SPORT_WIN_VERB_TERMS = ("win the", "wins the", "champion of")
 _SPORT_TOURNAMENT_NOUN_TERMS = ("championship", "tournament")
 _SPORT_WINNER_TERMS = (
     "win the final", "wins the final", "championship winner", "wins the title", "win the title",
+)
+# ROUND-1 addition: single-team "wins next match"/"wins the game" phrasing
+# was falling through to no event_type at all — the only match-level
+# detector was `_SPORT_MATCH_PATTERN`, which requires an explicit "X vs Y"
+# pattern in the text. A real, common question phrasing ("Will Team Alpha
+# win their next match?") never contains "vs" at all. Distinguishes
+# match-level from tournament-level per the round-1 brief's disambiguation
+# example (checked in _detect_event_type AFTER the tournament check, so
+# "Team wins the tournament" still wins on the more specific tournament
+# read even though it also contains "win"/"wins").
+_SPORT_MATCH_WIN_TERMS = (
+    "win the match", "wins the match", "win their match", "wins their match",
+    "win the game", "wins the game", "win next match", "wins next match",
+    "win their next match", "wins their next match",
+    "win the fixture", "wins the fixture",
 )
 _SPORT_QUALIFICATION_TERMS = (
     "qualify for", "qualifies for", "qualification for", "advance to the", "advances to the",
@@ -241,6 +273,111 @@ _ASSET_PATTERN = re.compile(
 )
 _ABOVE_DIRECTION_WORDS = frozenset({"above", "over", "at least", "more than", "reach", "reaches", "hit", "hits", "exceed", "exceeds"})
 _BELOW_DIRECTION_WORDS = frozenset({"below", "under", "less than"})
+
+# ---------------------------------------------------------------------------
+# ROUND-1: additive fields toward the target canonical MarketProposition
+# schema (85-section brief, section 3). Field-by-field mapping vs. the
+# target schema is documented in HANDOFF.md's round-1 section; only genuine
+# NEW information is added here (market_id/question/category are already
+# owned by the caller/classification.py and deliberately not duplicated).
+# Every derivation below is rule-based (regex/keyword, same style as the
+# rest of this module) — a field is None/UNKNOWN whenever it genuinely
+# cannot be determined, never guessed.
+# ---------------------------------------------------------------------------
+
+SubjectType = Literal["PERSON", "ORGANIZATION", "ASSET", "EVENT", "INSTITUTION"]
+Domain = Literal["POLITICS", "GEOPOLITICS", "MACRO", "SPORTS", "CRYPTO"]
+ContractType = Literal["binary_event", "price_threshold_at_date", "price_threshold_by_date"]
+ResolutionMechanism = Literal[
+    "official_announcement", "price_feed", "election_result", "court_ruling",
+    "legislative_vote", "appointment_confirmation", "sports_result",
+]
+
+# event_type -> (domain, subject_type, resolution_mechanism). A single
+# lookup table instead of a chain of if/elif — every value here is a
+# direct, literal mapping onto the vocabulary semantics.py already
+# produces (see _detect_event_type), not a new classifier.
+_EVENT_TYPE_META: dict[str, tuple[Domain, SubjectType, ResolutionMechanism]] = {
+    "office_departure": ("POLITICS", "PERSON", "official_announcement"),
+    "election": ("POLITICS", "PERSON", "election_result"),
+    "legislation": ("POLITICS", "INSTITUTION", "legislative_vote"),
+    "appointment": ("POLITICS", "PERSON", "appointment_confirmation"),
+    "court_outcome": ("POLITICS", "INSTITUTION", "court_ruling"),
+    "rate_cut": ("MACRO", "INSTITUTION", "official_announcement"),
+    "rate_hike": ("MACRO", "INSTITUTION", "official_announcement"),
+    "rate_hold": ("MACRO", "INSTITUTION", "official_announcement"),
+    "sanctions": ("GEOPOLITICS", "EVENT", "official_announcement"),
+    "strategic_waterway": ("GEOPOLITICS", "EVENT", "official_announcement"),
+    "territorial_control": ("GEOPOLITICS", "EVENT", "official_announcement"),
+    "diplomatic_agreement": ("GEOPOLITICS", "EVENT", "official_announcement"),
+    "military_action": ("GEOPOLITICS", "EVENT", "official_announcement"),
+    "ceasefire": ("GEOPOLITICS", "EVENT", "official_announcement"),
+    "war_escalation": ("GEOPOLITICS", "EVENT", "official_announcement"),
+    "sport_match": ("SPORTS", "ORGANIZATION", "sports_result"),
+    "sport_tournament": ("SPORTS", "ORGANIZATION", "sports_result"),
+    "sport_winner": ("SPORTS", "ORGANIZATION", "sports_result"),
+    "sport_qualification": ("SPORTS", "ORGANIZATION", "sports_result"),
+    "price_above": ("CRYPTO", "ASSET", "price_feed"),
+    "price_below": ("CRYPTO", "ASSET", "price_feed"),
+}
+
+
+def _derive_semantic_meta(
+    event_type: str | None, deadline_semantics: str | None,
+) -> tuple[Domain | None, SubjectType | None, ResolutionMechanism | None, ContractType | None]:
+    """Returns (domain, subject_type, resolution_mechanism, contract_type).
+    All four are None/UNKNOWN together whenever event_type isn't in the
+    lookup table above — never guessed independently of a real event_type
+    match."""
+    if event_type is None or event_type not in _EVENT_TYPE_META:
+        return None, None, None, None
+    domain, subject_type, resolution_mechanism = _EVENT_TYPE_META[event_type]
+    if event_type in ("price_above", "price_below"):
+        # E5's deadline_semantics distinction (already real, this round only
+        # consumes it) — "by_deadline" (barrier/touch) vs "at_deadline"
+        # (terminal). None deadline_semantics means the phrasing didn't
+        # confidently indicate either, so contract_type stays None rather
+        # than guessing one of the two.
+        if deadline_semantics == "by_deadline":
+            contract_type: ContractType | None = "price_threshold_by_date"
+        elif deadline_semantics == "at_deadline":
+            contract_type = "price_threshold_at_date"
+        else:
+            contract_type = None
+    else:
+        contract_type = "binary_event"
+    return domain, subject_type, resolution_mechanism, contract_type
+
+
+def _derive_actor(question: str, subject: str | None) -> str | None:
+    """`actor` (who performs the action) vs. `subject` (what the market's
+    proposition is fundamentally about) — for the literal proper-noun-run
+    extraction this module uses, these are usually the same named entity.
+    Genuinely differentiated only when a second, distinct named entity
+    appears in the question text (e.g. an institution acting on a named
+    person) — falls back to mirroring `subject` otherwise, which is an
+    honest statement that this extractor cannot yet distinguish the two
+    grammatical roles beyond "the first proper-noun run found"."""
+    actors = _extract_actors(question)
+    if not actors:
+        return subject
+    if subject is not None and actors[0].lower() == subject.lower() and len(actors) > 1:
+        return actors[1]
+    return actors[0]
+
+
+def _derive_semantic_confidence(proposition_status: str, ambiguity_flags: tuple[str, ...]) -> float:
+    """Numeric confidence (0..1), separate from the existing
+    `proposition_status` enum — a coarse CLEAR/AMBIGUOUS label collapses a
+    market with 1 minor ambiguity flag and a market with 4 into the same
+    bucket; this gives callers (confidence.py, maturity.py) a continuous
+    signal to compose with other dimensions. Deliberately simple, documented
+    arithmetic (EXPERT_HEURISTIC-tier, not fitted) — never fabricated from
+    nothing: it is a direct function of the same ambiguity_flags/
+    proposition_status this module already computed honestly."""
+    base = 0.9 if proposition_status == "CLEAR" else 0.4
+    penalized = base - 0.1 * len(ambiguity_flags)
+    return round(max(0.05, min(1.0, penalized)), 2)
 
 
 def detect_price_asset(text: str) -> str | None:
@@ -352,6 +489,8 @@ def _detect_event_type(text: str) -> tuple[str | None, str]:
         return "sport_tournament", "yes_if_occurs"
     if any(t in lowered for t in _SPORT_WINNER_TERMS):
         return "sport_winner", "yes_if_occurs"
+    if any(t in lowered for t in _SPORT_MATCH_WIN_TERMS):
+        return "sport_match", "yes_if_occurs"
     if _SPORT_MATCH_PATTERN.search(text) and any(s in lowered for s in _SPORT_CONTEXT_TERMS):
         return "sport_match", "yes_if_occurs"
 
@@ -402,6 +541,44 @@ class MarketProposition:
     # Additive-only field; every non-price proposition just carries None.
     deadline_semantics: Literal["by_deadline", "at_deadline"] | None = None
 
+    # --- ROUND-1 additive fields (target canonical schema, section 3) -----
+    # subject_type: is the subject a person/organization/asset/event/
+    # institution? Derived from event_type via _EVENT_TYPE_META — None
+    # whenever event_type itself is None/unrecognized (never guessed from
+    # the subject string alone).
+    subject_type: SubjectType | None = None
+    # actor: who performs the action, vs. `subject` (what the proposition is
+    # about) — see _derive_actor; mirrors `subject` when the two grammatical
+    # roles can't be told apart by this extractor.
+    actor: str | None = None
+    # domain: higher-level classification (POLITICS/GEOPOLITICS/MACRO/
+    # SPORTS/CRYPTO) — related to but not identical to classification.py's
+    # finer-grained `category` taxonomy (e.g. category=ELECTIONS maps to
+    # domain=POLITICS). Derived from event_type, not re-classified from raw
+    # text — see _EVENT_TYPE_META.
+    domain: Domain | None = None
+    # contract_type: "binary_event" for yes/no event propositions,
+    # "price_threshold_at_date"/"price_threshold_by_date" for quantitative
+    # threshold propositions (mirrors deadline_semantics — see E5's
+    # by_deadline/at_deadline distinction, reused not reinvented here).
+    contract_type: ContractType | None = None
+    # resolution_mechanism: what kind of real-world process actually
+    # resolves this market (official statement, price feed, election
+    # count, court ruling, legislative vote, appointment confirmation,
+    # sports result) — derived from event_type, same lookup table as domain/
+    # subject_type.
+    resolution_mechanism: ResolutionMechanism | None = None
+    # resolution_source: the specific named authority the resolution_text
+    # actually cited (mirrors resolution_authority — kept as a distinct,
+    # additively-named field per the target schema's vocabulary rather than
+    # renaming the existing, already-consumed `resolution_authority` field
+    # and risking breaking its current callers).
+    resolution_source: str | None = None
+    # semantic_confidence: numeric 0..1 confidence, separate from the
+    # existing proposition_status CLEAR/AMBIGUOUS enum — see
+    # _derive_semantic_confidence.
+    semantic_confidence: float | None = None
+
     def as_dict(self) -> dict:
         return {
             "subject": self.subject, "predicate": self.predicate, "object": self.object,
@@ -411,6 +588,9 @@ class MarketProposition:
             "resolution_authority": self.resolution_authority, "ambiguity_flags": list(self.ambiguity_flags),
             "proposition_status": self.proposition_status, "asset": self.asset,
             "deadline_semantics": self.deadline_semantics,
+            "subject_type": self.subject_type, "actor": self.actor, "domain": self.domain,
+            "contract_type": self.contract_type, "resolution_mechanism": self.resolution_mechanism,
+            "resolution_source": self.resolution_source, "semantic_confidence": self.semantic_confidence,
         }
 
 
@@ -509,12 +689,21 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
     if subject is None or event_type is None or "yes_condition_not_parsed" in ambiguity_flags:
         proposition_status = "AMBIGUOUS"
 
+    domain, subject_type, resolution_mechanism, contract_type = _derive_semantic_meta(
+        event_type, deadline_semantics
+    )
+    actor = _derive_actor(question, subject)
+    semantic_confidence = _derive_semantic_confidence(proposition_status, tuple(ambiguity_flags))
+
     return MarketProposition(
         subject=subject, predicate=predicate, object=object_, event_type=event_type, direction=direction,
         threshold=threshold, unit=unit, location=None, start_time=None, deadline=deadline,
         yes_condition=yes_condition, no_condition=no_condition, resolution_authority=resolution_authority,
         ambiguity_flags=tuple(ambiguity_flags), proposition_status=proposition_status,
         deadline_semantics=deadline_semantics, asset=asset,
+        subject_type=subject_type, actor=actor, domain=domain, contract_type=contract_type,
+        resolution_mechanism=resolution_mechanism, resolution_source=resolution_authority,
+        semantic_confidence=semantic_confidence,
     )
 
 

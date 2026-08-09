@@ -47,6 +47,7 @@ from .news import collect_news_evidence, compute_news_estimate
 from .reaction_lag import STATUS_REACTED, compute_market_reaction_lag
 from .reliability import compute_market_reliability
 from .resolution_edge import compute_resolution_edge
+from .resolution_semantics import extract_resolution_semantics
 from .scenarios import build_scenarios
 from .semantics import MarketProposition, parse_market_proposition
 from .specialized_router import ALL_SPECIALIZED_MODEL_NAMES, route_to_specialized_model
@@ -454,6 +455,17 @@ def compute_prediction(
     proposition = parse_market_proposition(question, resolution_text)
     reasoning.append(f"Specialized model event_type: {proposition.event_type or 'none'}")
 
+    # --- Resolution Engine (ROUND-1, section 4) --------------------------
+    # Additive, read-only: no probability computation happens here. See
+    # resolution_semantics.py for the extraction logic and HANDOFF.md's
+    # round-1 section for the audit of resolution_rules.py this builds on.
+    resolution_semantics = extract_resolution_semantics(question, resolution_text, proposition)
+    reasoning.append(
+        f"Resolution semantics: measurement={resolution_semantics.measurement or 'unknown'}, "
+        f"confidence={resolution_semantics.confidence:.2f}, "
+        f"{len(resolution_semantics.ambiguities)} ambiguity reason(s)."
+    )
+
     quant_current_price = None
     quant_daily_volatility = None
     if proposition.event_type in ("price_above", "price_below") and proposition.asset:
@@ -654,14 +666,14 @@ def compute_prediction(
         proposition=proposition, history_uncertainty=history_uncertainty,
         comparable_sample_size=comparable_sample_size, independent_evidence=independent_evidence,
         specialized_estimates=specialized_estimates, eligible_specialized_models=routing.eligible_models,
-        aktualitaet=aktualitaet,
+        aktualitaet=aktualitaet, resolution_semantics=resolution_semantics,
     )
     confidence_composite = compute_confidence_composite(
         proposition=proposition, history_uncertainty=history_uncertainty,
         comparable_sample_size=comparable_sample_size, independent_evidence=independent_evidence,
         specialized_estimates=specialized_estimates, all_submodel_estimates=all_submodels,
         aktualitaet=aktualitaet, deadline_phase_known=resolution_date is not None,
-        legacy_data_quality=dq,
+        legacy_data_quality=dq, resolution_semantics=resolution_semantics,
     )
     # K1: the composite score IS the production confidence_score — this is
     # the actual rebuild, not just an additive side-channel. The legacy
@@ -938,6 +950,8 @@ def compute_prediction(
         historical_rejected_count=history_uncertainty.rejected_count if history_uncertainty is not None else 0,
         data_gaps=data_gaps,
         world_state=world_state,
+        proposition=proposition,
+        resolution_semantics=resolution_semantics,
     )
     # Forecast Maturity is classified from the fully-assembled result (it
     # reads confidence/data_quality/data_gaps/divergence_audit, all of which
