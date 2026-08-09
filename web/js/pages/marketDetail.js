@@ -243,6 +243,11 @@ function _divergenceAuditHtml(p) {
   const audit = p && p.divergence_audit;
   if (!audit) return "";
   const VERDICT_BADGE = { PASS: "green", WARN: "yellow", REJECT: "red" };
+  const SUPPORT_BADGE = {
+    SUPPORTED_DIVERGENCE: "green",
+    WEAKLY_SUPPORTED_DIVERGENCE: "yellow",
+    UNSUPPORTED_DIVERGENCE: "red",
+  };
   const rows = (audit.checks || []).map((c) => `
     <tr>
       <td>${c.name}</td>
@@ -251,11 +256,16 @@ function _divergenceAuditHtml(p) {
       <td class="sub">${c.detail}</td>
     </tr>
   `).join("");
+  // p.divergence_support: SUPPORTED_DIVERGENCE / WEAKLY_SUPPORTED_DIVERGENCE /
+  // UNSUPPORTED_DIVERGENCE (or null if divergence wasn't triggered) — added
+  // to PredictionResult by divergence_audit.classify_divergence_support(),
+  // previously computed but never rendered anywhere in the UI.
   return `
     <h3>Divergenz-Audit</h3>
     <div class="widget-grid">
       ${widgetCard({ title: "Verdikt", value: `<span class="badge ${VERDICT_BADGE[audit.verdict] || ""}">${audit.verdict || "—"}</span>` })}
       ${widgetCard({ title: "Divergenz (Gap)", value: audit.gap !== null && audit.gap !== undefined ? fmtEdgePp(audit.gap) : "—" })}
+      ${widgetCard({ title: "Divergenz-Einstufung", value: p.divergence_support ? `<span class="badge ${SUPPORT_BADGE[p.divergence_support] || ""}">${p.divergence_support}</span>` : "keine Daten" })}
     </div>
     <p class="sub">${audit.summary}</p>
     ${rows ? `<table><thead><tr><th>Prüfung</th><th>Verdikt</th><th>Hard Fail</th><th>Begründung</th></tr></thead><tbody>${rows}</tbody></table>` : ""}
@@ -284,6 +294,20 @@ function _worldStateHtml(p) {
   const statusCounts = ws.claim_status_counts && Object.keys(ws.claim_status_counts).length
     ? Object.entries(ws.claim_status_counts).map(([k, v]) => `${k}: ${v}`).join(", ")
     : "keine Daten";
+  // waterway_state / path_to_resolution: added in a later round
+  // (world_state.py's current_state/trend + supporting/blocking conditions,
+  // honestly UNKNOWN absent real evidence — "absence of bad news is not
+  // normalization"). Previously computed but never rendered anywhere in the
+  // UI; shown here as an additive extension of the same section, "keine
+  // Daten" per-field rather than hiding the whole card.
+  const wws = ws.waterway_state;
+  const ptr = ws.path_to_resolution;
+  const supporting = ptr && ptr.supporting_conditions && ptr.supporting_conditions.length
+    ? ptr.supporting_conditions.join("; ")
+    : "keine Daten";
+  const blocking = ptr && ptr.blocking_conditions && ptr.blocking_conditions.length
+    ? ptr.blocking_conditions.join("; ")
+    : "keine Daten";
   return `
     <h3>Weltzustand</h3>
     <div class="widget-grid">
@@ -293,7 +317,14 @@ function _worldStateHtml(p) {
       ${widgetCard({ title: "Verbleibende Zeit", value: fmtDeadline(ws.time_remaining_hours) })}
       ${widgetCard({ title: "Widerspruchs-Evidenz", value: String(ws.counter_evidence_count ?? 0) })}
       ${widgetCard({ title: "Claim-Status", value: statusCounts })}
+      ${widgetCard({ title: "Aktueller Zustand", value: (wws && wws.current_state) || (ptr && ptr.current_state) || "keine Daten" })}
+      ${widgetCard({ title: "Trend", value: (wws && wws.trend) || "keine Daten" })}
     </div>
+    ${
+      ptr
+        ? `<p class="sub"><strong>Unterstützende Bedingungen:</strong> ${supporting}<br/><strong>Blockierende Bedingungen:</strong> ${blocking}</p>`
+        : ""
+    }
     ${
       ws.most_recent_evidence_headline
         ? `<p class="sub">Letzte Evidenz: ${ws.most_recent_evidence_headline} (${fmtDate(ws.most_recent_evidence_published_at)})</p>`
