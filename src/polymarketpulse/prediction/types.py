@@ -344,6 +344,16 @@ class PredictionResult:
     # category-equality path (no per-case similarity score exists there) or
     # had zero usable comparable cases.
     historical_comparables: tuple[dict, ...] = field(default_factory=tuple)
+    # Part 2/Part E (correctness-hardening round 2, additive): explicit
+    # candidate accounting from history.WeightedBaselineResult so the UI/API
+    # can show how many candidates were even considered vs how many actually
+    # passed the compatibility gate (`_passes_compatibility_gate` in
+    # history.py) and fed the weighted baseline above. 0/0/0 when the
+    # history submodel didn't run on the weighted path at all (legacy
+    # category-equality path, or zero candidates in the DB).
+    historical_candidate_count: int = 0
+    historical_accepted_count: int = 0
+    historical_rejected_count: int = 0
     # confidence_score above is now fed by this same composite approach
     # (see confidence.compute_confidence) — confidence_composite is the
     # full per-dimension breakdown, proving confidence is a function of
@@ -431,6 +441,9 @@ class PredictionResult:
             "data_quality_composite": self.data_quality_composite.as_dict() if self.data_quality_composite else None,
             "confidence_composite": self.confidence_composite.as_dict() if self.confidence_composite else None,
             "historical_comparables": list(self.historical_comparables),
+            "historical_candidate_count": self.historical_candidate_count,
+            "historical_accepted_count": self.historical_accepted_count,
+            "historical_rejected_count": self.historical_rejected_count,
             "data_gaps": self.data_gaps.as_dict() if self.data_gaps else None,
             "forecast_maturity": self.forecast_maturity,
             "world_state": self.world_state.as_dict() if self.world_state else None,

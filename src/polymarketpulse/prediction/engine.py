@@ -933,6 +933,9 @@ def compute_prediction(
         historical_comparables=(
             tuple(history_uncertainty.top_comparable_cases) if history_uncertainty is not None else ()
         ),
+        historical_candidate_count=history_uncertainty.candidate_count if history_uncertainty is not None else 0,
+        historical_accepted_count=history_uncertainty.accepted_count if history_uncertainty is not None else 0,
+        historical_rejected_count=history_uncertainty.rejected_count if history_uncertainty is not None else 0,
         data_gaps=data_gaps,
         world_state=world_state,
     )

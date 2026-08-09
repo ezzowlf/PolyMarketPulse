@@ -365,8 +365,27 @@ function _dataGapsHtml(p) {
 // I3: real historical comparable cases behind the history submodel's
 // weighted baseline (question / similarity / outcome / weight).
 function _historicalComparablesHtml(p) {
-  const cases = p && p.historical_comparables;
-  if (!cases || !cases.length) return "";
+  if (!p) return "";
+  const candidateCount = p.historical_candidate_count || 0;
+  const acceptedCount = p.historical_accepted_count || 0;
+  const rejectedCount = p.historical_rejected_count || 0;
+  const cases = p.historical_comparables;
+
+  // Correctness-hardening round 2 (Part E): when History was evaluated at
+  // all (candidateCount > 0) but nothing passed the compatibility gate
+  // (acceptedCount === 0 — e.g. the Hormuz market, where 126 candidates
+  // were considered and every single one was correctly rejected), show
+  // that honestly instead of silently rendering an empty section.
+  if (!cases || !cases.length) {
+    if (candidateCount > 0) {
+      return `
+        <h3>Historische Vergleichsfälle</h3>
+        <div class="empty-state">Keine ausreichend ähnlichen historischen Vergleichsfälle. (${candidateCount} Kandidat(en) geprüft, ${rejectedCount} abgelehnt, 0 akzeptiert.)</div>
+      `;
+    }
+    return "";
+  }
+
   const rows = cases.map((c) => `
     <tr>
       <td>${c.question}</td>
@@ -376,7 +395,7 @@ function _historicalComparablesHtml(p) {
     </tr>
   `).join("");
   return `
-    <h3>Historische Vergleichsfälle</h3>
+    <h3>Historische Vergleichsfälle <span class="sub">(${acceptedCount} akzeptiert / ${candidateCount} geprüft, ${rejectedCount} abgelehnt)</span></h3>
     <table>
       <thead><tr><th>Frage</th><th>Ähnlichkeit</th><th>Ausgang</th><th>Gewichtsanteil</th></tr></thead>
       <tbody>${rows}</tbody>
