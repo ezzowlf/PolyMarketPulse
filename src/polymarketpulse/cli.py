@@ -187,6 +187,37 @@ def _scan_one_provider(
         provider.close()
 
 
+def _save_news_provider_health(storage: Storage, source_id: str, items_fetched: int, latency_ms: int) -> None:
+    """Mirrors `_scan_one_provider`'s success/failure `ProviderHealth`
+    pattern for news/RSS/GDELT sources (audit Part 4 — `cmd_news_fetch`
+    never called this at all before, so `provider_health` had 0 rows
+    regardless of real GDELT/RSS reachability). `fetch_feed`/`fetch_gdelt`
+    never raise (see their own docstrings), so there is no exception to
+    branch on here the way `_scan_one_provider` does for `ProviderError` —
+    `items_fetched == 0` is treated as a real, honest degraded-not-crashed
+    signal (consecutive_failures incremented from whatever was last
+    stored) rather than fabricating a hard failure/success distinction the
+    return value doesn't actually support."""
+    previous = storage.get_provider_health(source_id)
+    previous_failures = previous.consecutive_failures if previous else 0
+    now = datetime.now(UTC)
+    if items_fetched > 0:
+        health = data_sources.ProviderHealth(
+            source_id=source_id, last_success=now, last_failure=previous.last_failure if previous else None,
+            last_failure_reason=None, last_http_status=200, last_latency_ms=latency_ms,
+            consecutive_failures=0, data_age_seconds=0, items_fetched=items_fetched, parse_failures=0,
+        )
+    else:
+        health = data_sources.ProviderHealth(
+            source_id=source_id, last_success=previous.last_success if previous else None, last_failure=now,
+            last_failure_reason="0 items returned (unreachable, empty feed, or rate-limited — "
+            "not distinguishable from the return value alone)",
+            last_http_status=None, last_latency_ms=latency_ms,
+            consecutive_failures=previous_failures + 1, data_age_seconds=None, items_fetched=0, parse_failures=0,
+        )
+    storage.save_provider_health(health)
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     settings = Settings.load()
     limit = args.limit or settings.scan_limit
@@ -476,11 +507,30 @@ def cmd_news_fetch(args: argparse.Namespace) -> int:
 
     from .news.gdelt import build_query_for_question, fetch_gdelt
     from .news.linker import link_news_to_markets
-    from .news.rss import fetch_all
+    from .news.rss import DEFAULT_FEEDS, fetch_feed
 
     storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
     try:
-        events = fetch_all(timeout=settings.request_timeout)
+        events: list = []
+
+        # Fetch each RSS feed individually (rather than the aggregate
+        # `fetch_all`) so per-source reachability becomes observable via
+        # `provider_health` (audit Part 4: this command never called
+        # `storage.save_provider_health()` at all before this — 0 rows in
+        # the table regardless of whether GDELT/RSS were actually reachable).
+        # `fetch_feed` never raises (it swallows network/parse errors and
+        # returns `[]`) by design, so a real HTTP/TLS failure and a feed
+        # that's simply empty this run are not distinguishable from the
+        # return value alone; `items_fetched == 0` is recorded as DEGRADED
+        # rather than a hard failure, which is the most honest signal
+        # available without changing `fetch_feed`'s no-raise contract (used
+        # elsewhere / covered by its own tests).
+        for source_name, url in DEFAULT_FEEDS.items():
+            started = time.monotonic()
+            feed_events = fetch_feed(url, source_name, timeout=settings.request_timeout)
+            latency_ms = int((time.monotonic() - started) * 1000)
+            events.extend(feed_events)
+            _save_news_provider_health(storage, source_name, len(feed_events), latency_ms)
 
         provider = create_provider(settings.default_provider, timeout=settings.request_timeout)
         try:
@@ -495,10 +545,20 @@ def cmd_news_fetch(args: argparse.Namespace) -> int:
         # in addition to the small curated RSS feed list, so the Independent
         # Evidence Engine has real primary-source coverage to work with.
         # Only public, lawfully accessible data (see news/gdelt.py); never
-        # exceeds free/no-key usage.
+        # exceeds free/no-key usage. Latency/items are aggregated across all
+        # per-market GDELT calls into one "gdelt" provider_health row (GDELT
+        # is one logical source queried many times per run, unlike the RSS
+        # feeds which are each a distinct named source).
+        gdelt_started = time.monotonic()
+        gdelt_items = 0
         for market in markets[: min(settings.scan_limit, 50)]:
             query = build_query_for_question(market.question)
-            events.extend(fetch_gdelt(query, timeout=settings.request_timeout))
+            gdelt_events = fetch_gdelt(query, timeout=settings.request_timeout)
+            gdelt_items += len(gdelt_events)
+            events.extend(gdelt_events)
+        gdelt_latency_ms = int((time.monotonic() - gdelt_started) * 1000)
+        if markets:
+            _save_news_provider_health(storage, "gdelt", gdelt_items, gdelt_latency_ms)
 
         new_count = 0
         saved_ids = {}

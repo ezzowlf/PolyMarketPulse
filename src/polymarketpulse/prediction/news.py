@@ -37,6 +37,18 @@ _NEGATIVE_TERMS = (
 _SOURCE_TRUST: dict[str, float] = {
     "reuters": 0.95, "apnews": 0.95, "ap news": 0.95, "bloomberg": 0.9, "bbc": 0.9,
     "wsj": 0.85, "nytimes": 0.85, "the guardian": 0.8, "cnbc": 0.8, "polymarket": 0.6,
+    # Official/primary-source RSS feed names (`news/rss.py`'s 6 curated
+    # feeds — federal_reserve, ecb, whitehouse, un_news, state_department,
+    # sec). These are first-party statements from the institution the
+    # market question is actually about (e.g. a Federal Reserve press
+    # release for a Fed rate-decision market), not third-party reporting —
+    # real audit finding: before this entry, all 6 fell through to the
+    # neutral 0.5 default, identical to an unknown blog, which directly
+    # undercut the "NEWS_PRIMARY/OFFICIAL evidence" premise. Scaled at or
+    # above `reuters`/`apnews` (0.95) since a primary official statement is
+    # at least as authoritative as top-tier wire-service reporting on it.
+    "federal_reserve": 0.97, "ecb": 0.97, "whitehouse": 0.95, "un_news": 0.95,
+    "state_department": 0.95, "sec": 0.97,
 }
 
 RECENCY_HALF_LIFE_HOURS = 48.0  # a news event's weight halves every 48h

@@ -85,3 +85,22 @@ def test_primary_wire_source_trusted_above_unknown_source() -> None:
     assert _trust_for_source("Reuters") > _trust_for_source("some-random-blog")
     assert _trust_for_source("reuters") == _trust_for_source("Reuters")  # case-insensitive
     assert _trust_for_source("some-random-blog") == 0.5
+
+
+def test_official_rss_feed_sources_trusted_above_unknown_and_at_least_reuters_level() -> None:
+    # Audit Part 2 regression: before this round, all 6 curated RSS feed
+    # source names (news/rss.py's DEFAULT_FEEDS) fell through to the
+    # neutral 0.5 default — identical to an unknown blog — even though
+    # they are first-party official statements (e.g. an actual Federal
+    # Reserve press release for a Fed rate-decision market). They must now
+    # score as high-trust primary/official sources.
+    official_sources = (
+        "federal_reserve", "ecb", "whitehouse", "un_news", "state_department", "sec",
+    )
+    for source in official_sources:
+        trust = _trust_for_source(source)
+        assert trust > 0.5, f"{source} should not be neutral-trust anymore"
+        assert trust >= _trust_for_source("reuters"), (
+            f"{source} (first-party official statement) should be at least as trusted "
+            "as top-tier wire-service reporting on it"
+        )

@@ -132,3 +132,37 @@ def test_relevance_scales_bayesian_evidence_strength(storage: Storage) -> None:
     low = compute_independent_evidence(storage.connection, "polymarket", "low-rel", low_rel_market.question, None, 0.5)
     assert high.available is True and low.available is True
     assert abs(high.independent_yes_probability - 0.5) > abs(low.independent_yes_probability - 0.5)
+
+
+def test_official_source_trust_flows_into_source_quality_score(storage: Storage) -> None:
+    """Audit Part 2 regression, end-to-end wiring check: the same relevant
+    evidence, differing only in the `source` label, must produce a
+    strictly higher `source_quality_score` when linked from a curated
+    official RSS source name (`federal_reserve`) than from an unrecognized
+    source — proving the `_SOURCE_TRUST` addition actually reaches
+    `evidence.py`'s `_domain_reliability` -> `source_quality_score`
+    computation, not just sitting in an unused dict. Uses the same
+    ceasefire-wording fixture as the relevance-scaling test above (proven
+    to pass `classify_evidence_relation`'s topic gate) purely as a
+    controlled, on-topic evidence payload — the market/event *content* is
+    incidental to this test; only the source-trust plumbing is under test."""
+    official_market = Market(
+        provider="polymarket", provider_market_id="official-src", condition_id="",
+        question="Will the ceasefire hold?", slug="official-src",
+    )
+    unknown_market = Market(
+        provider="polymarket", provider_market_id="unknown-src", condition_id="",
+        question="Will the ceasefire hold?", slug="unknown-src",
+    )
+    for pmid, market, source in (
+        ("official-src", official_market, "federal_reserve"),
+        ("unknown-src", unknown_market, "some-random-blog"),
+    ):
+        _link_news(storage, market, "Ceasefire confirmed by both sides, agreement signed", source, f"https://example.com/{pmid}-a", confidence=0.6, hours_ago=1)
+        _link_news(storage, market, "Officials confirm ceasefire agreement reached", source, f"https://example.com/{pmid}-b", confidence=0.6, hours_ago=2)
+
+    official = compute_independent_evidence(storage.connection, "polymarket", "official-src", official_market.question, None, 0.5)
+    unknown = compute_independent_evidence(storage.connection, "polymarket", "unknown-src", unknown_market.question, None, 0.5)
+    assert official.available is True and unknown.available is True
+    assert official.source_quality_score is not None and unknown.source_quality_score is not None
+    assert official.source_quality_score > unknown.source_quality_score

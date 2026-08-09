@@ -131,6 +131,39 @@ def test_raw_junk_category_with_real_classified_category_still_shows_news_primar
     assert "NEWS_PRIMARY" in categories_with
 
 
+def test_news_primary_gap_closes_for_live_whitehouse_source_health() -> None:
+    # Audit Part 2/4 follow-up bug fix: found while verifying the
+    # provider_health -> NEWS_PRIMARY wiring is real. The gate used to
+    # check `source_id in ("gdelt", "un_news", "white_house")` — an
+    # underscore typo that never matches the real feed name `"whitehouse"`
+    # (see news/rss.py's DEFAULT_FEEDS) — so a genuinely LIVE whitehouse
+    # feed could never close this gap even once provider_health has real
+    # rows. This proves the real (non-typo'd) source_id now closes it.
+    from polymarketpulse.data_gaps import calculate_data_gaps
+
+    live_whitehouse_health = {
+        "whitehouse": {"source_id": "whitehouse", "state": "LIVE"},
+    }
+    report = calculate_data_gaps(
+        market_id="m", question="Will there be a ceasefire?", market_category="GEOPOLITICS",
+        event_type=None, source_health=live_whitehouse_health, historical_comparables_count=50,
+        time_horizon_compatible=True, has_structured_data=True, has_event_relations=True,
+    )
+    categories = {g.category for g in report.gaps}
+    assert "NEWS_PRIMARY" not in categories
+
+    # Sanity: the OLD typo'd id ("white_house") must NOT be enough to close
+    # the gap — proving this test would have caught the original bug.
+    stale_health = {"white_house": {"source_id": "white_house", "state": "LIVE"}}
+    report_stale = calculate_data_gaps(
+        market_id="m", question="Will there be a ceasefire?", market_category="GEOPOLITICS",
+        event_type=None, source_health=stale_health, historical_comparables_count=50,
+        time_horizon_compatible=True, has_structured_data=True, has_event_relations=True,
+    )
+    categories_stale = {g.category for g in report_stale.gaps}
+    assert "NEWS_PRIMARY" in categories_stale
+
+
 def test_data_gaps_diagnostic_only_probability_unchanged(conn) -> None:
     # Two markets identical except one triggers many more gaps (GEOPOLITICS
     # with thin history) than the other (well-covered esports category) —

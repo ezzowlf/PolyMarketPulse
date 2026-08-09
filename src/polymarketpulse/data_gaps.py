@@ -134,11 +134,23 @@ def calculate_data_gaps(
     
     # News gaps
     # If market is in geopolitical/politics category and we have no primary news evidence
+    # Real source_id values, matching `news/rss.py`'s DEFAULT_FEEDS keys and
+    # the "gdelt" id `cli.py::_save_news_provider_health` now saves (audit
+    # Part 4 wiring). Real bug fixed here (found while verifying that Part
+    # 4's provider_health wiring actually flows into this gate): the old
+    # tuple checked for source_id `"white_house"` (with an underscore),
+    # which never matches the real feed name `"whitehouse"` (no
+    # underscore, see `news/rss.py::DEFAULT_FEEDS`) — so even once
+    # `provider_health` has real rows, a genuinely LIVE `whitehouse` feed
+    # could never close this gap. Also added `state_department`, the third
+    # real feed name directly relevant to POLITICS/GEOPOLITICS/WAR_PEACE
+    # markets (federal_reserve/ecb/sec are not added here — they're not
+    # topically primary sources for these three categories).
     if market_category in ("GEOPOLITICS", "WAR_PEACE", "POLITICS") and (
         source_health is None or not any(
             h.get("state") == "LIVE"
             for h in source_health.values()
-            if h.get("source_id") in ("gdelt", "un_news", "white_house")
+            if h.get("source_id") in ("gdelt", "un_news", "whitehouse", "state_department")
         )
     ):
         gaps.append(DataGap(
@@ -147,7 +159,7 @@ def calculate_data_gaps(
             description="Keine verifizierten Primärquellen (Regierungserklärungen, offizielle Pressemitteilungen).",
             priority=GapPriority.HIGH,
             impact_on_confidence=0.15,
-            recommended_sources=("gdelt", "un_news", "white_house"),
+            recommended_sources=("gdelt", "un_news", "whitehouse", "state_department"),
         ))
     
     # Historical comparables gap

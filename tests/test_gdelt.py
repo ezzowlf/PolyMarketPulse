@@ -15,6 +15,46 @@ def test_build_query_for_empty_question_returns_empty_string() -> None:
     assert build_query_for_question("") == ""
 
 
+def test_build_query_phrase_quotes_multiword_entity() -> None:
+    """Audit Part 1 regression: a multi-word entity like "Strait of
+    Hormuz" must be phrase-quoted as a single term, not split into 3
+    independent OR terms (the real over-broad-query bug found in the
+    audit: "strait OR hormuz OR traffic OR returns OR normal OR august")."""
+    query = build_query_for_question("Will the Strait of Hormuz traffic return to normal by August 31?")
+    assert '"Strait of Hormuz"' in query
+    # The old behavior (pure keyword-OR, no phrase-quoting) would have
+    # produced independent "strait" / "hormuz" terms instead.
+    assert " OR strait " not in f" {query} "
+    assert " OR hormuz " not in f" {query} "
+
+
+def test_build_query_expanded_function_word_list_excludes_real_non_substantive_words() -> None:
+    """Audit Part 1 regression: words like "before"/"next"/"state" are
+    length>3 and used to slip through the old length<=3-only stopword
+    filter. They must not appear as bare OR terms now."""
+    query = build_query_for_question("Will the state announce a decision before the next meeting?")
+    assert "state" not in query.split(" OR ")
+    assert "before" not in query.split(" OR ")
+    assert "next" not in query.split(" OR ")
+
+
+def test_build_query_more_specific_than_old_flat_keyword_or_for_real_market() -> None:
+    """Before/after comparison for a real acceptance-run market question:
+    the new query must be strictly more specific (contains a quoted
+    phrase) than the old flat OR-of-words query would have been."""
+    question = "Will the President of the United States be out of office by August 31?"
+    old_style_terms = [
+        w.strip(".,?!\"'()").lower()
+        for w in question.split()
+        if len(w.strip(".,?!\"'()")) > 3
+        and w.strip(".,?!\"'()").lower() not in {"the", "will"}
+    ]
+    old_query = " OR ".join(old_style_terms[:6])
+    new_query = build_query_for_question(question)
+    assert '"' in new_query  # phrase-quoted — old query never quotes anything
+    assert new_query != old_query
+
+
 def test_fetch_gdelt_parses_articles(monkeypatch) -> None:
     # assert_safe_url does a real DNS lookup by design (SSRF guard) — stubbed
     # here so this stays a pure, network-free unit test.
