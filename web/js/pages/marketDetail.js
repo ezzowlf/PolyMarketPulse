@@ -173,6 +173,7 @@ function _headlinePanelHtml(market, opp, pred) {
       ${widgetCard({ title: "CONFIDENCE", value: p.confidence_score !== undefined ? `${fmtNum(p.confidence_score, 1)} / 100 <span class="sub">(${p.confidence_calibration_status || "UNCALIBRATED"})</span>` : "–" })}
       ${widgetCard({ title: "DATA QUALITY", value: p.data_quality_score !== undefined ? `${fmtNum(p.data_quality_score, 0)} / 100` : "–" })}
       ${widgetCard({ title: "STATUS", value: statusLabel })}
+      ${widgetCard({ title: "FORECAST MATURITY", value: p.forecast_maturity || "–" })}
       ${widgetCard({ title: "Deadline", value: opp ? fmtDeadline(opp.deadline_hours) : "–" })}
     </div>
     ${!hasIndependent ? `<p class="sub">Keine unabhängigen Daten — Prognose basiert derzeit nicht auf einer eigenständigen Analyse.</p>` : ""}
