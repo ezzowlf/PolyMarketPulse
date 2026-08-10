@@ -1299,43 +1299,19 @@ def get_data_gaps(market_id: str, storage: Storage = Depends(get_storage)) -> di
     Returns a comprehensive gap report identifying missing information
     and which data sources would reduce uncertainty most.
     """
-    from .data_gaps import calculate_data_gaps
-    
-    # Load market data
     row = storage.connection.execute(
-        "SELECT question, category FROM markets WHERE market_id = ?", (market_id,)
+        "SELECT 1 FROM markets WHERE market_id = ?", (market_id,)
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"Unknown market_id: {market_id}")
-    
-    question, category = row
-    
-    # Get provider health
-    health_list = storage.get_all_provider_health()
-    source_health = {h["source_id"]: h for h in health_list}
-    
-    # Simple heuristics for missing structured data
-    has_structured_data = source_health.get("coingecko", {}).get("state") == "LIVE" if category == "CRYPTO" else True
-    
-    # Get historical comparable count (would need a real query in production)
-    comparable_count = 0
-    
-    # Calculate gaps
-    report = calculate_data_gaps(
-        market_id=market_id,
-        question=question or "",
-        market_category=category,
-        event_type=None,  # Would need real extraction
-        source_health=source_health,
-        historical_comparables_count=comparable_count,
-        time_horizon_compatible=None,  # Would need real calculation
-        has_structured_data=has_structured_data,
-        has_event_relations=False,  # Placeholder
-    )
+
+    prediction_result = ai_service.get_prediction(storage, market_id)
+    if prediction_result.data_gaps is None:
+        raise HTTPException(status_code=503, detail="Data-gap analysis unavailable")
     
     return {
         "abgerufen_am": datetime.now(UTC).isoformat(),
-        **report.as_dict(),
+        **prediction_result.data_gaps.as_dict(),
     }
 
 

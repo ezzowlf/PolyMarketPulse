@@ -17,13 +17,15 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import replace as _dataclass_replace
 from datetime import UTC, datetime, timedelta
+from threading import Lock
+from time import monotonic
 from typing import TYPE_CHECKING
 
 from ..data_gaps import calculate_data_gaps
 from ..data_sources import row_to_provider_health
 from ..price_analytics import PricePoint
-from ..providers.coingecko import fetch_price_and_volatility, resolve_coingecko_id
-from ..providers.fred import fetch_macro_snapshot
+from ..providers.coingecko import PriceData, fetch_price_and_volatility, resolve_coingecko_id
+from ..providers.fred import MacroSnapshot, fetch_macro_snapshot
 from .bayesian import bayesian_update
 from .confidence import (
     compute_confidence,
@@ -71,6 +73,40 @@ EDGE_WATCH = 0.08
 EDGE_STRONG = 0.18
 MIN_CONFIDENCE_FOR_ACTION = 40
 MIN_COMPARABLE_SAMPLE = 5  # kept for backward-compat imports (tests/test_prediction.py)
+
+_PROVIDER_CACHE_TTL_SECONDS = 300.0
+_provider_cache_lock = Lock()
+_provider_cache: dict[tuple, tuple[float, object]] = {}
+
+
+def _cached_provider_call(key: tuple, fetch):
+    """Small in-process TTL cache for repeated identical forecast inputs.
+
+    The callable identity is part of each caller's key so monkeypatched test
+    providers cannot leak cached values into another test. Failures (`None`)
+    are cached too: an offline provider should not block every market-detail
+    request until the short TTL expires.
+    """
+    now = monotonic()
+    with _provider_cache_lock:
+        cached = _provider_cache.get(key)
+        if cached is not None and now - cached[0] < _PROVIDER_CACHE_TTL_SECONDS:
+            return cached[1]
+        value = fetch()
+        _provider_cache[key] = (monotonic(), value)
+        return value
+
+
+def _fetch_quant_snapshot(coingecko_id: str) -> PriceData | None:
+    key = ("coingecko", id(fetch_price_and_volatility), coingecko_id, 90)
+    return _cached_provider_call(
+        key, lambda: fetch_price_and_volatility(coingecko_id)
+    )
+
+
+def _fetch_macro_snapshot() -> MacroSnapshot | None:
+    key = ("fred", id(fetch_macro_snapshot))
+    return _cached_provider_call(key, fetch_macro_snapshot)
 
 
 def _recommendation(net_edge: float | None, confidence: float, sample_size: int) -> Recommendation:
@@ -239,15 +275,16 @@ def _forecast_status(
     if estimated_yes is None:
         return "NO_FORECAST"
     available_names = {s.name for s in submodel_estimates if s.available}
-    independent_names = available_names & {"history", "independent_evidence"}
-    price_anchored_names = available_names & {"momentum", "news", "event_relations"}
-
     specialized_names = available_names & set(ALL_SPECIALIZED_MODEL_NAMES)
+    independent_names = (
+        available_names & {"history", "independent_evidence"}
+    ) | specialized_names
+    price_anchored_names = available_names & {"momentum", "news", "event_relations"}
 
     if independent_probability is None or not independent_names:
         return "BLENDED_FORECAST" if price_anchored_names else "NO_FORECAST"
 
-    if independent_names == {"history"} and not price_anchored_names and not specialized_names:
+    if independent_names == {"history"} and not price_anchored_names:
         if proposition is not None and (
             proposition.event_type is None or proposition.proposition_status == "AMBIGUOUS"
         ):
@@ -489,7 +526,7 @@ def compute_prediction(
     if as_of is None and proposition.event_type in ("price_above", "price_below") and proposition.asset:
         coingecko_id = resolve_coingecko_id(proposition.asset)
         if coingecko_id:
-            price_data = fetch_price_and_volatility(coingecko_id)
+            price_data = _fetch_quant_snapshot(coingecko_id)
             if price_data is not None:
                 quant_current_price = price_data.current_price
                 quant_daily_volatility = price_data.daily_volatility
@@ -503,7 +540,7 @@ def compute_prediction(
     # safety note above.
     macro_snapshot = None
     if as_of is None and proposition.event_type in ("rate_cut", "rate_hike", "rate_hold"):
-        macro_snapshot = fetch_macro_snapshot()
+        macro_snapshot = _fetch_macro_snapshot()
         if macro_snapshot is not None:
             try:
                 _persist_macro_snapshot(conn, macro_snapshot)
@@ -588,7 +625,12 @@ def compute_prediction(
     # actually has nothing independent to say — exactly the bug this
     # comment now prevents from being reintroduced.
     prior_estimate, _ = combine_submodels(
-        [history_estimate, momentum_estimate, independent_evidence_estimate, event_relation_estimate]
+        [
+            history_estimate,
+            momentum_estimate,
+            independent_evidence_estimate,
+            event_relation_estimate,
+        ] + specialized_available
     )
 
     # --- News submodel + Bayesian update ---------------------------------

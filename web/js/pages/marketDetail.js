@@ -194,7 +194,9 @@ const SOURCE_LABEL_DE = {
 // I1: sources whose independent forecast doesn't take the market price as
 // input at all — used to build the plain-language "independent model type"
 // label from whichever of these actually contributed this time.
-const INDEPENDENT_SOURCE_NAMES = new Set(["history", "independent_evidence"]);
+const INDEPENDENT_SOURCE_NAMES = new Set([
+  "history", "independent_evidence", "politics", "geopolitics", "macro", "quant", "sports",
+]);
 
 function _independentModelTypeLabel(p) {
   const contributing = (p.contribution_breakdown || []).filter(

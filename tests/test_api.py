@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -233,6 +234,31 @@ def test_providers_status_endpoint(client: TestClient) -> None:
     assert "polymarket" in names
     poly = next(p for p in body if p["name"] == "polymarket")
     assert poly["markets_stored"] == 1
+
+
+def test_data_gaps_endpoint_uses_canonical_prediction_report(
+    client: TestClient, monkeypatch,
+) -> None:
+    from polymarketpulse import api
+
+    market_id = client.get("/markets").json()["items"][0]["market_id"]
+    canonical = {
+        "market_id": market_id,
+        "gaps": [{"category": "EVENT_GRAPH", "severity": "LOW"}],
+    }
+    monkeypatch.setattr(
+        api.ai_service,
+        "get_prediction",
+        lambda storage, requested_id: SimpleNamespace(
+            data_gaps=SimpleNamespace(as_dict=lambda: canonical)
+        ),
+    )
+
+    response = client.get(f"/data-gaps/{market_id}")
+
+    assert response.status_code == 200
+    assert response.json()["market_id"] == market_id
+    assert response.json()["gaps"] == canonical["gaps"]
 
 
 def test_search_endpoint_finds_seeded_market(client: TestClient) -> None:
