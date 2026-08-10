@@ -162,8 +162,9 @@ def calculate_data_gaps(
             recommended_sources=("gdelt", "un_news", "whitehouse", "state_department"),
         ))
     
-    # Historical comparables gap
-    if historical_comparables_count < 10:
+    # History is optional when a genuine structured domain-data path is
+    # available; its absence is not a critical gap for that forecast.
+    if not has_structured_data and historical_comparables_count < 10:
         if historical_comparables_count < 3:
             severity = "CRITICAL"
             impact = 0.30
@@ -184,7 +185,7 @@ def calculate_data_gaps(
         ))
     
     # Time horizon gap
-    if time_horizon_compatible is False:
+    if not has_structured_data and time_horizon_compatible is False:
         gaps.append(DataGap(
             category="TIME_HORIZON",
             severity="HIGH",
@@ -193,7 +194,7 @@ def calculate_data_gaps(
             impact_on_confidence=0.12,
             recommended_sources=(),  # Fixed by data collection improvements
         ))
-    elif time_horizon_compatible is None:
+    elif not has_structured_data and time_horizon_compatible is None:
         gaps.append(DataGap(
             category="TIME_HORIZON",
             severity="MEDIUM",

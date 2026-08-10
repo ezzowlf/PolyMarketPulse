@@ -141,6 +141,17 @@ def _estimate_price_probability(
     the sample stdev of daily log returns."""
     inputs_used: list[str] = []
 
+    # A current price observed after expiry cannot establish the named
+    # resolution source's value at the resolution timestamp. This check
+    # must precede "threshold already crossed".
+    if time_to_deadline_days is not None and time_to_deadline_days < 0:
+        inputs_used.append("deadline_expired_without_resolution_observation")
+        return (
+            None,
+            "Deadline expired - no point-in-time resolution-source observation available",
+            tuple(inputs_used),
+        )
+
     # Edge case: threshold already crossed
     if direction == "above" and current_price >= threshold:
         inputs_used.append("threshold_already_crossed_above")

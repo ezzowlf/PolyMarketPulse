@@ -359,9 +359,21 @@ def analyze_macro(
             uncertainty=1.0,
         )
 
-    # Run the appropriate analysis function
-    analysis_func = _ANALYSIS_FUNCTIONS[event_type]
-    probability, reason, inputs_used = analysis_func(text, proposition_status, event_type)
+    # A market question describes the proposition; it is not evidence that
+    # the described decision was reported or confirmed. Questions go
+    # directly to the structured-data path below.
+    is_market_question = "?" in text or text.strip().lower().startswith(
+        ("will ", "is ", "are ", "does ", "do ", "can ", "could ")
+    )
+    if is_market_question:
+        probability, reason, inputs_used = (
+            None,
+            "market question is not evidence of a completed/reported rate decision",
+            ("market_question_only",),
+        )
+    else:
+        analysis_func = _ANALYSIS_FUNCTIONS[event_type]
+        probability, reason, inputs_used = analysis_func(text, proposition_status, event_type)
 
     if probability is None:
         # Text-keyword analysis found no confirmed/reported decision (most

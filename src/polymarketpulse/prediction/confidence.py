@@ -185,7 +185,10 @@ def _model_agreement_dimension(submodel_estimates: list[SubmodelEstimate]) -> Qu
     )
 
 
-def _provider_health_dimension() -> QualityDimension:
+def _provider_health_dimension(
+    live_provider_sources: tuple[str, ...] = (),
+    attempted_provider_sources: tuple[str, ...] = (),
+) -> QualityDimension:
     # Honest gap: no provider_health/circuit_breaker/success-failure
     # tracking exists anywhere in providers/ or news/ as of this pass (see
     # J2/K1 task notes). Building a real one requires wiring call-result
@@ -193,9 +196,19 @@ def _provider_health_dimension() -> QualityDimension:
     # etc.) — a moderate lift with real regression risk to the 647+ test
     # baseline, judged out of scope for this pass. Reported honestly as
     # UNKNOWN/unavailable rather than fabricated.
+    if live_provider_sources:
+        return QualityDimension(
+            name="provider_health", raw_value=100.0, normalized_score=100.0, available=True,
+            reason=f"Live provider call succeeded and parsed this run: {list(live_provider_sources)}.",
+        )
+    if attempted_provider_sources:
+        return QualityDimension(
+            name="provider_health", raw_value=0.0, normalized_score=0.0, available=True,
+            reason=f"Required live provider returned no usable data this run: {list(attempted_provider_sources)}.",
+        )
     return QualityDimension(
         name="provider_health", raw_value=None, normalized_score=None, available=False,
-        reason="No provider-health/circuit-breaker tracking exists in this codebase yet (honest gap).",
+        reason="No structured provider call was applicable to this market.",
     )
 
 
@@ -271,6 +284,32 @@ def _specialized_model_reliability_dimension(
     )
 
 
+def _specialized_model_confidence_dimension(
+    specialized_estimates: list[SubmodelEstimate],
+) -> QualityDimension:
+    """Recover the model's own input-derived confidence from its weight.
+
+    Engine weights specialized models as ``0.45 * model_confidence``. The
+    confidence composite previously rewarded only the existence/reliability
+    of the production path, so a quant estimate with model confidence 35%
+    could still receive composite confidence above 80%. This dimension
+    restores the model's actual uncertainty without using probability size.
+    """
+    available = [s for s in specialized_estimates if s.available]
+    if not available:
+        return QualityDimension(
+            name="specialized_model_confidence", raw_value=None, normalized_score=None,
+            available=False, reason="No specialized model contributed.",
+        )
+    scores = [max(0.0, min(100.0, (s.weight / 0.45) * 100.0)) for s in available]
+    avg = sum(scores) / len(scores)
+    return QualityDimension(
+        name="specialized_model_confidence", raw_value=round(avg, 1),
+        normalized_score=round(avg, 1), available=True,
+        reason="Input-derived domain-model confidence recovered from its quality-scaled ensemble weight.",
+    )
+
+
 def _legacy_signal_dimension(dq: DataQualityBreakdown) -> QualityDimension:
     """Folds the pre-K1 `DataQualityBreakdown` (liquidity, caller-supplied
     news_agreement/data_quality_report_score, resolution_rules_present) in
@@ -335,6 +374,7 @@ def compute_freshness_score(
     latest_price_captured_at: str | None,
     now: datetime | None = None,
     price_signal_is_primary: bool = False,
+    structured_data_recency_score: float | None = None,
 ) -> tuple[float, str]:
     """Returns (aktualitaet 0..100, detail). `evidence_recency_weights` is the
     list of individual EvidenceFactor.recency_weight values (0..1, already
@@ -346,6 +386,10 @@ def compute_freshness_score(
     news freshness."""
     now = now or datetime.now(UTC)
     signals: list[tuple[float, float]] = []  # (score_0_100, weight)
+
+    if structured_data_recency_score is not None:
+        score = max(0.0, min(100.0, structured_data_recency_score))
+        signals.append((score, 0.8))
 
     if evidence_recency_weights:
         avg_recency = sum(evidence_recency_weights) / len(evidence_recency_weights)
@@ -388,6 +432,8 @@ def compute_data_quality_composite(
     eligible_specialized_models: tuple[str, ...],
     aktualitaet: float,
     resolution_semantics: ResolutionSemantics | None = None,
+    live_provider_sources: tuple[str, ...] = (),
+    attempted_provider_sources: tuple[str, ...] = (),
 ) -> QualityComposite:
     """J2: the genuine data_quality composite. Weights (documented, not
     fitted — no resolved-forecast history yet to fit against, same honesty
@@ -404,9 +450,8 @@ def compute_data_quality_composite(
                                               model actually get real data
       freshness                      0.10  — J1's real timestamp decay
 
-    provider_health is intentionally NOT weighted in (always UNKNOWN today,
-    see _provider_health_dimension) but is still reported in the breakdown
-    for transparency. model_agreement is a K1-confidence-specific dimension,
+    Provider health is weighted only when this forecast actually attempted
+    a structured provider call; otherwise it remains unavailable. Model agreement is a K1-confidence-specific dimension,
     not part of data_quality (agreement is about the estimate's robustness,
     not about how much/good data exists) — kept out of J2 deliberately.
     `resolution_semantics` is optional (defaults to None) so every existing
@@ -421,11 +466,11 @@ def compute_data_quality_composite(
         (_source_quality_independence_dimension(independent_evidence), 0.18),
         (_structured_data_availability_dimension(specialized_estimates, eligible_specialized_models), 0.15),
         (_freshness_dimension(aktualitaet), 0.10),
+        (_provider_health_dimension(live_provider_sources, attempted_provider_sources), 0.10),
     ]
     composite = _weighted_composite(dims, "data_quality (J2)")
-    # provider_health reported for transparency only, not weighted (see above).
     composite = QualityComposite(
-        dimensions=composite.dimensions + (_provider_health_dimension(),),
+        dimensions=composite.dimensions,
         score=composite.score, formula_detail=composite.formula_detail,
     )
     return composite
@@ -442,6 +487,8 @@ def compute_confidence_composite(
     deadline_phase_known: bool,
     legacy_data_quality: DataQualityBreakdown | None = None,
     resolution_semantics: ResolutionSemantics | None = None,
+    live_provider_sources: tuple[str, ...] = (),
+    attempted_provider_sources: tuple[str, ...] = (),
 ) -> QualityComposite:
     """K1: the genuine confidence composite — deliberately built from ONLY
     data-robustness/quality signals, never from the probability estimate's
@@ -486,13 +533,15 @@ def compute_confidence_composite(
         (_model_agreement_dimension(all_submodel_estimates), 0.15),
         (_proposition_clarity_dimension(proposition), 0.05),
         (_specialized_model_reliability_dimension(specialized_estimates), 0.10),
+        (_specialized_model_confidence_dimension(specialized_estimates), 0.20),
         (_resolution_semantics_clarity_dimension(resolution_semantics), 0.05),
+        (_provider_health_dimension(live_provider_sources, attempted_provider_sources), 0.05),
     ]
     if legacy_data_quality is not None:
         dims.append((_legacy_signal_dimension(legacy_data_quality), 0.10))
     composite = _weighted_composite(dims, "confidence (K1)")
     composite = QualityComposite(
-        dimensions=composite.dimensions + (_provider_health_dimension(),),
+        dimensions=composite.dimensions,
         score=composite.score, formula_detail=composite.formula_detail,
     )
     if not deadline_phase_known:

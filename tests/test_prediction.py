@@ -76,18 +76,18 @@ def test_edges_never_change_after_computation_are_consistent(conn) -> None:
     assert result.gross_yes_edge == expected_gross
 
 
-def test_strong_recommendation_for_large_edge(conn) -> None:
+def test_large_edge_without_supported_maturity_is_not_actionable(conn) -> None:
     _seed_resolved(conn, n_yes=45, n_no=5)  # 90% historical rate, big gap vs 0.3 market price
     result = compute_prediction(conn, "m4", "polymarket", "m4", "esports", 0.3, 200000, 95, 3, 0.9, True)
     assert result.net_yes_edge is not None and result.net_yes_edge > 0
-    assert result.recommendation in ("YES", "STRONG_YES")
+    assert result.recommendation == "INSUFFICIENT_DATA"
 
 
-def test_no_bet_for_tiny_edge(conn) -> None:
+def test_tiny_edge_without_supported_maturity_is_not_actionable(conn) -> None:
     _seed_resolved(conn, n_yes=10, n_no=10)  # 50/50 historical rate
     result = compute_prediction(conn, "m5", "polymarket", "m5", "esports", 0.5, 100000, 90, 1, 0.7, True)
     assert abs(result.net_yes_edge) < 0.08
-    assert result.recommendation == "NO_BET"
+    assert result.recommendation == "INSUFFICIENT_DATA"
 
 
 def test_poor_data_quality_lowers_confidence_relative_to_good_data(conn) -> None:

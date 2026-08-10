@@ -379,6 +379,7 @@ class PredictionResult:
     # provenance (like PriorProvenance) — not fitted against resolved-
     # outcome history, which doesn't exist yet.
     forecast_maturity: ForecastMaturity = "NO_FORECAST"
+    maturity_breakdown: tuple[dict, ...] = field(default_factory=tuple)
 
     # --- World State (steering point 9/21, additive) -----------------------
     # See prediction/world_state.py for the audit conclusion and exact
@@ -462,6 +463,7 @@ class PredictionResult:
             "historical_rejected_count": self.historical_rejected_count,
             "data_gaps": self.data_gaps.as_dict() if self.data_gaps else None,
             "forecast_maturity": self.forecast_maturity,
+            "maturity_breakdown": list(self.maturity_breakdown),
             "world_state": self.world_state.as_dict() if self.world_state else None,
             "proposition": self.proposition.as_dict() if self.proposition else None,
             "resolution_semantics": self.resolution_semantics.as_dict() if self.resolution_semantics else None,

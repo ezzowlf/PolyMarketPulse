@@ -48,7 +48,7 @@ def test_unavailable_specialized_model_does_not_create_forecast() -> None:
     assert status == "NO_FORECAST"
 
 
-def test_macro_only_estimate_flows_through_full_prediction(tmp_path: Path, monkeypatch) -> None:
+def test_macro_question_without_fred_stays_unavailable(tmp_path: Path, monkeypatch) -> None:
     storage = Storage(tmp_path / "macro-only.db")
     fetch_calls = []
 
@@ -77,9 +77,8 @@ def test_macro_only_estimate_flows_through_full_prediction(tmp_path: Path, monke
     repeated = compute_prediction(storage.connection, **kwargs)
 
     macro = next(item for item in result.submodel_estimates if item.name == "macro")
-    assert macro.available is True
-    assert result.independent_probability == macro.estimated_yes_probability
-    assert result.estimated_yes_probability is not None
-    assert result.forecast_status in {"INDEPENDENT_FORECAST", "LOW_DATA"}
-    assert repeated.independent_probability == result.independent_probability
+    assert macro.available is False
+    assert result.independent_probability is None
+    assert result.forecast_status == "NO_FORECAST"
+    assert repeated.independent_probability is None
     assert len(fetch_calls) == 1

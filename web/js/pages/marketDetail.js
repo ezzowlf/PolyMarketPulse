@@ -163,8 +163,21 @@ function _headlinePanelHtml(market, opp, pred) {
   const p = pred || {};
   const statusLabel = FORECAST_STATUS_LABEL_DE[p.forecast_status] || p.forecast_status || "Datenlage unzureichend";
   const hasIndependent = p.independent_probability !== null && p.independent_probability !== undefined;
+  const maturityTitle = ["SUPPORTED_FORECAST", "MATURE_FORECAST"].includes(p.forecast_maturity)
+    ? "Warum belastbar?"
+    : "Warum noch keine belastbare Prognose?";
+  const maturityRows = (p.maturity_breakdown || []).map((item) => `
+    <tr><td>${item.dimension}</td><td><strong>${item.status}</strong></td><td class="sub">${item.reason}</td></tr>
+  `).join("");
+  const maturityDetails = maturityRows ? `
+    <details open>
+      <summary>${maturityTitle}</summary>
+      <table><thead><tr><th>Prüfung</th><th>Status</th><th>Begründung</th></tr></thead><tbody>${maturityRows}</tbody></table>
+    </details>
+  ` : "";
   return `
     <h2 style="margin:0 0 4px">${market.question}</h2>
+    ${maturityDetails}
     <div class="widget-grid">
       ${widgetCard({ title: "MARKT", value: fmtPct(p.market_yes_probability) })}
       ${widgetCard({ title: "UNABHÄNGIG", value: hasIndependent ? fmtPct(p.independent_probability) : "—" })}

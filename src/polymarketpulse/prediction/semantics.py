@@ -503,8 +503,7 @@ def _detect_event_type(text: str) -> tuple[str | None, str]:
 def _extract_subject(question: str) -> str | None:
     # First capitalized run of words (naive proper-noun heuristic) — good
     # enough for "Trump out as President...", "Will Senator X resign...".
-    match = re.search(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b", question)
-    if match:
+    for match in re.finditer(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b", question):
         candidate = match.group(1)
         if candidate.lower() not in ("will", "the", "is"):
             return candidate
@@ -642,7 +641,13 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
             threshold = float(threshold_match.group(2).replace(",", ""))
         except ValueError:
             threshold = None
-        unit = "%" if threshold_match.group(3) else None
+        suffix = (threshold_match.group(3) or "").lower()
+        if "$" in threshold_match.group(0):
+            unit = "USD"
+        elif suffix in ("%", "percent"):
+            unit = "%"
+        else:
+            unit = None
 
     yes_terms: tuple[str, ...] = ()
     no_terms: tuple[str, ...] = ()

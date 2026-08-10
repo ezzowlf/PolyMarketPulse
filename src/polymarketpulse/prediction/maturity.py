@@ -51,6 +51,77 @@ def _weak_or_context_only(result: PredictionResult) -> bool:
     return not any(e.relation_label in strong_tiers for e in all_items)
 
 
+def _has_live_structured_domain_path(result: PredictionResult) -> bool:
+    """True only for a production model backed by state fetched this run."""
+    available = {
+        s.name for s in result.submodel_estimates
+        if s.available and s.estimated_yes_probability is not None
+    }
+    if not available.intersection({"macro", "quant"}) or result.world_state is None:
+        return False
+    sources = {v.source for v in result.world_state.state_variables}
+    return bool(("macro" in available and "fred" in sources) or ("quant" in available and "coingecko" in sources))
+
+
+def build_maturity_breakdown(result: PredictionResult) -> tuple[dict, ...]:
+    """Itemized, domain-aware explanation of the maturity decision."""
+    proposition = result.proposition
+    resolution = result.resolution_semantics
+    structured = _has_live_structured_domain_path(result)
+    domain = proposition.domain if proposition else None
+    direct = _direct_tier_evidence_count(result)
+    evidence_items = ()
+    if result.independent_evidence is not None:
+        evidence_items = (
+            *result.independent_evidence.evidence_for_yes,
+            *result.independent_evidence.evidence_for_no,
+        )
+    relevant_evidence = sum(
+        item.relation_label in ("DIRECT_YES", "DIRECT_NO", "SUPPORTS_YES", "SUPPORTS_NO")
+        for item in evidence_items
+    )
+    gaps = result.data_gaps
+    high_critical = 0 if gaps is None else gaps.high_gaps + gaps.critical_gaps
+    verdict = result.divergence_audit.verdict if result.divergence_audit else None
+    path = result.world_state.path_to_resolution if result.world_state else None
+    path_known = bool(path and path.current_state != "UNKNOWN")
+
+    def row(name: str, status: str, reason: str) -> dict:
+        return {"dimension": name, "status": status, "reason": reason}
+
+    evidence_status = "N/A" if structured and domain in ("MACRO", "CRYPTO") else (
+        "PASS" if relevant_evidence else "FAIL"
+    )
+    path_status = "N/A" if domain not in ("POLITICS", "GEOPOLITICS") else (
+        "PASS" if path_known else "FAIL"
+    )
+    sources = {v.source for v in result.world_state.state_variables} if result.world_state else set()
+    return (
+        row("SEMANTICS", "PASS" if proposition and proposition.proposition_status == "CLEAR" else "FAIL",
+            f"proposition_status={proposition.proposition_status if proposition else 'missing'}"),
+        row("RESOLUTION", "PASS" if resolution and resolution.confidence >= 0.7 else "FAIL",
+            f"resolution confidence={resolution.confidence if resolution else None}"),
+        row("WORLD_STATE", "PASS" if structured or path_known else "FAIL",
+            f"structured sources={sorted(sources)}; path state known={path_known}"),
+        row("DOMAIN_MODEL", "PASS" if any(s.available and s.name in {"macro", "quant", "politics", "geopolitics", "sports"} for s in result.submodel_estimates) else "FAIL",
+            "At least one eligible specialized model produced a numeric estimate."),
+        row("LIVE_PROVIDER", "PASS" if structured else ("N/A" if domain not in ("MACRO", "CRYPTO") else "FAIL"),
+            f"live structured provider sources={sorted(sources)}"),
+        row("EVIDENCE", evidence_status,
+            f"direct={direct}, relevant direct/support={relevant_evidence}; optional for live structured macro/quant"),
+        row("PATH_TO_RESOLUTION", path_status,
+            f"domain={domain}, current path state={path.current_state if path else None}"),
+        row("UNCERTAINTY", "PASS" if result.confidence_score >= 70 else "FAIL",
+            f"confidence={result.confidence_score:.1f}/100"),
+        row("DATA_QUALITY", "PASS" if result.data_quality_composite and result.data_quality_composite.score >= 60 else "FAIL",
+            f"data quality={result.data_quality_composite.score if result.data_quality_composite else None}"),
+        row("BLOCKING_GAPS", "PASS" if high_critical == 0 else "FAIL",
+            f"high+critical gaps={high_critical}"),
+        row("DIVERGENCE", "PASS" if verdict != "REJECT" else "FAIL",
+            f"verdict={verdict}"),
+    )
+
+
 def classify_forecast_maturity(result: PredictionResult) -> ForecastMaturity:
     """Classify a completed PredictionResult into the Forecast Maturity
     taxonomy. Pure function of already-computed fields — never recomputes
@@ -120,14 +191,15 @@ def classify_forecast_maturity(result: PredictionResult) -> ForecastMaturity:
     divergence_verdict = result.divergence_audit.verdict if result.divergence_audit is not None else None
 
     # --- 2. CONTEXT_ONLY ---------------------------------------------------
-    thin_single_case = comparable_n <= 1 and (
+    structured_domain_path = _has_live_structured_domain_path(result)
+    thin_single_case = not structured_domain_path and comparable_n <= 1 and (
         result.independent_evidence is None or not result.independent_evidence.available
     )
     if direct_count == 0 and (_weak_or_context_only(result) or thin_single_case):
         return "CONTEXT_ONLY"
 
     # --- 3. HYPOTHESIS ------------------------------------------------------
-    if confidence < 40 or (comparable_n < 3 and direct_count == 0):
+    if confidence < 40 or (not structured_domain_path and comparable_n < 3 and direct_count == 0):
         return "HYPOTHESIS"
 
     # --- 6. MATURE_FORECAST (checked before 4/5 since it is a strict

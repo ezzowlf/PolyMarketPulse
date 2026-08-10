@@ -34,6 +34,7 @@ def main() -> None:
     storage = Storage(db_path, auto_migrate=False)
 
     dist: dict[str, int] = {}
+    composition: dict[str, int] = {}
     rows = []
     errors = []
     for mid in MARKET_IDS:
@@ -45,14 +46,33 @@ def main() -> None:
         maturity = result.forecast_maturity
         dist[maturity] = dist.get(maturity, 0) + 1
         rows.append((mid, maturity, result.forecast_status, result.independent_probability))
+        names = {c.source for c in result.contribution_breakdown if c.available}
+        has_history = "history" in names
+        has_evidence = "independent_evidence" in names
+        has_domain = bool(names & {"macro", "quant", "politics", "geopolitics", "sports"})
+        if sum((has_history, has_evidence, has_domain)) >= 2:
+            label = "true_multi_model"
+        elif has_history:
+            label = "history_only"
+        elif has_evidence:
+            label = "evidence_only"
+        elif has_domain:
+            label = "domain_only"
+        else:
+            label = "no_independent_model"
+        composition[label] = composition.get(label, 0) + 1
 
     print("=== forecast_maturity distribution (AFTER, post-fix) ===")
-    for k in ("NO_FORECAST", "PARTIAL_FORECAST", "SUPPORTED_FORECAST", "MATURE_FORECAST"):
+    for k in ("NO_FORECAST", "CONTEXT_ONLY", "HYPOTHESIS", "PARTIAL_FORECAST", "SUPPORTED_FORECAST", "MATURE_FORECAST"):
         print(f"  {k}: {dist.get(k, 0)}")
     print(f"  total queried: {len(rows)} (of {len(MARKET_IDS)} requested), errors: {len(errors)}")
     if errors:
         for mid, err in errors:
             print(f"  ERROR {mid}: {err}")
+
+    print("\n=== forecast composition ===")
+    for label in ("history_only", "domain_only", "evidence_only", "true_multi_model", "no_independent_model"):
+        print(f"  {label}: {composition.get(label, 0)}")
 
     print("\n=== CENTRAL_BANKS markets (must remain SUPPORTED_FORECAST, unchanged) ===")
     for mid, maturity, status, ip in rows:

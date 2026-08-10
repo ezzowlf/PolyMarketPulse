@@ -423,12 +423,12 @@ def test_insufficient_data_recommendation_explained_correctly(storage: Storage) 
     assert response.explanation.direction == "NONE"
 
 
-def test_no_bet_recommendation_explained_correctly(storage: Storage) -> None:
+def test_non_supported_forecast_is_research_only(storage: Storage) -> None:
     _seed_resolved_history(storage, n_yes=5, n_no=5)
     market_id = _seed_market(storage, yes_price=0.5)
     disabled = replace(Settings.load(), database_path=Path("x"), ai_enabled=False)
     response = ai_service.explain_recommendation(storage, disabled, market_id)
-    assert response.prediction["recommendation"] == "NO_BET"
+    assert response.prediction["recommendation"] == "INSUFFICIENT_DATA"
     assert response.explanation.direction == "NONE"
 
 

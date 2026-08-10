@@ -43,7 +43,7 @@ from .evidence import compute_independent_evidence
 from .history import compute_history_estimate
 from .manipulation import compute_manipulation_risk
 from .market_flow import load_flow_metrics_from_db
-from .maturity import classify_forecast_maturity
+from .maturity import build_maturity_breakdown, classify_forecast_maturity
 from .momentum import compute_momentum_estimate
 from .news import collect_news_evidence, compute_news_estimate
 from .reaction_lag import STATUS_REACTED, compute_market_reaction_lag
@@ -523,11 +523,15 @@ def compute_prediction(
     # correctly fall back to their no-data behavior for those markets.
     quant_current_price = None
     quant_daily_volatility = None
+    attempted_provider_sources: list[str] = []
+    live_provider_sources: list[str] = []
     if as_of is None and proposition.event_type in ("price_above", "price_below") and proposition.asset:
         coingecko_id = resolve_coingecko_id(proposition.asset)
         if coingecko_id:
+            attempted_provider_sources.append("coingecko")
             price_data = _fetch_quant_snapshot(coingecko_id)
             if price_data is not None:
+                live_provider_sources.append("coingecko")
                 quant_current_price = price_data.current_price
                 quant_daily_volatility = price_data.daily_volatility
 
@@ -540,8 +544,10 @@ def compute_prediction(
     # safety note above.
     macro_snapshot = None
     if as_of is None and proposition.event_type in ("rate_cut", "rate_hike", "rate_hold"):
+        attempted_provider_sources.append("fred")
         macro_snapshot = _fetch_macro_snapshot()
         if macro_snapshot is not None:
+            live_provider_sources.append("fred")
             try:
                 _persist_macro_snapshot(conn, macro_snapshot)
             except sqlite3.Error:
@@ -687,6 +693,7 @@ def compute_prediction(
     _price_is_primary = proposition.event_type in ("price_above", "price_below")
     aktualitaet, freshness_detail = compute_freshness_score(
         _evidence_recency, _latest_price_captured_at, now=now, price_signal_is_primary=_price_is_primary,
+        structured_data_recency_score=100.0 if quant_current_price is not None else None,
     )
     reasoning.append(freshness_detail)
 
@@ -729,6 +736,8 @@ def compute_prediction(
         comparable_sample_size=comparable_sample_size, independent_evidence=independent_evidence,
         specialized_estimates=specialized_estimates, eligible_specialized_models=routing.eligible_models,
         aktualitaet=aktualitaet, resolution_semantics=resolution_semantics,
+        live_provider_sources=tuple(live_provider_sources),
+        attempted_provider_sources=tuple(attempted_provider_sources),
     )
     confidence_composite = compute_confidence_composite(
         proposition=proposition, history_uncertainty=history_uncertainty,
@@ -736,6 +745,8 @@ def compute_prediction(
         specialized_estimates=specialized_estimates, all_submodel_estimates=all_submodels,
         aktualitaet=aktualitaet, deadline_phase_known=resolution_date is not None,
         legacy_data_quality=dq, resolution_semantics=resolution_semantics,
+        live_provider_sources=tuple(live_provider_sources),
+        attempted_provider_sources=tuple(attempted_provider_sources),
     )
     # K1: the composite score IS the production confidence_score — this is
     # the actual rebuild, not just an additive side-channel. The legacy
@@ -1027,4 +1038,8 @@ def compute_prediction(
     # reads confidence/data_quality/data_gaps/divergence_audit, all of which
     # only exist once `result` is built) — see maturity.py for the exact
     # rules. dataclasses.replace keeps PredictionResult frozen/immutable.
-    return _dataclass_replace(result, forecast_maturity=classify_forecast_maturity(result))
+    maturity = classify_forecast_maturity(result)
+    result = _dataclass_replace(result, forecast_maturity=maturity)
+    if maturity not in ("SUPPORTED_FORECAST", "MATURE_FORECAST"):
+        result = _dataclass_replace(result, recommendation="INSUFFICIENT_DATA")
+    return _dataclass_replace(result, maturity_breakdown=build_maturity_breakdown(result))

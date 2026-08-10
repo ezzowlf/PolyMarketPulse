@@ -360,7 +360,7 @@ def test_quant_unsupported_asset():
     assert "not supported" in result2.reason.lower()
 
 
-def test_quant_expired_deadline():
+def test_quant_expired_deadline_without_point_in_time_observation():
     """Deadline expired — outcome determined."""
     result = analyze_quant(
         text="Will BTC be above 100k by December?",
@@ -372,9 +372,9 @@ def test_quant_expired_deadline():
         historical_volatility=0.02,
         deadline="2025-12-31",  # Past!
     )
-    assert result.available is True
-    assert result.probability is not None
-    assert result.probability < 0.2  # Deadline expired, threshold not reached
+    assert result.available is False
+    assert result.probability is None
+    assert "point-in-time" in result.reason
 
 
 # --- Sports Model Tests -----------------------------------------------------

@@ -342,6 +342,10 @@ def test_prediction_endpoint_returns_binding_values(client: TestClient) -> None:
     assert data["recommendation"] in (
         "STRONG_YES", "YES", "WATCH_YES", "NO_BET", "WATCH_NO", "NO", "STRONG_NO", "INSUFFICIENT_DATA",
     )
+    assert data["maturity_breakdown"]
+    assert {item["dimension"] for item in data["maturity_breakdown"]} >= {
+        "SEMANTICS", "RESOLUTION", "WORLD_STATE", "DOMAIN_MODEL", "UNCERTAINTY", "DIVERGENCE",
+    }
 
 
 def test_prediction_endpoint_unknown_market_returns_424(client: TestClient) -> None:
