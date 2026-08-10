@@ -96,6 +96,24 @@ pytest -q
 ruff check .
 ```
 
+### HTTPS-Zertifikate unter Windows
+
+Alle Provider behalten vollständige TLS-Zertifikatsprüfung. Ohne weitere
+Konfiguration nutzt die Anwendung über `truststore` den nativen
+Windows-Zertifikatsspeicher; damit funktionieren auch lokal administrierte
+Unternehmens- oder Security-Proxy-CAs, sofern Windows ihnen vertraut.
+
+Falls bewusst eine zusätzliche PEM-Datei verwendet werden soll, kann ihr Pfad
+über `POLYMARKETPULSE_CA_BUNDLE`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` oder
+`NODE_EXTRA_CA_CERTS` gesetzt werden. Der Pfad bleibt lokale Konfiguration und
+darf nicht committed werden. `verify=False` wird nirgendwo verwendet.
+
+Die reale Provider-Matrix lässt sich ohne Secrets prüfen mit:
+
+```powershell
+python scripts/smoke_test_providers.py
+```
+
 ## Telegram (optional, standardmäßig aus)
 
 Telegram-Versand ist nur aktiv, wenn **beide** Bedingungen erfüllt sind:

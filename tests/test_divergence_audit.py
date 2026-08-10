@@ -145,7 +145,7 @@ def test_large_divergence_weak_evidence_yields_reject_and_suppression(storage: S
     assert by_name["evidentiary_sufficiency"].hard_fail is True
     # Suppression behavior preserved from Phase B4.
     assert result.forecast_status == "FORECAST_SUPPRESSED"
-    assert result.independent_probability is None
+    assert result.independent_probability is not None
     assert result.forecast_suppression_reason is not None
 
 

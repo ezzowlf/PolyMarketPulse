@@ -59,10 +59,10 @@ def classify_forecast_maturity(result: PredictionResult) -> ForecastMaturity:
     Exact rules (evaluated top to bottom, first match wins):
 
     1. NO_FORECAST
-       independent_probability is None. Either nothing independent was
-       computed at all, or the divergence red-team audit REJECTed the
-       forecast (engine.py sets independent_probability=None on REJECT) —
-       either way, there is no independent number to stand behind.
+       independent_probability is None, or the divergence red-team audit
+       rejected publication (`forecast_status=FORECAST_SUPPRESSED`). The
+       underlying market-blind estimate remains observable in the latter
+       case, but cannot mature into an opportunity.
 
     2. CONTEXT_ONLY
        An independent_probability exists but the evidence behind it is
@@ -104,7 +104,7 @@ def classify_forecast_maturity(result: PredictionResult) -> ForecastMaturity:
        reported honestly rather than loosened to make the bucket non-empty.
     """
     # --- 1. NO_FORECAST ---------------------------------------------------
-    if result.independent_probability is None:
+    if result.independent_probability is None or result.forecast_status == "FORECAST_SUPPRESSED":
         return "NO_FORECAST"
 
     confidence = result.confidence_score

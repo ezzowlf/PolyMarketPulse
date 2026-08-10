@@ -836,7 +836,7 @@ def compute_prediction(
     # Replaces Phase B4's binary evidence_is_strong bool with a real,
     # itemized audit (see divergence_audit.py for the per-check breakdown
     # and verdict logic). REJECT behaves exactly like the old suppression
-    # path (independent_probability -> None, status -> FORECAST_SUPPRESSED);
+    # path (status -> FORECAST_SUPPRESSED, recommendation blocked);
     # WARN leaves the forecast standing but attaches the audit for
     # visibility; PASS attaches the audit with no suppression. The audit is
     # only even invoked (by audit_divergence itself) when the gap exceeds
@@ -865,7 +865,6 @@ def compute_prediction(
             f"Failing checks: {[c.name for c in divergence_audit.checks if c.verdict == 'REJECT']}."
         )
         reasoning.append(forecast_suppression_reason)
-        independent_probability = None
         forecast_status = "FORECAST_SUPPRESSED"
     elif divergence_audit.verdict == "WARN":
         reasoning.append(

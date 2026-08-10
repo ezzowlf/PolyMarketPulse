@@ -143,7 +143,7 @@ def test_hormuz_weak_heuristic_evidence_large_divergence_is_rejected_and_suppres
         assert sufficiency.verdict == "REJECT"
         assert sufficiency.hard_fail is True
         assert result.forecast_status == "FORECAST_SUPPRESSED"
-        assert result.independent_probability is None
+        assert result.independent_probability is not None
         assert result.forecast_suppression_reason is not None
     else:
         # Even weaker than the REJECT fixture above (e.g. the WEAK-tier

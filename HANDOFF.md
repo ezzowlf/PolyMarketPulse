@@ -1,5 +1,17 @@
 # HANDOFF
 
+## THIS ROUND (newest) - permanent Windows CA/TLS trust and live provider finalization
+
+Starting HEAD `f5ee05b`. HTTPS now uses the Windows/system trust store through `truststore` by default; an explicit `POLYMARKETPULSE_CA_BUNDLE` (or the supported conventional CA environment variables) augments the certifi bundle. TLS verification remains enabled everywhere; no `verify=False` fallback was introduced. A real provider smoke matrix now distinguishes connectivity, TLS, HTTP, parsing, item count, latency, live success, rate limiting, parse failure, and remote-protocol failure without printing secrets or certificate paths.
+
+Live verification: Gamma, CLOB, Polymarket Data, CoinGecko, Federal Reserve RSS, ECB RSS, White House RSS, UN RSS, SEC RSS, Manifold, and PredictIt succeeded. GDELT returned honest HTTP 429/degraded-rate-limited. State Department returned HTTP 200 but non-XML content and is reported as parse-failed. FRED no longer fails certificate validation but its server/proxy closes the connection (`RemoteProtocolError`) after about 19 seconds; the same endpoint also failed outside Python, so this is retained as an honest upstream transport failure, not bypassed. Positive/negative provider-cache TTL and recovery are covered by tests.
+
+The exact same 30-market acceptance set completed with 0 runtime errors: before 27 `NO_FORECAST` / 3 `CONTEXT_ONLY`; after 23 `NO_FORECAST` / 7 `CONTEXT_ONLY`; still 0 `SUPPORTED` and 0 `MATURE`. The four additional context-only results are real BTC threshold markets using live CoinGecko spot/volatility state. Fed stays context-only using text evidence while FRED state variables remain honestly absent. Trump and Hormuz remain `NO_FORECAST` without independent evidence. A real news fetch processed 120 items, inserted 12 new articles, linked one relevant White House article, and correctly created no quantitative claim or mature forecast from that generic story.
+
+Correctness fixes kept deliberately narrow: market-price divergence suppression no longer destroys the independently computed probability, so market-blind reruns preserve the same independent number while only the market-dependent suppression status changes. Maturity now remains `NO_FORECAST` when the forecast is suppressed. `/provider-health` was repaired by adding the missing storage read method and an API regression test.
+
+Real API/browser acceptance: `/health`, `/provider-health`, Fed/BTC predictions, data gaps, and news returned HTTP 200 without 500s. Browser detail pages for Fed, BTC, Trump, and Hormuz rendered `API: ok`, honest maturity/source/data-quality values, and no `NaN`; an additional stored sports detail page loaded without an HTTP error. Final full-suite and release evidence are recorded in the commit/turn result.
+
 Checkpoint file per the project owner's steering instruction. Not a roadmap — update after coherent milestones only.
 
 ## THIS ROUND (newest) — Proof-of-Edge, completed: real backfill (100/126 markets) + real point-in-time-safe backtest run. Answer: NO measurable edge found this round (0/100 real forecasts produced).

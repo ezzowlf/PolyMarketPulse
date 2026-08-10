@@ -236,6 +236,14 @@ def test_providers_status_endpoint(client: TestClient) -> None:
     assert poly["markets_stored"] == 1
 
 
+def test_provider_health_endpoint_returns_observed_rows(client: TestClient) -> None:
+    response = client.get("/provider-health")
+
+    assert response.status_code == 200
+    assert response.json()["provider"] == []
+    assert response.json()["zusammenfassung"] == {}
+
+
 def test_data_gaps_endpoint_uses_canonical_prediction_report(
     client: TestClient, monkeypatch,
 ) -> None:

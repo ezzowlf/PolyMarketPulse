@@ -179,12 +179,13 @@ def test_divergence_suppressed_when_evidence_is_weak(storage: Storage) -> None:
     )
     # Market price is far from the (already-dampened, low) independent
     # estimate, and there is no historical baseline and no direct-tier
-    # evidence -> must be suppressed, not reported as a raw number.
+    # evidence -> recommendation must be suppressed while the market-blind
+    # diagnostic estimate remains observable.
     result = compute_prediction(
         storage.connection, "weak-divergence", "polymarket", "weak-divergence", "geopolitics",
         0.85, 50000, 90, 0, None, True, question=market.question,
     )
-    assert result.independent_probability is None
+    assert result.independent_probability is not None
     assert result.forecast_status == "FORECAST_SUPPRESSED"
     assert result.forecast_suppression_reason is not None
     assert "%" in result.forecast_suppression_reason

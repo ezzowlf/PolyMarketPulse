@@ -243,6 +243,19 @@ class Storage:
             return None
         return data_sources.row_to_provider_health(row)
 
+    def get_all_provider_health(self) -> list[dict]:
+        """Load every observed provider-health row for the API dashboard."""
+        rows = self.connection.execute(
+            """
+            SELECT source_id, last_success, last_failure, last_failure_reason,
+                   last_http_status, last_latency_ms, consecutive_failures,
+                   data_age_seconds, items_fetched, parse_failures
+            FROM provider_health
+            ORDER BY source_id
+            """
+        ).fetchall()
+        return [data_sources.row_to_provider_health(row).as_dict() for row in rows]
+
     def save_macro_snapshot(self, snapshot) -> None:
         """Persists the (series_id, observation_date, value) points behind a
         real (or realistically-mocked) providers/fred.py MacroSnapshot into

@@ -83,6 +83,26 @@ def test_engine_estimate_is_not_forced_toward_market_price_when_history_availabl
     assert result.estimated_yes_probability > 0.5  # pulled toward the real 90% historical rate, not stuck at 0.2
 
 
+def test_independent_probability_survives_market_dependent_suppression(conn) -> None:
+    for i in range(8):
+        pmid = f"blind-yes-{i}"
+        conn.execute("INSERT INTO markets VALUES (?, 'polymarket', ?, 'esports')", (pmid, pmid))
+        conn.execute("INSERT INTO market_resolutions VALUES ('polymarket', ?, 'resolved', 'Yes')", (pmid,))
+    for i in range(2):
+        pmid = f"blind-no-{i}"
+        conn.execute("INSERT INTO markets VALUES (?, 'polymarket', ?, 'esports')", (pmid, pmid))
+        conn.execute("INSERT INTO market_resolutions VALUES ('polymarket', ?, 'resolved', 'No')", (pmid,))
+    conn.commit()
+
+    results = [
+        compute_prediction(conn, "blind", "polymarket", "blind", "esports", price, 100000, 90, 0, None, True)
+        for price in (0.05, 0.20, 0.50, 0.80, 0.95)
+    ]
+
+    assert len({result.independent_probability for result in results}) == 1
+    assert results[0].independent_probability is not None
+
+
 # --- Test 2 + 3: edge math is exact, zero stays zero ------------------------
 
 def test_edge_is_mathematically_exact_difference() -> None:

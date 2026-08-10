@@ -81,6 +81,15 @@ def test_get_ca_bundle_ignores_env_var_pointing_at_missing_file(monkeypatch, tmp
     assert get_ca_bundle() == certifi.where()
 
 
+def test_project_ca_bundle_missing_file_is_reported(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("POLYMARKETPULSE_CA_BUNDLE", str(tmp_path / "missing.pem"))
+    for var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS"):
+        monkeypatch.delenv(var, raising=False)
+
+    with pytest.raises(FileNotFoundError, match="POLYMARKETPULSE_CA_BUNDLE"):
+        get_ssl_context()
+
+
 def test_get_ca_bundle_combines_certifi_with_extra_ca_when_env_var_set(monkeypatch, tmp_path) -> None:
     extra_ca = tmp_path / "extra-ca.pem"
     extra_ca.write_bytes(b"-----BEGIN CERTIFICATE-----\nFAKE-TEST-CA-ONLY\n-----END CERTIFICATE-----\n")
@@ -120,3 +129,13 @@ def test_get_ssl_context_returns_ssl_context(monkeypatch) -> None:
     assert isinstance(ctx, ssl.SSLContext)
     assert ctx.verify_mode == ssl.CERT_REQUIRED
     _reset_ca_cache()
+
+
+def test_get_ssl_context_uses_system_trust_without_explicit_ca(monkeypatch) -> None:
+    sentinel = ssl.create_default_context()
+    for var in security._EXTRA_CA_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(security.truststore, "SSLContext", lambda protocol: sentinel)
+
+    assert get_ssl_context() is sentinel
+    assert security.get_tls_trust_source() == "system_trust_store"

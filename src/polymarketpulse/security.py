@@ -17,6 +17,7 @@ import threading
 from urllib.parse import urlparse
 
 import certifi
+import truststore
 
 ALLOWED_SCHEMES = {"http", "https"}
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5 MB — generous for RSS/JSON, blocks runaway downloads
@@ -75,10 +76,33 @@ _ca_bundle_cache_key: tuple[str | None, str | None, str | None] | None = None
 
 # Well-known environment variables used by many tools/languages (Node.js's
 # NODE_EXTRA_CA_CERTS, OpenSSL's SSL_CERT_FILE, and requests/urllib3's
-# REQUESTS_CA_BUNDLE) to add an extra, OS-already-trusted root CA to the
-# default trust store. We honor the same convention here rather than
-# inventing a project-specific one.
-_EXTRA_CA_ENV_VARS = ("NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE")
+# REQUESTS_CA_BUNDLE) plus one explicit project override. The default path
+# uses the native OS trust store; these variables are only needed when an
+# operator intentionally supplies a separate PEM file.
+_EXTRA_CA_ENV_VARS = (
+    "POLYMARKETPULSE_CA_BUNDLE",
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+)
+
+
+def _configured_extra_ca() -> str | None:
+    """Return the first readable explicitly configured CA file.
+
+    A project-specific path is an operator instruction, so a missing file is
+    reported instead of silently falling back. Missing conventional variables
+    are ignored because other installed tools may own them independently.
+    """
+    for var in _EXTRA_CA_ENV_VARS:
+        candidate = os.environ.get(var)
+        if not candidate:
+            continue
+        if os.path.isfile(candidate):
+            return candidate
+        if var == "POLYMARKETPULSE_CA_BUNDLE":
+            raise FileNotFoundError(f"{var} points to a missing CA file")
+    return None
 
 
 def get_ca_bundle() -> str:
@@ -95,25 +119,16 @@ def get_ca_bundle() -> str:
     not specific to any one vendor or machine.
 
     This helper NEVER weakens verification and NEVER hardcodes a vendor or
-    path. It only *adds* trust for one extra CA when the operator has
-    explicitly pointed to it via a well-known, standard environment
-    variable (NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, or REQUESTS_CA_BUNDLE —
-    conventions already used by Node.js, OpenSSL, and requests/urllib3 for
-    exactly this scenario). If none of those variables are set, or the
-    file they point to doesn't exist/isn't readable, this returns plain
-    certifi with no behavior change at all — the default, safe path.
+    path. It only *adds* trust for one extra CA when the operator explicitly
+    points to it. `get_ssl_context()` normally uses the native OS trust store;
+    this bundle is the explicit-file path and certifi fallback.
 
     Certificate verification (`verify=...`) is always performed; this
     function only chooses *which* trusted bundle to verify against.
     """
     global _ca_bundle_cache, _ca_bundle_cache_key
 
-    extra_path = None
-    for var in _EXTRA_CA_ENV_VARS:
-        candidate = os.environ.get(var)
-        if candidate and os.path.isfile(candidate):
-            extra_path = candidate
-            break
+    extra_path = _configured_extra_ca()
 
     certifi_path = certifi.where()
     if extra_path is None:
@@ -145,10 +160,27 @@ def get_ca_bundle() -> str:
 
 
 def get_ssl_context() -> ssl.SSLContext:
-    """Same trust decision as `get_ca_bundle()`, wrapped as an `ssl.SSLContext`
-    for passing to `httpx`'s `verify=` (avoids httpx's deprecation warning for
-    passing a bare path string, without changing which CAs are trusted)."""
-    return ssl.create_default_context(cafile=get_ca_bundle())
+    """Return a verification-enforcing context shared by every HTTP client.
+
+    An explicitly configured extra CA is combined with certifi for portable,
+    deterministic behavior. Otherwise truststore uses the native OS trust
+    store (Windows Certificate Store on Windows), which includes locally
+    administered enterprise/AV interception roots. If native trust cannot be
+    initialized, certifi remains the safe cross-platform fallback.
+    """
+    if _configured_extra_ca() is not None:
+        return ssl.create_default_context(cafile=get_ca_bundle())
+    try:
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except (OSError, RuntimeError):
+        return ssl.create_default_context(cafile=certifi.where())
+
+
+def get_tls_trust_source() -> str:
+    """Non-sensitive diagnostic label for smoke tests and health reporting."""
+    if _configured_extra_ca() is not None:
+        return "configured_ca_plus_certifi"
+    return "system_trust_store"
 
 
 def mask_secret(value: str | None) -> str:
