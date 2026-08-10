@@ -1018,6 +1018,34 @@ def _migration_019_macro_observations(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _migration_020_polymarket_price_history_backfill(conn: sqlite3.Connection) -> None:
+    """Additive: real historical Polymarket CLOB price points backfilled for
+    already-resolved markets (see scripts/backfill_polymarket_price_history.py).
+    Deliberately a NEW table rather than reusing market_snapshots — that
+    table's schema (NOT NULL run_id FK to scanner_runs, NOT NULL liquidity/
+    volume_24h/volume_total/opportunity_score/reasons) models a *live scan
+    snapshot* and does not fit a bare (timestamp, price) point pulled from
+    the CLOB /prices-history endpoint. captured_at is the REAL historical
+    timestamp the price point represents (from the API's "t" field), never
+    the fetch time. Purely additive: no existing table/column touched."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS polymarket_price_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_id TEXT NOT NULL REFERENCES markets(market_id),
+            condition_id TEXT,
+            token_id TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            yes_price REAL NOT NULL,
+            source TEXT NOT NULL DEFAULT 'polymarket_backfill',
+            fetched_at TEXT NOT NULL,
+            UNIQUE(market_id, token_id, captured_at)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_polymarket_price_history_market_captured
+        ON polymarket_price_history(market_id, captured_at);
+    """)
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1038,6 +1066,7 @@ MIGRATIONS: list[Migration] = [
     (17, "provider_health_tracking", _migration_017_provider_health_tracking),
     (18, "claim_extraction_and_verification", _migration_018_claim_extraction_and_verification),
     (19, "macro_observations", _migration_019_macro_observations),
+    (20, "polymarket_price_history_backfill", _migration_020_polymarket_price_history_backfill),
 ]
 
 

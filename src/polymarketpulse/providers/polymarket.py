@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover - truststore is a declared dependency
     pass
 
 from ..models import Market, ResolutionStatus
-from ..security import get_ssl_context
+from ..security import MAX_RESPONSE_BYTES, SSRFError, assert_safe_url, get_ssl_context
 from .base import (
     Page,
     PredictionMarketProvider,
@@ -345,3 +345,60 @@ class PolymarketProvider(PredictionMarketProvider):
             cursor=cursor,
             page_size=min(100, limit),
         )
+
+
+_CLOB_BASE_URL = "https://clob.polymarket.com"
+
+
+def fetch_price_history(
+    token_id: str,
+    start_ts: int,
+    end_ts: int,
+    fidelity: int = 60,
+    timeout: float = 15.0,
+) -> list[tuple[int, float]] | None:
+    """Fetch real historical YES-price points for a single CLOB token from
+    Polymarket's public prices-history endpoint.
+
+    `token_id` MUST be the CLOB token id (Market.yes_token_id in this repo's
+    schema) — confirmed by a live test call that the `market` query param on
+    this endpoint takes the token id, not the condition_id (condition_id
+    returns an empty history). `fidelity` is in minutes.
+
+    Returns a list of (unix_timestamp, yes_price) sorted by timestamp, or
+    None on any network/parse failure or SSRF-guard rejection. Never
+    fabricates data — an empty result from the API is returned as an empty
+    list (distinct from None, which signals a fetch failure)."""
+    url = (
+        f"{_CLOB_BASE_URL}/prices-history"
+        f"?market={token_id}&startTs={start_ts}&endTs={end_ts}&fidelity={fidelity}"
+    )
+
+    try:
+        assert_safe_url(url)
+    except SSRFError:
+        return None
+
+    try:
+        response = httpx.get(
+            url,
+            timeout=timeout,
+            headers={"User-Agent": "PolymarketPulse/0.2"},
+            verify=get_ssl_context(),
+        )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+
+    if len(response.content) > MAX_RESPONSE_BYTES:
+        return None
+
+    try:
+        payload = response.json()
+        points = payload["history"]
+        result = [(int(p["t"]), float(p["p"])) for p in points]
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+    result.sort(key=lambda pair: pair[0])
+    return result

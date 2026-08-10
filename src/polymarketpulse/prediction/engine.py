@@ -326,9 +326,17 @@ def compute_prediction(
     question: str = "",
     resolution_text: str | None = None,
     classified_category: str | None = None,
+    as_of: datetime | None = None,
 ) -> PredictionResult:
+    """`as_of`, when given, makes this a point-in-time-safe forecast for
+    backtesting: every submodel that reads time-ordered data (history's
+    resolved-market comparables, independent evidence's linked news) is
+    restricted to data timestamped at/before `as_of`, and `as_of` replaces
+    wall-clock "now" throughout (deadline phase, recency weighting, reaction
+    lag). Defaults to real wall-clock time for the normal/live call path —
+    existing callers are unaffected."""
     reasoning: list[str] = []
-    now = datetime.now(UTC)
+    now = as_of or datetime.now(UTC)
 
     # --- Deadline Engine -------------------------------------------------
     resolution_date = _load_resolution_date(conn, market_id)
@@ -338,7 +346,7 @@ def compute_prediction(
 
     # --- History submodel --------------------------------------------------
     history_estimate, comparable_sample_size, observed_yes_rate, history_uncertainty = compute_history_estimate(
-        conn, category, provider, question=question, resolution_text=resolution_text,
+        conn, category, provider, question=question, resolution_text=resolution_text, as_of=as_of,
     )
     reasoning.append(history_estimate.detail)
 
@@ -466,9 +474,19 @@ def compute_prediction(
         f"{len(resolution_semantics.ambiguities)} ambiguity reason(s)."
     )
 
+    # Point-in-time safety: CoinGecko/FRED have no "as of a past date"
+    # fetch mode in this codebase (confirmed — both providers/coingecko.py
+    # and providers/fred.py only expose current-time fetches). Calling them
+    # during a backtest (as_of is not None) would silently leak
+    # today's/current price or rate data into a forecast dated in the
+    # past. Rather than build that historical-fetch mode (a non-trivial,
+    # separate provider change) or risk contamination, quant/macro markets
+    # are excluded from point-in-time-safe forecasts: both fetches are
+    # skipped whenever as_of is set, so the quant/macro specialized paths
+    # correctly fall back to their no-data behavior for those markets.
     quant_current_price = None
     quant_daily_volatility = None
-    if proposition.event_type in ("price_above", "price_below") and proposition.asset:
+    if as_of is None and proposition.event_type in ("price_above", "price_below") and proposition.asset:
         coingecko_id = resolve_coingecko_id(proposition.asset)
         if coingecko_id:
             price_data = fetch_price_and_volatility(coingecko_id)
@@ -480,9 +498,11 @@ def compute_prediction(
     # derived quantitative rate-decision signal: only spend the HTTP calls
     # when the proposition could plausibly need it (rate_cut/rate_hike/
     # rate_hold — the three event types macro.py's quantitative fallback
-    # actually uses; see macro.py's _QUANTITATIVE_EVENT_TYPES).
+    # actually uses; see macro.py's _QUANTITATIVE_EVENT_TYPES). Also
+    # skipped during backtests (as_of is not None) — see point-in-time
+    # safety note above.
     macro_snapshot = None
-    if proposition.event_type in ("rate_cut", "rate_hike", "rate_hold"):
+    if as_of is None and proposition.event_type in ("rate_cut", "rate_hike", "rate_hold"):
         macro_snapshot = fetch_macro_snapshot()
         if macro_snapshot is not None:
             try:

@@ -348,15 +348,22 @@ def compute_independent_evidence(
     if "news_market_links" not in tables or "news_events" not in tables:
         return _unavailable("Keine News-Infrastruktur in dieser Datenbank vorhanden.")
 
+    # Point-in-time safety: only news published at or before `now` may ever
+    # be used. `now` defaults to wall-clock time for the live/normal call
+    # path, but backtesting callers pass a real historical forecast_time
+    # here, which makes this the load-bearing look-ahead guard for the
+    # whole evidence pipeline. Rows with a NULL/unparseable published_at
+    # are excluded rather than assumed safe, both live and in backtests.
     rows = conn.execute(
         """
         SELECT ne.id, ne.title, ne.source, ne.published_at, nml.confidence, ne.source_url
         FROM news_market_links nml
         JOIN news_events ne ON ne.id = nml.news_event_id
         WHERE nml.provider = ? AND nml.provider_market_id = ?
+          AND ne.published_at IS NOT NULL AND ne.published_at <= ?
         ORDER BY ne.published_at DESC
         """,
-        (provider, provider_market_id),
+        (provider, provider_market_id, now.isoformat()),
     ).fetchall()
 
     if len(rows) < MIN_EVIDENCE_ITEMS_FOR_ESTIMATE:

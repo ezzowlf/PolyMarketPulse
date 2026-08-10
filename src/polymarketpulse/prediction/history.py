@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from .classification import MarketClassification, classify_market
 from .semantics import MarketProposition, parse_market_proposition
@@ -259,13 +260,21 @@ def _target_entities_from_proposition(proposition: MarketProposition) -> set[str
     return entities
 
 
-def _load_comparable_candidates(conn: sqlite3.Connection, provider: str | None = None) -> list[ComparableCandidate]:
+def _load_comparable_candidates(
+    conn: sqlite3.Connection, provider: str | None = None, as_of: datetime | None = None
+) -> list[ComparableCandidate]:
     """Pull every historically-resolved-or-terminal market (any status —
     resolved/cancelled/invalid/disputed) with its Phase A/C structured data
     for scoring. Terminal-but-non-resolved rows are included so
     find_comparable_cases can show them (e.g. for diagnostics) but
     compute_weighted_baseline explicitly excludes anything except
-    'resolved' from the YES/NO baseline math."""
+    'resolved' from the YES/NO baseline math.
+
+    `as_of`, when given, is the point-in-time-safety cutoff for backtesting:
+    a market that resolved AFTER `as_of` must NOT be usable as a historical
+    comparable for a forecast made AT `as_of` (that would be look-ahead
+    leakage). Filters on `mr.resolved_at < as_of`; rows with a NULL
+    resolved_at are excluded rather than assumed safe."""
     query = """
         SELECT m.market_id, m.question, m.classified_category, m.event_type,
                m.entities_json, m.proposition_json, m.start_date, m.end_date,
@@ -273,10 +282,17 @@ def _load_comparable_candidates(conn: sqlite3.Connection, provider: str | None =
         FROM markets m
         JOIN market_resolutions mr ON mr.provider = m.provider AND mr.provider_market_id = m.provider_market_id
     """
-    params: tuple = ()
+    conditions: list[str] = []
+    params: list = []
     if provider:
-        query += " WHERE m.provider = ?"
-        params = (provider,)
+        conditions.append("m.provider = ?")
+        params.append(provider)
+    if as_of is not None:
+        conditions.append("mr.resolved_at IS NOT NULL AND mr.resolved_at < ?")
+        params.append(as_of.isoformat())
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    params = tuple(params)
 
     out: list[ComparableCandidate] = []
     for row in conn.execute(query, params).fetchall():
@@ -485,6 +501,7 @@ def compute_history_estimate(
     provider: str,
     question: str | None = None,
     resolution_text: str | None = None,
+    as_of: datetime | None = None,
 ) -> tuple[SubmodelEstimate, int, float | None, WeightedBaselineResult | None]:
     """Returns (estimate, comparable_sample_size, observed_yes_rate, uncertainty).
 
@@ -507,8 +524,8 @@ def compute_history_estimate(
     existing callers/tests that don't have a question string keep exactly
     their old behavior."""
     if question:
-        return _compute_history_estimate_weighted(conn, category, provider, question, resolution_text)
-    est, n, rate = _compute_history_estimate_legacy(conn, category, provider)
+        return _compute_history_estimate_weighted(conn, category, provider, question, resolution_text, as_of)
+    est, n, rate = _compute_history_estimate_legacy(conn, category, provider, as_of)
     return est, n, rate, None
 
 
@@ -518,10 +535,11 @@ def _compute_history_estimate_weighted(
     provider: str,
     question: str,
     resolution_text: str | None,
+    as_of: datetime | None = None,
 ) -> tuple[SubmodelEstimate, int, float | None, WeightedBaselineResult | None]:
     target_proposition = parse_market_proposition(question, resolution_text)
     target_classification = classify_market(question, resolution_text, target_proposition)
-    candidates = _load_comparable_candidates(conn, provider=provider)
+    candidates = _load_comparable_candidates(conn, provider=provider, as_of=as_of)
     scored = find_comparable_cases(target_proposition, target_classification, candidates)
     result = compute_weighted_baseline(scored)
 
@@ -572,18 +590,24 @@ def _compute_history_estimate_weighted(
 
 
 def _compute_history_estimate_legacy(
-    conn: sqlite3.Connection, category: str | None, provider: str
+    conn: sqlite3.Connection, category: str | None, provider: str, as_of: datetime | None = None
 ) -> tuple[SubmodelEstimate, int, float | None]:
-    """Returns (estimate, comparable_sample_size, observed_yes_rate)."""
-    rows = conn.execute(
-        """
+    """Returns (estimate, comparable_sample_size, observed_yes_rate).
+
+    `as_of`, when given, excludes any comparable that resolved at/after
+    that timestamp — see _load_comparable_candidates for the same
+    point-in-time-safety rationale."""
+    query = """
         SELECT mr.winning_outcome
         FROM market_resolutions mr
         JOIN markets m ON m.provider = mr.provider AND m.provider_market_id = mr.provider_market_id
         WHERE mr.status = 'resolved' AND m.category = ? AND m.provider = ?
-        """,
-        (category, provider),
-    ).fetchall()
+        """
+    params: list = [category, provider]
+    if as_of is not None:
+        query += " AND mr.resolved_at IS NOT NULL AND mr.resolved_at < ?"
+        params.append(as_of.isoformat())
+    rows = conn.execute(query, tuple(params)).fetchall()
     sample_size = len(rows)
 
     if sample_size == 0:
