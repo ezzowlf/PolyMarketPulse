@@ -59,6 +59,12 @@ def test_parse_fred_csv_rejects_non_fred_shaped_response() -> None:
     assert fred._parse_fred_csv("", "FEDFUNDS") is None
 
 
+def test_parse_fred_csv_accepts_observation_date_header() -> None:
+    text = "OBSERVATION_DATE,FEDFUNDS\n2025-01-01,4.5\n2025-02-01,4.4\n"
+    parsed = fred._parse_fred_csv(text, "FEDFUNDS")
+    assert parsed == [(date(2025, 1, 1), 4.5), (date(2025, 2, 1), 4.4)]
+
+
 def test_build_macro_snapshot_from_realistic_mocked_series() -> None:
     fedfunds = fred._parse_fred_csv(_fedfunds_csv(), "FEDFUNDS")
     cpi = fred._parse_fred_csv(_cpi_csv(), "CPIAUCSL")

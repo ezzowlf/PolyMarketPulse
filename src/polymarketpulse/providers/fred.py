@@ -140,8 +140,8 @@ def _fetch_series_csv(series_id: str, timeout: float = 10.0) -> list[tuple[date,
 
 
 def _parse_fred_csv(text: str, series_id: str) -> list[tuple[date, float]] | None:
-    """Parses FRED's two-column CSV (`DATE,<SERIES_ID>` header, then rows of
-    `YYYY-MM-DD,value` with missing observations as '.'). Returns None if
+    """Parses FRED's two-column CSV (`DATE,<SERIES_ID>` or `OBSERVATION_DATE,<SERIES_ID>` header,
+    then rows of `YYYY-MM-DD,value` with missing observations as '.'). Returns None if
     the shape doesn't look like a real FRED response at all."""
     try:
         reader = csv.reader(io.StringIO(text))
@@ -153,7 +153,7 @@ def _parse_fred_csv(text: str, series_id: str) -> list[tuple[date, float]] | Non
         return None
 
     header = rows[0]
-    if len(header) < 2 or header[0].strip().upper() != "DATE":
+    if len(header) < 2 or header[0].strip().upper() not in {"DATE", "OBSERVATION_DATE"}:
         return None
 
     observations: list[tuple[date, float]] = []
