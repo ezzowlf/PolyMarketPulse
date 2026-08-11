@@ -1366,6 +1366,14 @@ class Storage:
         blended_probability: float | None = None, calibrated_probability: float | None = None,
         confidence_calibration_status: str | None = None, forecast_status: str | None = None,
         models_used: str | None = None, divergence_verdict: str | None = None,
+        # --- Block E Part 4: forecast-semantics fields flowing into the
+        # forecast-history snapshot mechanism (migration 22, additive) ---
+        model_hypothesis_probability: float | None = None,
+        evidence_backed_probability: float | None = None,
+        published_forecast_probability: float | None = None,
+        forecast_maturity: str | None = None,
+        evidence_strength: str | None = None,
+        data_quality_composite_score: float | None = None,
     ) -> int:
         now = datetime.now(UTC).isoformat()
         cursor = self.connection.execute(
@@ -1379,8 +1387,10 @@ class Storage:
                 orderbook_imbalance, net_flow, wallet_concentration_score, reaction_lag_hours,
                 submodel_estimates_json, warnings_json, engine_version, config_hash,
                 forecast_at, market_probability_at_forecast, blended_probability, calibrated_probability,
-                confidence_calibration_status, forecast_status, models_used, divergence_verdict
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                confidence_calibration_status, forecast_status, models_used, divergence_verdict,
+                model_hypothesis_probability, evidence_backed_probability, published_forecast_probability,
+                forecast_maturity, evidence_strength, data_quality_composite_score
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 market_id, provider, provider_market_id, category, prediction_version, now,
@@ -1395,6 +1405,8 @@ class Storage:
                 # created_at) — no resolution/outcome data is ever read or written on this path.
                 now, market_probability_at_forecast, blended_probability, calibrated_probability,
                 confidence_calibration_status, forecast_status, models_used, divergence_verdict,
+                model_hypothesis_probability, evidence_backed_probability, published_forecast_probability,
+                forecast_maturity, evidence_strength, data_quality_composite_score,
             ),
         )
         self.connection.commit()

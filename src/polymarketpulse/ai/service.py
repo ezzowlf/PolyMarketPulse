@@ -462,6 +462,23 @@ def _persist_prediction_snapshot(storage: Storage, market: dict, prediction: Pre
         prediction.divergence_audit.verdict if prediction.divergence_audit else None
     )
 
+    # Block E Part 4: real evidence-strength signal at snapshot time, from
+    # the SAME relation-tier data maturity.py's own evidence checks already
+    # use (DIRECT_YES/DIRECT_NO strongest, then SUPPORTS_*, then WEAK/
+    # CONTEXT-only, then "no items at all") — never fabricated, "NONE"
+    # honestly means independent_evidence ran but found nothing usable.
+    evidence_strength = None
+    if ie is not None and ie.available:
+        all_items = (*ie.evidence_for_yes, *ie.evidence_for_no)
+        if any(item.relation_label in ("DIRECT_YES", "DIRECT_NO") for item in all_items):
+            evidence_strength = "DIRECT"
+        elif any(item.relation_label in ("SUPPORTS_YES", "SUPPORTS_NO") for item in all_items):
+            evidence_strength = "SUPPORTS"
+        elif all_items:
+            evidence_strength = "WEAK"
+        else:
+            evidence_strength = "NONE"
+
     return storage.save_prediction_snapshot(
         market_id=prediction.market_id, provider=market["provider"],
         provider_market_id=market["provider_market_id"], category=market["category"],
@@ -497,6 +514,14 @@ def _persist_prediction_snapshot(storage: Storage, market: dict, prediction: Pre
         forecast_status=prediction.forecast_status,
         models_used=models_used or None,
         divergence_verdict=divergence_verdict,
+        model_hypothesis_probability=prediction.model_hypothesis_probability,
+        evidence_backed_probability=prediction.evidence_backed_probability,
+        published_forecast_probability=prediction.published_forecast_probability,
+        forecast_maturity=prediction.forecast_maturity,
+        evidence_strength=evidence_strength,
+        data_quality_composite_score=(
+            prediction.data_quality_composite.score if prediction.data_quality_composite else None
+        ),
     )
 
 

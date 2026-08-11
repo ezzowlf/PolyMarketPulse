@@ -1025,6 +1025,17 @@ def prediction(market_id: str, storage: Storage = Depends(get_storage)) -> dict:
     return ai_service.get_prediction(storage, market_id).as_dict()
 
 
+@app.get("/change-attribution/{market_id}")
+def change_attribution(market_id: str, limit: int = 20, storage: Storage = Depends(get_storage)) -> list[dict]:
+    """Block E Part 3: real, derived change-attribution history for a
+    market — previous_forecast/new_forecast/delta/timestamp and, only when
+    a real correlated `events` row exists, triggering_claim/source/factor/
+    reason. Backend data only (no UI change in this block)."""
+    from .prediction.change_attribution import compute_change_attributions
+
+    return [a.as_dict() for a in compute_change_attributions(storage, market_id, limit=limit)]
+
+
 @app.get("/ai/explain-recommendation/{market_id}")
 @_handle_ai_errors
 def ai_explain_recommendation(market_id: str, storage: Storage = Depends(get_storage)) -> ExplainRecommendationResponse:

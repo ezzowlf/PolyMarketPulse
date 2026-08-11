@@ -1058,6 +1058,27 @@ def _migration_021_claim_resolution_step(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migration_022_prediction_snapshot_forecast_semantics(conn: sqlite3.Connection) -> None:
+    """BLOCK E, Part 4: additive columns on the existing `prediction_snapshots`
+    table (migration 8, extended by migrations 14/16) so a market's forecast
+    history genuinely carries Block A's four-tier forecast-semantics
+    separation (market_probability/model_hypothesis_probability/
+    evidence_backed_probability/published_forecast_probability), plus
+    forecast_maturity and a real evidence-strength/data-quality signal at
+    the time each snapshot was taken. Every column is nullable and purely
+    additive — no existing column dropped, renamed, or altered; every
+    existing row keeps reading exactly as it did before this migration
+    (all new columns NULL for pre-Block-A snapshots, which is honest: those
+    rows genuinely predate the four-tier separation existing at all)."""
+    _add_column(conn, "prediction_snapshots", "model_hypothesis_probability", "REAL")
+    _add_column(conn, "prediction_snapshots", "evidence_backed_probability", "REAL")
+    _add_column(conn, "prediction_snapshots", "published_forecast_probability", "REAL")
+    _add_column(conn, "prediction_snapshots", "forecast_maturity", "TEXT")
+    _add_column(conn, "prediction_snapshots", "evidence_strength", "TEXT")
+    _add_column(conn, "prediction_snapshots", "data_quality_composite_score", "REAL")
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1080,6 +1101,7 @@ MIGRATIONS: list[Migration] = [
     (19, "macro_observations", _migration_019_macro_observations),
     (20, "polymarket_price_history_backfill", _migration_020_polymarket_price_history_backfill),
     (21, "claim_resolution_step", _migration_021_claim_resolution_step),
+    (22, "prediction_snapshot_forecast_semantics", _migration_022_prediction_snapshot_forecast_semantics),
 ]
 
 
