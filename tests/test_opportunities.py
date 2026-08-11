@@ -7,7 +7,9 @@ from polymarketpulse.models import Market
 from polymarketpulse.opportunities import (
     STATUS_INSUFFICIENT_DATA,
     STATUS_PRICE_MISSING,
+    compute_opportunity,
     list_opportunities,
+    list_ranked_opportunities,
 )
 from polymarketpulse.signals import generate_signals
 from polymarketpulse.storage import Storage
@@ -38,12 +40,39 @@ def test_list_opportunities_empty_db_returns_empty_list(storage: Storage) -> Non
     assert list_opportunities(storage) == []
 
 
-def test_market_with_price_and_no_history_is_insufficient_data(storage: Storage) -> None:
+def _seed_market_row(storage: Storage, provider_market_id="1", yes_price=0.5, category="esports") -> dict:
+    """Block E Part 2: a bare, no-evidence market never gets a real
+    `published_forecast_probability`, so it correctly no longer appears in
+    `list_opportunities` at all (see test_bare_market_excluded_from_ranked_
+    opportunities below). These per-field assertions moved to
+    `compute_opportunity` directly, which still returns a labeled entry for
+    single-market detail views (api.py) regardless of ranking eligibility."""
+    market_id = _seed_market(storage, provider_market_id=provider_market_id, yes_price=yes_price, category=category)
+    cols = ("market_id", "provider", "provider_market_id", "question", "category", "url",
+            "end_date", "first_seen_at", "last_seen_at")
+    row = storage.connection.execute(
+        f"SELECT {', '.join(cols)} FROM markets WHERE market_id = ?", (market_id,),
+    ).fetchone()
+    return dict(zip(cols, row, strict=True))
+
+
+def test_bare_market_excluded_from_ranked_opportunities(storage: Storage) -> None:
+    """Block E Part 2: a market with no evidence/history has
+    published_forecast_probability=None, so it must NEVER appear in the
+    ranked opportunities list, even though it still gets a labeled
+    single-market view via compute_opportunity."""
     _seed_market(storage)
-    items = list_opportunities(storage)
-    assert len(items) == 1
-    assert items[0]["status"] == STATUS_INSUFFICIENT_DATA
-    assert items[0]["market_yes_probability"] == 0.5
+    assert list_ranked_opportunities(storage) == []
+
+
+def test_market_with_price_and_no_history_is_insufficient_data(storage: Storage) -> None:
+    row = _seed_market_row(storage)
+    opp = compute_opportunity(storage, row)
+    assert opp is not None
+    assert opp["status"] == STATUS_INSUFFICIENT_DATA
+    assert opp["market_yes_probability"] == 0.5
+    assert opp["is_ranked_opportunity"] is False
+    assert opp["published_forecast_probability"] is None
 
 
 def test_market_without_price_is_flagged_price_missing(storage: Storage) -> None:
@@ -54,31 +83,36 @@ def test_market_without_price_is_flagged_price_missing(storage: Storage) -> None
     )
     run_id = storage.start_run("polymarket")
     storage.save(run_id, [(market, generate_signals(market))])
+    row = _seed_market_row(storage, provider_market_id="no-price", yes_price=None)
 
-    items = list_opportunities(storage)
-    assert len(items) == 1
-    assert items[0]["status"] == STATUS_PRICE_MISSING
-    assert items[0]["market_yes_probability"] is None
+    opp = compute_opportunity(storage, row)
+    assert opp is not None
+    assert opp["status"] == STATUS_PRICE_MISSING
+    assert opp["market_yes_probability"] is None
+    assert opp["is_ranked_opportunity"] is False
 
 
 def test_opportunity_score_never_negative_or_above_100(storage: Storage) -> None:
-    _seed_market(storage)
-    items = list_opportunities(storage)
-    assert 0.0 <= items[0]["opportunity_score"] <= 100.0
+    row = _seed_market_row(storage)
+    opp = compute_opportunity(storage, row)
+    assert opp is not None
+    assert 0.0 <= opp["opportunity_score"] <= 100.0
 
 
 def test_change_since_last_analysis_none_on_first_run(storage: Storage) -> None:
-    _seed_market(storage)
-    items = list_opportunities(storage)
-    assert items[0]["change_since_last_analysis"] is None
+    row = _seed_market_row(storage)
+    opp = compute_opportunity(storage, row)
+    assert opp is not None
+    assert opp["change_since_last_analysis"] is None
 
 
 def test_change_since_last_analysis_present_on_second_run(storage: Storage) -> None:
-    _seed_market(storage)
-    list_opportunities(storage)  # first run persists a snapshot
-    items = list_opportunities(storage)  # second run compares to it
-    assert items[0]["change_since_last_analysis"] is not None
-    change = items[0]["change_since_last_analysis"]
+    row = _seed_market_row(storage)
+    compute_opportunity(storage, row)  # first run persists a snapshot
+    opp = compute_opportunity(storage, row)  # second run compares to it
+    assert opp is not None
+    assert opp["change_since_last_analysis"] is not None
+    change = opp["change_since_last_analysis"]
     assert "market_yes_probability" in change
     assert set(change["market_yes_probability"].keys()) == {"from", "to"}
 

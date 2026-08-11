@@ -1077,6 +1077,10 @@ def opportunities(
     from .opportunities import list_opportunities
 
     items = list_opportunities(storage, limit=limit)
+    # Block E Part 2: a market with no published_forecast_probability (weak
+    # evidence, insufficient maturity, or a REJECTed divergence audit) must
+    # never appear in the ranked opportunities list.
+    items = [o for o in items if o["is_ranked_opportunity"]]
     if require_price:
         items = [o for o in items if o["market_yes_probability"] is not None]
     if min_edge is not None:

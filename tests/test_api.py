@@ -390,12 +390,13 @@ def test_command_center_endpoint(client: TestClient) -> None:
 
 
 def test_opportunities_endpoint(client: TestClient) -> None:
+    # Block E Part 2: the seeded test market has no real evidence/history,
+    # so published_forecast_probability is honestly None and it correctly
+    # never appears in the ranked opportunities list.
     resp = client.get("/opportunities")
     assert resp.status_code == 200
     items = resp.json()
-    assert len(items) >= 1
-    assert "status" in items[0]
-    assert "opportunity_score" in items[0]
+    assert items == []
 
 
 def test_opportunities_endpoint_filters_require_price(client: TestClient) -> None:

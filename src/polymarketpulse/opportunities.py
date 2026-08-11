@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from .ai import service as ai_service
 from .ai.client import AIContextError
+from .prediction.decision import compute_decision_state
 from .storage import Storage
 
 STATUS_PRICE_MISSING = "Preis fehlt"
@@ -56,7 +57,9 @@ def _status_for(market_yes_price: float | None, prediction) -> str:
         return STATUS_PRICE_MISSING
     if prediction.recommendation == "INSUFFICIENT_DATA":
         return STATUS_INSUFFICIENT_DATA
-    net_edge = prediction.net_yes_edge
+    if not is_ranked_opportunity(prediction):
+        return STATUS_INSUFFICIENT_DATA
+    net_edge = _published_edge(prediction)
     if net_edge is None or abs(net_edge) < 0.03:
         return STATUS_NO_EDGE
     manipulation_risk = prediction.manipulation_risk
@@ -72,16 +75,42 @@ def _status_for(market_yes_price: float | None, prediction) -> str:
     return STATUS_WATCH
 
 
+def is_ranked_opportunity(prediction) -> bool:
+    """Block E Part 2: the single, real inclusion gate for the opportunities
+    page. A market NEVER appears as a ranked opportunity unless it has a
+    real `published_forecast_probability` — which, per engine.py's Block A
+    gate, is already None whenever evidence is weak, maturity is below
+    SUPPORTED_FORECAST, or the divergence audit REJECTed. Gating on this one
+    field is therefore not a simplification of the four listed conditions —
+    it IS their union, computed once, honestly, by the engine itself rather
+    than re-derived (and risking drifting out of sync) here."""
+    return prediction.published_forecast_probability is not None
+
+
+def _published_edge(prediction) -> float | None:
+    if prediction.published_forecast_probability is None or prediction.market_probability is None:
+        return None
+    return prediction.published_forecast_probability - prediction.market_probability
+
+
 def _opportunity_score(prediction, liquidity: float | None, spread: float | None, deadline_hours: float | None) -> float:
     """Composite ranking score (0-100) — deliberately not just |edge|. A
     market with a big edge but low confidence must not outrank a market
     with a smaller, well-supported edge (explicit product requirement).
     Resolution clarity and cross-market inconsistency additionally pull the
     score down when the wording is a trap or related markets disagree in a
-    way that isn't explained by fees/spread/differing rules."""
-    if prediction.net_yes_edge is None:
+    way that isn't explained by fees/spread/differing rules.
+
+    Block E Part 2: ranked strictly among markets that already passed
+    `is_ranked_opportunity` (published_forecast_probability is real), so the
+    edge component below is the REAL publishable edge
+    (published_forecast_probability - market_probability), not the raw
+    market-anchored `net_yes_edge` (which can be non-None even when nothing
+    is publishable)."""
+    published_edge = _published_edge(prediction)
+    if published_edge is None:
         return 0.0
-    edge_component = min(40.0, abs(prediction.net_yes_edge) * 100 * 2.2)  # ~18pp edge -> ~40 pts
+    edge_component = min(40.0, abs(published_edge) * 100 * 2.2)  # ~18pp edge -> ~40 pts
     confidence_component = prediction.confidence_score * 0.30
     quality_component = prediction.data_quality.total * 0.15
     liquidity_component = min(10.0, ((liquidity or 0) / 100_000) * 10)
@@ -156,6 +185,10 @@ def compute_opportunity(storage: Storage, market_row: dict) -> dict | None:
     if status not in (STATUS_PRICE_MISSING, STATUS_INSUFFICIENT_DATA) and hours_left is not None and 0 <= hours_left < DEADLINE_URGENT_HOURS:
         status = STATUS_DEADLINE_SOON
 
+    decision_state, decision_reasons = compute_decision_state(
+        prediction, liquidity=market_row.get("liquidity"), spread=market_row.get("spread"), deadline_hours=hours_left,
+    )
+
     return {
         "market_id": market_row["market_id"],
         "provider": market_row["provider"],
@@ -169,6 +202,11 @@ def compute_opportunity(storage: Storage, market_row: dict) -> dict | None:
         "market_consensus_probability": prediction.market_consensus_probability,
         "blended_probability": prediction.blended_probability,
         "calibrated_probability": prediction.calibrated_probability,
+        "market_probability": prediction.market_probability,
+        "model_hypothesis_probability": prediction.model_hypothesis_probability,
+        "evidence_backed_probability": prediction.evidence_backed_probability,
+        "published_forecast_probability": prediction.published_forecast_probability,
+        "forecast_maturity": prediction.forecast_maturity,
         "forecast_status": prediction.forecast_status,
         "contribution_breakdown": [c.as_dict() for c in prediction.contribution_breakdown],
         "net_yes_edge": prediction.net_yes_edge,
@@ -176,6 +214,9 @@ def compute_opportunity(storage: Storage, market_row: dict) -> dict | None:
         "data_quality_score": prediction.data_quality.total,
         "recommendation": prediction.recommendation,
         "status": status,
+        "is_ranked_opportunity": is_ranked_opportunity(prediction),
+        "decision_state": decision_state,
+        "decision_reasons": list(decision_reasons),
         "opportunity_score": _opportunity_score(prediction, market_row.get("liquidity"), market_row.get("spread"), hours_left),
         "liquidity": market_row.get("liquidity"),
         "volume_24h": market_row.get("volume_24h"),
@@ -225,3 +266,22 @@ def list_opportunities(storage: Storage, limit: int = 300) -> list[dict]:
         if opp is not None:
             opportunities.append(opp)
     return opportunities
+
+
+def rank_opportunities(items: list[dict]) -> list[dict]:
+    """Block E Part 2: the real ranked "opportunities" view — never
+    includes a market whose `published_forecast_probability` is None (no
+    real, evidence-backed, sufficiently-mature, non-REJECTed forecast; see
+    `is_ranked_opportunity` on the underlying prediction). `list_opportunities`
+    itself stays unfiltered (it also backs the command-center's "all active
+    markets" counters/lists, which legitimately need every market, not just
+    ranked opportunities) — this is the dedicated filter+sort layer for
+    anything actually presenting a *ranked opportunities* list."""
+    ranked = [o for o in items if o["is_ranked_opportunity"]]
+    ranked.sort(key=lambda o: o["opportunity_score"], reverse=True)
+    return ranked
+
+
+def list_ranked_opportunities(storage: Storage, limit: int = 300) -> list[dict]:
+    """Convenience wrapper: fetch + filter + rank in one call."""
+    return rank_opportunities(list_opportunities(storage, limit=limit))

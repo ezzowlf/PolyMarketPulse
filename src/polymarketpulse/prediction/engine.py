@@ -36,6 +36,7 @@ from .confidence import (
 )
 from .cross_market import compute_cross_market_relations
 from .deadline import classify_deadline_phase, deadline_weights_for
+from .decision import compute_decision_state
 from .divergence import DIVERGENCE_THRESHOLD_PP
 from .divergence_audit import DivergenceAuditContext, audit_divergence, classify_divergence_support
 from .ensemble import combine_submodels, quality_scaled_weight
@@ -1190,6 +1191,28 @@ def compute_prediction(
         data_gaps=result.data_gaps,
         divergence_audit=result.divergence_audit,
     )
+    # Block E Part 1: Decision Engine. Computed from the just-finalized
+    # forecast_maturity/published_forecast_probability above — `result` at
+    # this point still has the PRE-Part-1 maturity/published values, so we
+    # build a temporary view with the finalized values for the decision
+    # function rather than re-deriving them. `spread` is not available at
+    # this layer (compute_prediction has no spread parameter) — callers
+    # with real market_snapshots spread data (opportunities.py) should
+    # re-call prediction.decision.compute_decision_state directly with the
+    # real spread for a more precise cap; engine-level decision_state is
+    # computed with spread=None (never wrongly downgrades, may be
+    # over-optimistic about tradeability in illiquid/wide-spread markets).
+    _decision_input = _dataclass_replace(
+        result,
+        forecast_maturity=maturity,
+        published_forecast_probability=published_forecast_probability,
+    )
+    decision_state, decision_reasons = compute_decision_state(
+        _decision_input,
+        liquidity=liquidity,
+        spread=None,
+        deadline_hours=(resolution_date - now).total_seconds() / 3600 if resolution_date else None,
+    )
     return _dataclass_replace(
         result,
         forecast_maturity=maturity,
@@ -1198,4 +1221,6 @@ def compute_prediction(
         evidence_backed_probability=evidence_backed_probability,
         published_forecast_probability=published_forecast_probability,
         change_triggers=change_triggers,
+        decision_state=decision_state,
+        decision_reasons=decision_reasons,
     )

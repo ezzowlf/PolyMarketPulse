@@ -72,6 +72,14 @@ ForecastMaturity = Literal[
     "MATURE_FORECAST",
 ]
 
+# Block E, Part 1: Decision Engine states. Distinct from ForecastMaturity
+# (maturity answers "how much should a reader trust THIS forecast";
+# DecisionState answers "is there an actionable edge worth surfacing").
+# Ordered weakest -> strongest. See prediction/decision.py for the
+# weighting logic and the hard rule: a large model_hypothesis deviation
+# ALONE (published_forecast_probability=None) can never exceed WATCH.
+DecisionState = Literal["NO_POSITION", "WATCH", "POSSIBLE_EDGE", "STRONG_EDGE"]
+
 PREDICTION_VERSION = "v2"
 
 
@@ -472,6 +480,13 @@ class PredictionResult:
     # the majority of markets with no concrete derivable trigger.
     change_triggers: tuple[str, ...] = field(default_factory=tuple)
 
+    # --- Block E Part 1: Decision Engine (additive) -------------------------
+    # See prediction/decision.py for the full weighting logic. `decision_state`
+    # is the actionable recommendation-strength label; `decision_reasons` is
+    # an itemized, honest explanation (never a fabricated confidence story).
+    decision_state: DecisionState = "NO_POSITION"
+    decision_reasons: tuple[str, ...] = field(default_factory=tuple)
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -539,4 +554,6 @@ class PredictionResult:
             "proposition": self.proposition.as_dict() if self.proposition else None,
             "resolution_semantics": self.resolution_semantics.as_dict() if self.resolution_semantics else None,
             "change_triggers": list(self.change_triggers),
+            "decision_state": self.decision_state,
+            "decision_reasons": list(self.decision_reasons),
         }
