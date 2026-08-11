@@ -27,6 +27,10 @@ if TYPE_CHECKING:
     from ..claims import ExtractedClaim
 
 from ..claims import group_claims_by_normalization
+from ..source_registry import (
+    calculate_source_quality_score,
+    get_source_definition,
+)
 from .base_rates import EXTRAORDINARY_EVENT_TYPES, get_base_rate
 from .bayesian import bayesian_update
 from .news import _trust_for_source, score_sentiment
@@ -81,6 +85,8 @@ class EvidenceFactor:
     relation_label: str = "AMBIGUOUS"  # semantics.EvidenceRelationLabel — the real entailment classification
     entailment: str = "NEUTRAL"  # "ENTAILS" | "CONTRADICTS" | "NEUTRAL"
     relation_weight: float = 0.0  # semantics.EvidenceRelation.quantitative_weight, 0..1
+    source_type: str = "OTHER"  # SourceType aus source_registry.py
+    independence_group: str | None = None  # Für Cluster-Erkennung
 
     def as_dict(self) -> dict:
         return {
@@ -89,9 +95,9 @@ class EvidenceFactor:
             "tone": self.tone, "matched_condition": self.matched_condition,
             "recency_weight": self.recency_weight, "relation_label": self.relation_label,
             "entailment": self.entailment, "relation_weight": self.relation_weight,
-            # I2 (additive): topical-match relevance, previously computed but
-            # never surfaced past the internal scoring math.
             "link_confidence": self.link_confidence,
+            "source_type": self.source_type,
+            "independence_group": self.independence_group,
         }
 
 
@@ -452,6 +458,8 @@ def compute_independent_evidence(
                 tone=sentiment, matched_condition=matched_condition, recency_weight=recency,
                 link_confidence=link_confidence, relation_label=relation_label,
                 entailment=relation.entailment, relation_weight=relation_weight,
+                source_type=source_def.source_type.value if (source_def := get_source_definition(domain)) else "OTHER",
+                independence_group=source_def.independence_group if (source_def := get_source_definition(domain)) else None,
             )
         )
         if extracted_claim is not None:
@@ -575,6 +583,14 @@ def compute_independent_evidence(
                 independent_yes_probability = round(dampened, 4)
 
     source_quality_score = round(min(100.0, (weight_sum / len(scored)) * 100), 1)
+    
+    # Phase F: Source Registry Integration - echte Quality und Independence
+    source_domains = [f.source_domain or f.source for f in scored]
+    source_labels = [f.source for f in scored]
+    # Berechne Quality aus Source Registry (domain preferred, curated label
+    # as fallback so a known official/wire-service label with an
+    # unrecognized or placeholder domain still gets real trust credit).
+    source_quality_score = calculate_source_quality_score(source_domains, source_labels)
 
     first_reported = _first_reported_at(rows)
     time_since_first_report_hours = None
