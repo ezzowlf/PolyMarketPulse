@@ -32,6 +32,7 @@ from .types import (
     ForecastStatus,
     PredictionResult,
     Recommendation,
+    Scenario,
     ScenarioSet,
     SubmodelEstimate,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "ForecastStatus",
     "PredictionResult",
     "Recommendation",
+    "Scenario",
     "ScenarioSet",
     "SubmodelEstimate",
     "_recommendation",

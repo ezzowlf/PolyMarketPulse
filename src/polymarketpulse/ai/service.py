@@ -339,7 +339,30 @@ def _build_recommendation_payload(market: dict, prediction: PredictionResult, al
         {"factor": note, "source_ids": [f"reasoning_{i}"]} for i, note in enumerate(prediction.reasoning_notes)
     ][:5]
     scenarios = prediction.scenarios
-    data_gaps = [] if prediction.comparable_sample_size >= 5 else ["Zu wenige historische Vergleichsfälle"]
+    # Block F Part 2: real Data Gap Engine descriptions (Block D Part 3),
+    # not the old crude "<5 comparables" heuristic — falls back to that
+    # heuristic only if data_gaps itself never ran (should not happen in
+    # practice; kept for defensiveness).
+    data_gaps = (
+        [g.description for g in prediction.data_gaps.gaps]
+        if prediction.data_gaps is not None
+        else ([] if prediction.comparable_sample_size >= 5 else ["Zu wenige historische Vergleichsfälle"])
+    )
+    # Block F Part 2: the real Block A-E structured fields this payload was
+    # previously missing entirely — published_forecast_probability (the
+    # actual gated, publishable number), forecast_status/forecast_maturity,
+    # decision_state/decision_reasons (Block E's Decision Engine),
+    # independent vs market divergence, and change_triggers (Block D Part 4,
+    # deterministic — echoed here only so GPT can reference them in prose;
+    # the field is server-overwritten with these exact values after parsing,
+    # see _try_model below, so GPT can never invent its own).
+    world_state = prediction.world_state
+    path_to_resolution = world_state.path_to_resolution if world_state else None
+    divergence_pp = (
+        _as_percent(prediction.independent_probability) - _as_percent(prediction.market_probability)
+        if prediction.independent_probability is not None and prediction.market_probability is not None
+        else None
+    )
     return {
         "task": "Erkläre kurz die bereits berechnete Prognose.",
         "language": "de",
@@ -356,8 +379,26 @@ def _build_recommendation_payload(market: dict, prediction: PredictionResult, al
             "base": scenarios.base_case if scenarios else None,
             "bull": scenarios.bull_case[:2] if scenarios else [],
             "bear": scenarios.bear_case[:2] if scenarios else [],
+            "derived_scenarios": [s.as_dict() for s in scenarios.scenarios] if scenarios else [],
         },
         "data_gaps": data_gaps,
+        # --- published/decision/divergence (Block A/E, previously absent) ---
+        "published_forecast_probability_percent": _as_percent(prediction.published_forecast_probability),
+        "forecast_status": prediction.forecast_status,
+        "forecast_maturity": prediction.forecast_maturity,
+        "decision_state": prediction.decision_state,
+        "decision_reasons": list(prediction.decision_reasons)[:5],
+        "independent_probability_percent": _as_percent(prediction.independent_probability),
+        "market_probability_percent": _as_percent(prediction.market_probability),
+        "divergence_percentage_points": divergence_pp,
+        "divergence_audit_verdict": prediction.divergence_audit.verdict if prediction.divergence_audit else None,
+        # --- change triggers (Block D Part 4) — echoed for context only,
+        # server-overwritten on the way back out, see _try_model. -----------
+        "change_triggers": list(prediction.change_triggers),
+        # --- resolution condition text (world_state.py), for "was wissen
+        # wir" / condition grounding when no richer scenario applies. -------
+        "yes_condition": path_to_resolution.yes_condition if path_to_resolution else None,
+        "no_condition": path_to_resolution.no_condition if path_to_resolution else None,
         "allowed_source_ids": allowed_source_ids,
     }
 
@@ -727,6 +768,14 @@ def explain_recommendation(
 
         try:
             result = ExplanationResult.model_validate(parsed)
+            # Block F Part 2: `change_triggers` is never trusted from the
+            # model — overwritten unconditionally with the real, already-
+            # computed prediction.change_triggers tuple, the same
+            # server-side-overwrite pattern _execute() already uses for
+            # `disclaimer`. This guarantees a fabricated/invented trigger
+            # string in a mocked (or real) model response can never reach
+            # the persisted explanation or the API response.
+            result = result.model_copy(update={"change_triggers": list(prediction.change_triggers)})
         except PydanticValidationError as exc:
             attempts.append(
                 ModelAttempt(

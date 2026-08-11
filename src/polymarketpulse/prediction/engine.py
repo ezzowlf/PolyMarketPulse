@@ -1078,10 +1078,31 @@ def compute_prediction(
         ),
     )
 
+    # Block F Part 1: compute change_triggers HERE (moved up from its
+    # original post-result location — world_state/data_gaps/divergence_audit
+    # are all already real values by this point) so build_scenarios can
+    # reuse the SAME real trigger strings rather than a second, later,
+    # duplicate computation. The later `change_triggers = compute_change_
+    # triggers(...)` call below is removed in favor of this single value.
+    _resolution_path_for_scenarios = (
+        world_state.path_to_resolution.resolution_path
+        if world_state is not None and world_state.path_to_resolution is not None
+        else None
+    )
+    change_triggers = compute_change_triggers(
+        world_state=world_state,
+        data_gaps=data_gaps,
+        divergence_audit=divergence_audit,
+    )
     scenarios = build_scenarios(
         estimated_yes_probability=estimated_yes, submodel_estimates=all_submodels,
         news_evidence=news_evidence, comparable_sample_size=comparable_sample_size,
         recommendation=recommendation,
+        resolution_path=_resolution_path_for_scenarios,
+        resolution_semantics=resolution_semantics,
+        evidence_for_yes=independent_evidence.evidence_for_yes if independent_evidence else (),
+        evidence_for_no=independent_evidence.evidence_for_no if independent_evidence else (),
+        change_triggers=change_triggers,
     )
 
     result = PredictionResult(
@@ -1183,14 +1204,10 @@ def compute_prediction(
         if maturity == "NO_FORECAST" or result.forecast_status == "FORECAST_SUPPRESSED"
         else result.recommendation
     )
-    # Block D Part 4: computed last, from the same already-finalized real
-    # structured fields on `result` (world_state/data_gaps/divergence_audit)
-    # — no new data access, no LLM call.
-    change_triggers = compute_change_triggers(
-        world_state=result.world_state,
-        data_gaps=result.data_gaps,
-        divergence_audit=result.divergence_audit,
-    )
+    # Block D Part 4 / Block F Part 1: `change_triggers` was already computed
+    # earlier in this function (above, before build_scenarios) from the same
+    # world_state/data_gaps/divergence_audit values now sitting on `result`
+    # — reused here rather than recomputed a second time.
     # Block E Part 1: Decision Engine. Computed from the just-finalized
     # forecast_maturity/published_forecast_probability above — `result` at
     # this point still has the PRE-Part-1 maturity/published values, so we

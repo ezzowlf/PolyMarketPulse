@@ -10,8 +10,107 @@ NO or NO_BET").
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .news import NewsEvidenceItem
-from .types import ScenarioSet, SubmodelEstimate
+from .types import Scenario, ScenarioSet, SubmodelEstimate
+
+if TYPE_CHECKING:
+    from .evidence import EvidenceFactor
+    from .resolution_semantics import ResolutionSemantics
+    from .world_state import ResolutionPath
+
+_STEP_NAME_DE: dict[str, str] = {
+    "introduced": "Einbringung des Gesetzentwurfs",
+    "committee": "Abschluss der Ausschussphase",
+    "house_vote": "Abstimmung im Repräsentantenhaus",
+    "senate_vote": "Abstimmung im Senat",
+    "presidential_action": "Unterzeichnung oder Veto durch den Präsidenten",
+}
+
+
+def _build_resolution_path_scenarios(
+    resolution_path: ResolutionPath,
+    evidence_for_yes: tuple[EvidenceFactor, ...],
+    evidence_for_no: tuple[EvidenceFactor, ...],
+    change_triggers: tuple[str, ...],
+) -> tuple[Scenario, ...]:
+    """Block F Part 1: rich scenarios for markets with a real, structured
+    multi-step ResolutionPath (Block C — e.g. legislation markets). Every
+    step name/status comes directly from `resolution_path.steps`; nothing
+    here is guessed. `probability` stays None — no per-scenario probability
+    formula exists anywhere in this codebase, so attaching one would be
+    fabrication."""
+    done_steps = [s for s in resolution_path.steps if s.status == "done"]
+    open_steps = [s for s in resolution_path.steps if s.status in ("unknown", "blocked")]
+    step_labels = [_STEP_NAME_DE.get(s.name, s.name) for s in resolution_path.steps]
+
+    supporting = tuple(e.title for e in evidence_for_yes[:5])
+    contradicting = tuple(e.title for e in evidence_for_no[:5])
+
+    yes_necessary = tuple(_STEP_NAME_DE.get(s.name, s.name) for s in open_steps)
+    yes_desc = (
+        "YES-Szenario: " + " → ".join(step_labels) + " vor der Deadline abgeschlossen. "
+        f"Bereits abgeschlossen: {len(done_steps)}/{len(resolution_path.steps)} Schritte."
+    )
+    yes_scenario = Scenario(
+        outcome="YES",
+        description=yes_desc,
+        necessary_events=yes_necessary,
+        supporting_claims=supporting,
+        contradicting_claims=contradicting,
+        triggers=change_triggers,
+        probability=None,
+    )
+
+    blocked_steps = [s for s in resolution_path.steps if s.status == "blocked"]
+    no_desc = (
+        "NO-Szenario: mindestens ein notwendiger Schritt ("
+        + ", ".join(_STEP_NAME_DE.get(s.name, s.name) for s in (blocked_steps or open_steps or resolution_path.steps))
+        + ") wird nicht rechtzeitig abgeschlossen oder scheitert."
+    )
+    no_scenario = Scenario(
+        outcome="NO",
+        description=no_desc,
+        necessary_events=tuple(_STEP_NAME_DE.get(s.name, s.name) for s in (blocked_steps or open_steps)),
+        supporting_claims=contradicting,
+        contradicting_claims=supporting,
+        triggers=change_triggers,
+        probability=None,
+    )
+    return (yes_scenario, no_scenario)
+
+
+def _build_binary_scenarios(
+    resolution_semantics: ResolutionSemantics,
+    evidence_for_yes: tuple[EvidenceFactor, ...],
+    evidence_for_no: tuple[EvidenceFactor, ...],
+    change_triggers: tuple[str, ...],
+) -> tuple[Scenario, ...]:
+    """Block F Part 1: minimal, honest scenario pair for simple binary
+    markets with no real multi-step ResolutionPath — just the real
+    yes_condition/no_condition text (resolution_semantics.py) plus whatever
+    real supporting/contradicting evidence exists. No fabricated richness
+    for markets with no real underlying structure to support it."""
+    supporting = tuple(e.title for e in evidence_for_yes[:5])
+    contradicting = tuple(e.title for e in evidence_for_no[:5])
+    yes_scenario = Scenario(
+        outcome="YES",
+        description=f"YES: {resolution_semantics.yes_condition}",
+        supporting_claims=supporting,
+        contradicting_claims=contradicting,
+        triggers=change_triggers,
+        probability=None,
+    )
+    no_scenario = Scenario(
+        outcome="NO",
+        description=f"NO: {resolution_semantics.no_condition}",
+        supporting_claims=contradicting,
+        contradicting_claims=supporting,
+        triggers=change_triggers,
+        probability=None,
+    )
+    return (yes_scenario, no_scenario)
 
 
 def build_scenarios(
@@ -20,13 +119,35 @@ def build_scenarios(
     news_evidence: list[NewsEvidenceItem],
     comparable_sample_size: int,
     recommendation: str,
+    *,
+    resolution_path: ResolutionPath | None = None,
+    resolution_semantics: ResolutionSemantics | None = None,
+    evidence_for_yes: tuple[EvidenceFactor, ...] = (),
+    evidence_for_no: tuple[EvidenceFactor, ...] = (),
+    change_triggers: tuple[str, ...] = (),
 ) -> ScenarioSet:
+    # Block F Part 1: genuinely-derived scenarios, independent of whether an
+    # ensemble estimate exists — a market can have a real ResolutionPath (or
+    # at minimum real yes/no condition text) even when the probabilistic
+    # engine honestly declines to produce a number. Richer structure wins
+    # over the minimal binary form whenever a real multi-step path exists.
+    if resolution_path is not None and resolution_path.applies and resolution_path.steps:
+        derived_scenarios = _build_resolution_path_scenarios(
+            resolution_path, evidence_for_yes, evidence_for_no, change_triggers
+        )
+    elif resolution_semantics is not None and resolution_semantics.yes_condition and resolution_semantics.no_condition:
+        derived_scenarios = _build_binary_scenarios(
+            resolution_semantics, evidence_for_yes, evidence_for_no, change_triggers
+        )
+    else:
+        derived_scenarios = ()
+
     if estimated_yes_probability is None:
         base = (
             "Keine belastbare Basisprognose vorhanden — zu wenige historische Vergleichsfälle und/oder kein "
             "aktueller Marktpreis. Weder Bull- noch Bear-Case lassen sich derzeit sinnvoll ableiten."
         )
-        return ScenarioSet(base_case=base, bull_case=[], bear_case=[])
+        return ScenarioSet(base_case=base, bull_case=[], bear_case=[], scenarios=derived_scenarios)
 
     base = (
         f"Wahrscheinlichster Verlauf laut Ensemble: YES-Wahrscheinlichkeit ~{estimated_yes_probability:.0%}, "
@@ -67,4 +188,4 @@ def build_scenarios(
     if not bear:
         bear.append("Keine spezifischen Bear-Faktoren aus den verfügbaren Teilmodellen identifiziert.")
 
-    return ScenarioSet(base_case=base, bull_case=bull, bear_case=bear)
+    return ScenarioSet(base_case=base, bull_case=bull, bear_case=bear, scenarios=derived_scenarios)

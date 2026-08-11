@@ -262,11 +262,15 @@ def test_costs_of_both_attempts_are_summed(storage: Storage, ai_settings: Settin
 
 def test_second_attempt_skipped_for_budget(storage: Storage, ai_settings: Settings) -> None:
     market_id = _seed_market(storage)
-    # First attempt's real cost (~0.000065 USD) plus the repair's own
-    # pre-flight estimate together exceed this cap, but the first attempt's
-    # pre-flight estimate alone (using the same small max_output_tokens)
-    # fits — so attempt 1 is sent, and only the repair is blocked.
-    tight_budget = replace(ai_settings, openai_max_cost_per_analysis_usd=0.00009, openai_max_output_tokens=100)
+    # First attempt's real cost plus the repair's own pre-flight estimate
+    # together exceed this cap, but the first attempt's pre-flight estimate
+    # alone (using the same small max_output_tokens) fits — so attempt 1 is
+    # sent, and only the repair is blocked. Recalibrated for Block F Part 2's
+    # larger (real Block A-E structured data) explanation payload — attempt
+    # 1's pre-flight estimate alone is now ~0.0001 USD (was ~0.00006 USD
+    # before that payload grew), so the cap must sit above that but still
+    # well below attempt1 + repair combined.
+    tight_budget = replace(ai_settings, openai_max_cost_per_analysis_usd=0.00015, openai_max_output_tokens=100)
 
     def expensive_failure():
         raise AIInvalidJSONError("bad json", 500, 100)

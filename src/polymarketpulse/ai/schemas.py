@@ -147,6 +147,19 @@ class ExplanationResult(BaseModel):
     historical_context: str = ""
     recommendation_explanation: str
     warning: str = "Prognose, keine Gewissheit."
+    # --- Block F Part 2 (additive): maps the explanation onto the project
+    # owner's target question set (INTEGRATION_PLAN.md). `what_we_know` and
+    # `divergence_explanation` are free text (like `summary`/
+    # `recommendation_explanation` above — same "explain, never invent"
+    # discipline, no new numbers allowed by validation.py). `change_triggers`
+    # is NOT trusted from the model at all — ai/service.py::_try_model
+    # unconditionally overwrites it with the real, already-computed
+    # `prediction.change_triggers` tuple right after parsing, the same
+    # server-side-overwrite pattern already used for `disclaimer` in
+    # AnalysisResult — so this field can never carry a GPT-invented trigger.
+    what_we_know: str = ""
+    divergence_explanation: str = ""
+    change_triggers: list[str] = Field(default_factory=list)
 
     model_config = {"extra": "forbid"}
 

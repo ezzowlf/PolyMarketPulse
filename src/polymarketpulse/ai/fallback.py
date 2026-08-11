@@ -91,6 +91,27 @@ def build_fallback_explanation(prediction: PredictionResult) -> ExplanationResul
             )
         )
 
+    # Block F Part 2 (additive): "WAS WISSEN WIR" / "WARUM WEICHEN WIR VOM
+    # MARKT AB" free-text fields, built the same rule-based way as the rest
+    # of this fallback — real numbers only, no invention.
+    what_we_know = (
+        f"Publizierbare Prognose: {round(prediction.published_forecast_probability * 100)}% YES "
+        f"(Status: {prediction.forecast_status}, Reifegrad: {prediction.forecast_maturity})."
+        if prediction.published_forecast_probability is not None
+        else f"Keine publizierbare Prognose (Status: {prediction.forecast_status}, "
+        f"Reifegrad: {prediction.forecast_maturity})."
+    )
+    if prediction.independent_probability is not None and market_pct is not None:
+        divergence_pp = round(prediction.independent_probability * 100) - market_pct
+        divergence_explanation = (
+            f"Eigene unabhängige Einschätzung ({round(prediction.independent_probability * 100)}%) weicht "
+            f"{divergence_pp:+d} Prozentpunkte vom Marktpreis ({market_pct}%) ab."
+        )
+        if prediction.divergence_audit is not None:
+            divergence_explanation += f" Divergenz-Audit: {prediction.divergence_audit.verdict}."
+    else:
+        divergence_explanation = "Keine unabhängige Einschätzung verfügbar, daher keine Marktabweichung zu erklären."
+
     return ExplanationResult(
         direction=direction,
         recommendation=prediction.recommendation,
@@ -115,4 +136,7 @@ def build_fallback_explanation(prediction: PredictionResult) -> ExplanationResul
         ),
         recommendation_explanation=recommendation_explanation,
         warning="Prognose, keine Gewissheit. Regelbasierte Erklärung (keine KI-Anfrage durchgeführt).",
+        what_we_know=what_we_know,
+        divergence_explanation=divergence_explanation,
+        change_triggers=list(prediction.change_triggers),
     )

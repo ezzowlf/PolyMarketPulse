@@ -255,19 +255,62 @@ class QualityComposite:
 
 
 @dataclass(frozen=True)
+class Scenario:
+    """Block F Part 1: one genuinely-derived YES/NO scenario. Every field
+    is traceable to real, already-computed structured data — ResolutionPath
+    steps (Block C), real evidence/claims (EvidenceFactor titles from
+    evidence.py), and change_triggers (Block D Part 4). `probability` is
+    None unless a real per-scenario number was actually computed somewhere
+    (no code path fabricates one today, so this is the honest default for
+    every scenario currently produced)."""
+
+    outcome: str  # "YES" | "NO"
+    description: str
+    necessary_events: tuple[str, ...] = field(default_factory=tuple)
+    supporting_claims: tuple[str, ...] = field(default_factory=tuple)
+    contradicting_claims: tuple[str, ...] = field(default_factory=tuple)
+    triggers: tuple[str, ...] = field(default_factory=tuple)
+    probability: float | None = None
+
+    def as_dict(self) -> dict:
+        return {
+            "outcome": self.outcome,
+            "description": self.description,
+            "necessary_events": list(self.necessary_events),
+            "supporting_claims": list(self.supporting_claims),
+            "contradicting_claims": list(self.contradicting_claims),
+            "triggers": list(self.triggers),
+            "probability": self.probability,
+        }
+
+
+@dataclass(frozen=True)
 class ScenarioSet:
     """Deterministic, factor-derived scenario descriptions. Text is built
     from structured inputs (submodel estimates, news events, deadline
     phase) by plain string templates — no LLM involved in deciding what the
     scenarios *are*; GPT is only ever handed this finished set to phrase
-    more naturally in the explanation layer."""
+    more naturally in the explanation layer.
+
+    `scenarios` (Block F Part 1, additive) is the genuinely-derived YES/NO
+    scenario pair described above — real ResolutionPath structure for
+    markets that have one (e.g. legislation), or a minimal honest
+    yes_condition/no_condition pair for simple binary markets, or an empty
+    tuple when neither exists. `base_case`/`bull_case`/`bear_case` are kept
+    unchanged for backward compatibility with existing callers/tests."""
 
     base_case: str
     bull_case: list[str]
     bear_case: list[str]
+    scenarios: tuple[Scenario, ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict:
-        return {"base_case": self.base_case, "bull_case": self.bull_case, "bear_case": self.bear_case}
+        return {
+            "base_case": self.base_case,
+            "bull_case": self.bull_case,
+            "bear_case": self.bear_case,
+            "scenarios": [s.as_dict() for s in self.scenarios],
+        }
 
 
 @dataclass(frozen=True)
