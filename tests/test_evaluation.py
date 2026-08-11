@@ -3,7 +3,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from polymarketpulse.evaluation import evaluate_predictions
+from polymarketpulse.evaluation import (
+    evaluate_forecast_history,
+    evaluate_predictions,
+    evaluate_source_performance,
+)
 from polymarketpulse.migrations import run_migrations
 
 
@@ -134,3 +138,80 @@ def test_evaluation_simulated_roi_positive_for_all_correct_calls() -> None:
 
     assert report.simulated_roi is not None
     assert report.simulated_roi > 0
+
+
+# --- BLOCK G Part 1/2: published_forecast_probability evaluation --------
+
+
+def _seed_block_e_snapshot(
+    conn, provider_market_id, published_prob, category, models_used, forecast_at=None
+):
+    conn.execute(
+        "INSERT INTO prediction_snapshots (market_id, provider, provider_market_id, category, "
+        "prediction_version, created_at, recommendation, comparable_sample_size, forecast_at, "
+        "published_forecast_probability, models_used) "
+        "VALUES (?, 'polymarket', ?, ?, 'v2', ?, 'WATCH', 10, ?, ?, ?)",
+        (
+            provider_market_id, provider_market_id, category,
+            datetime.now(UTC).isoformat(), forecast_at or datetime(2020, 1, 1, tzinfo=UTC).isoformat(),
+            published_prob, models_used,
+        ),
+    )
+    conn.commit()
+
+
+def test_evaluate_forecast_history_on_empty_db(conn: sqlite3.Connection) -> None:
+    report = evaluate_forecast_history(conn)
+    assert report.status == "UNCALIBRATED"
+    assert report.matched_pair_count == 0
+    assert report.by_category == []
+    assert report.by_submodel == []
+
+
+def test_evaluate_forecast_history_never_scores_null_published_probability(conn: sqlite3.Connection) -> None:
+    # A snapshot with published_forecast_probability=NULL (correct
+    # NO_POSITION) must NEVER be coerced into a scored pair, even though
+    # it resolves and even though older fields (market_yes_probability)
+    # might be present.
+    _seed_snapshot(conn, "m1", "1", None, 0.3, None, "NO_BET")
+    _seed_resolution(conn, "1", "Yes")
+
+    report = evaluate_forecast_history(conn)
+    assert report.matched_pair_count == 0
+    assert report.status == "UNCALIBRATED"
+
+
+def test_evaluate_forecast_history_scores_published_forecasts_below_threshold_with_real_n(
+    conn: sqlite3.Connection,
+) -> None:
+    _seed_block_e_snapshot(conn, "1", 0.9, "politics", "history,momentum")
+    _seed_resolution(conn, "1", "Yes")
+
+    report = evaluate_forecast_history(conn)
+    assert report.matched_pair_count == 1
+    assert report.status == "UNCALIBRATED"  # below MIN_MATCHED_PAIRS_FOR_CALIBRATION
+    assert len(report.by_category) == 1
+    assert report.by_category[0].key == "politics"
+    assert report.by_category[0].n == 1
+    assert report.by_category[0].too_small is True
+    submodel_keys = {s.key for s in report.by_submodel}
+    assert submodel_keys == {"history", "momentum"}
+
+
+def test_evaluate_forecast_history_excludes_lookahead_forecasts(conn: sqlite3.Connection) -> None:
+    # forecast_at AFTER resolved_at must be excluded entirely.
+    _seed_block_e_snapshot(conn, "1", 0.9, "politics", "history", forecast_at=datetime(2099, 1, 1, tzinfo=UTC).isoformat())
+    _seed_resolution(conn, "1", "Yes")
+
+    report = evaluate_forecast_history(conn)
+    assert report.matched_pair_count == 0
+
+
+# --- BLOCK G Part 3: source performance -----------------------------------
+
+
+def test_evaluate_source_performance_reports_missing_linkage(conn: sqlite3.Connection) -> None:
+    report = evaluate_source_performance(conn)
+    assert report.linkage_available is False
+    assert "claim_market_links" in report.reason
+    assert report.by_source == []

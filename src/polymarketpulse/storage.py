@@ -1374,6 +1374,10 @@ class Storage:
         forecast_maturity: str | None = None,
         evidence_strength: str | None = None,
         data_quality_composite_score: float | None = None,
+        # --- Block G Part 4: persisted NO_FORECAST reason (additive,
+        # migration 23) ---
+        no_forecast_reason: str | None = None,
+        data_gap_summary_json: str | None = None,
     ) -> int:
         now = datetime.now(UTC).isoformat()
         cursor = self.connection.execute(
@@ -1389,8 +1393,9 @@ class Storage:
                 forecast_at, market_probability_at_forecast, blended_probability, calibrated_probability,
                 confidence_calibration_status, forecast_status, models_used, divergence_verdict,
                 model_hypothesis_probability, evidence_backed_probability, published_forecast_probability,
-                forecast_maturity, evidence_strength, data_quality_composite_score
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                forecast_maturity, evidence_strength, data_quality_composite_score,
+                no_forecast_reason, data_gap_summary_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 market_id, provider, provider_market_id, category, prediction_version, now,
@@ -1407,6 +1412,7 @@ class Storage:
                 confidence_calibration_status, forecast_status, models_used, divergence_verdict,
                 model_hypothesis_probability, evidence_backed_probability, published_forecast_probability,
                 forecast_maturity, evidence_strength, data_quality_composite_score,
+                no_forecast_reason, data_gap_summary_json,
             ),
         )
         self.connection.commit()

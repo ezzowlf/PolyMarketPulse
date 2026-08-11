@@ -19,8 +19,21 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from .prediction.calibration import (
+    MIN_MATCHED_PAIRS_FOR_CALIBRATION,
+    brier_score,
+    calibration_bins,
+    log_loss,
+)
+
 POSITIVE_RECOMMENDATIONS = ("STRONG_YES", "YES", "WATCH_YES")
 NEGATIVE_RECOMMENDATIONS = ("STRONG_NO", "NO", "WATCH_NO")
+
+# Same floor calibration.py already established (see its module docstring):
+# a breakdown below this many matched pairs is too small to draw any real
+# conclusion from and is reported as such (N shown, no verdict), never
+# padded or silently omitted.
+MIN_N_FOR_BREAKDOWN_CONCLUSION = 10
 
 
 @dataclass
@@ -155,4 +168,278 @@ def evaluate_predictions(conn: sqlite3.Connection) -> EvaluationReport:
         n_snapshots_total=n_total, n_evaluable=n_evaluable, n_directional=n_directional,
         accuracy=accuracy, precision=precision, recall=recall, brier_score=brier, log_loss=log_loss,
         calibration=calibration, average_net_edge=average_net_edge, simulated_roi=simulated_roi,
+    )
+
+
+# ---------------------------------------------------------------------------
+# BLOCK G — real, measurable evaluation on top of Block E's four-tier
+# forecast-semantics snapshot fields (market_probability_at_forecast /
+# model_hypothesis_probability / evidence_backed_probability /
+# published_forecast_probability), plus category and submodel breakdowns.
+#
+# Deliberately distinct from `evaluate_predictions` above (which scores the
+# older `estimated_yes_probability` field against every resolved snapshot
+# regardless of whether a forecast was actually published): this section
+# scores ONLY `published_forecast_probability`, and ONLY when it was
+# non-null at forecast time. A market that correctly never published a
+# forecast (NO_POSITION / WATCH under the Decision Engine's hard cap) has
+# NOTHING to score — that is a correct, honest outcome, not a missing data
+# point, and is never coerced into a score.
+#
+# Point-in-time safety (same invariant as calibration.py and
+# proof_of_edge_backtest.py): a snapshot only counts when
+#   snapshot.forecast_at < resolution.resolved_at
+# a forecast made at/after resolution is excluded entirely, never used to
+# inflate or deflate a score.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BreakdownResult:
+    """One (category|submodel) slice of the forecast-history evaluation.
+    `n` is always reported; `too_small` is set once `n` is below
+    MIN_N_FOR_BREAKDOWN_CONCLUSION, and metrics are still computed (Brier/
+    log-loss are well-defined for any n >= 1) but must be read as noise,
+    not a real conclusion, until n grows."""
+
+    key: str
+    n: int
+    too_small: bool
+    brier_score: float | None
+    log_loss_value: float | None
+    mean_predicted_probability: float | None
+    observed_frequency: float | None
+
+    def as_dict(self) -> dict:
+        return {
+            "key": self.key,
+            "n": self.n,
+            "too_small_for_conclusion": self.too_small,
+            "brier_score": self.brier_score,
+            "log_loss": self.log_loss_value,
+            "mean_predicted_probability": self.mean_predicted_probability,
+            "observed_frequency": self.observed_frequency,
+        }
+
+
+def _summarize_pairs(pairs: list[tuple[float, bool]]) -> tuple[float | None, float | None, float | None, float | None]:
+    if not pairs:
+        return None, None, None, None
+    b = brier_score(pairs)
+    ll = log_loss(pairs)
+    mean_pred = sum(p for p, _ in pairs) / len(pairs)
+    observed = sum(1.0 for _, o in pairs if o) / len(pairs)
+    return b, ll, mean_pred, observed
+
+
+@dataclass
+class ForecastHistoryEvaluation:
+    """Part 1/2 result: real Brier/log-loss for `published_forecast_probability`
+    against the market's own historical probability at forecast time,
+    joined point-in-time-safe against `market_resolutions`, plus category
+    and submodel (contributing-model) breakdowns. Every count is real —
+    never padded — and status is UNCALIBRATED whenever the matched-pair
+    count is below calibration.py's MIN_MATCHED_PAIRS_FOR_CALIBRATION."""
+
+    status: str  # "UNCALIBRATED" or "CALIBRATED"
+    matched_pair_count: int
+    min_required: int
+    brier_score: float | None
+    log_loss_value: float | None
+    bins: list[dict]
+    by_category: list[BreakdownResult]
+    by_submodel: list[BreakdownResult]
+
+    def as_dict(self) -> dict:
+        return {
+            "status": self.status,
+            "matched_pair_count": self.matched_pair_count,
+            "min_required": self.min_required,
+            "brier_score": self.brier_score,
+            "log_loss": self.log_loss_value,
+            "bins": self.bins,
+            "by_category": [c.as_dict() for c in self.by_category],
+            "by_submodel": [s.as_dict() for s in self.by_submodel],
+        }
+
+
+def evaluate_forecast_history(conn: sqlite3.Connection) -> ForecastHistoryEvaluation:
+    """The real Block G Part 1/2 evaluation function. Joins
+    `prediction_snapshots` (Block E's four-tier fields) against
+    `market_resolutions`, scoring `published_forecast_probability` only
+    where it is non-null and only for snapshots taken strictly before
+    resolution. Reuses calibration.py's brier_score/log_loss/
+    calibration_bins — no metric logic is reimplemented here."""
+    rows = conn.execute(
+        """
+        SELECT s.published_forecast_probability, s.category, s.models_used,
+               r.winning_outcome
+        FROM prediction_snapshots s
+        JOIN market_resolutions r
+          ON r.provider = s.provider AND r.provider_market_id = s.provider_market_id
+        WHERE s.forecast_at IS NOT NULL
+          AND r.resolved_at IS NOT NULL
+          AND s.forecast_at < r.resolved_at
+          AND r.winning_outcome IN ('Yes', 'No')
+          AND s.published_forecast_probability IS NOT NULL
+        """
+    ).fetchall()
+
+    pairs: list[tuple[float, bool]] = []
+    by_category: dict[str, list[tuple[float, bool]]] = {}
+    by_submodel: dict[str, list[tuple[float, bool]]] = {}
+
+    for published_prob, category, models_used, winning_outcome in rows:
+        outcome = winning_outcome == "Yes"
+        pairs.append((published_prob, outcome))
+        cat_key = category or "UNCATEGORIZED"
+        by_category.setdefault(cat_key, []).append((published_prob, outcome))
+        for submodel in (models_used or "").split(","):
+            submodel = submodel.strip()
+            if submodel:
+                by_submodel.setdefault(submodel, []).append((published_prob, outcome))
+
+    matched_pair_count = len(pairs)
+
+    category_results = [
+        BreakdownResult(
+            key=key, n=len(items), too_small=len(items) < MIN_N_FOR_BREAKDOWN_CONCLUSION,
+            **dict(zip(
+                ("brier_score", "log_loss_value", "mean_predicted_probability", "observed_frequency"),
+                _summarize_pairs(items), strict=True,
+            )),
+        )
+        for key, items in sorted(by_category.items())
+    ]
+    submodel_results = [
+        BreakdownResult(
+            key=key, n=len(items), too_small=len(items) < MIN_N_FOR_BREAKDOWN_CONCLUSION,
+            **dict(zip(
+                ("brier_score", "log_loss_value", "mean_predicted_probability", "observed_frequency"),
+                _summarize_pairs(items), strict=True,
+            )),
+        )
+        for key, items in sorted(by_submodel.items())
+    ]
+
+    if matched_pair_count < MIN_MATCHED_PAIRS_FOR_CALIBRATION:
+        return ForecastHistoryEvaluation(
+            status="UNCALIBRATED", matched_pair_count=matched_pair_count,
+            min_required=MIN_MATCHED_PAIRS_FOR_CALIBRATION, brier_score=None, log_loss_value=None,
+            bins=[], by_category=category_results, by_submodel=submodel_results,
+        )
+
+    return ForecastHistoryEvaluation(
+        status="CALIBRATED", matched_pair_count=matched_pair_count,
+        min_required=MIN_MATCHED_PAIRS_FOR_CALIBRATION,
+        brier_score=brier_score(pairs), log_loss_value=log_loss(pairs),
+        bins=[b.as_dict() for b in calibration_bins(pairs)],
+        by_category=category_results, by_submodel=submodel_results,
+    )
+
+
+@dataclass
+class SourcePerformanceEvaluation:
+    """Part 3: measures whether source_registry sources/independence_groups
+    that contributed claims to a market were directionally correct once
+    that market resolved. Real machinery, honestly gated: the current
+    schema (`claims`/`claim_sources`, migrations.py migration 18) records
+    which source contributed a claim, but does NOT record which market
+    that claim was evaluated for — there is no `claim_id -> (provider,
+    provider_market_id)` linkage table today. Independent evidence lookups
+    (prediction/independent_evidence.py) query claims live, per-request,
+    and never persist that per-market linkage back to storage. Until that
+    linkage exists, this function can only report a structural N=0 for
+    every source/independence_group — not because too few markets have
+    resolved, but because the join key itself does not exist in the
+    schema yet. That is reported explicitly via `linkage_available`."""
+
+    linkage_available: bool
+    reason: str
+    by_source: list[BreakdownResult]
+    by_independence_group: list[BreakdownResult]
+
+    def as_dict(self) -> dict:
+        return {
+            "linkage_available": self.linkage_available,
+            "reason": self.reason,
+            "by_source": [s.as_dict() for s in self.by_source],
+            "by_independence_group": [g.as_dict() for g in self.by_independence_group],
+        }
+
+
+def evaluate_source_performance(conn: sqlite3.Connection) -> SourcePerformanceEvaluation:
+    """Real check for Part 3: does the schema currently support joining
+    claim sources to the specific market they were used to forecast, and
+    that market's eventual resolution? If a `claim_market_links` (or
+    equivalent) table exists it is used; otherwise this honestly reports
+    `linkage_available=False` with an explicit reason rather than
+    fabricating a claim about which sources "are good"."""
+    tables = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    # No table in the current schema links a claim_id (and therefore a
+    # source_id / independence_group) to the (provider, provider_market_id)
+    # of the market it was actually used to forecast. `claims`/
+    # `claim_sources` (migration 18) record source attribution per claim,
+    # but not per-market usage.
+    linkage_table_candidates = {"claim_market_links", "claim_market_usage"}
+    linkage_available = bool(tables & linkage_table_candidates)
+
+    if not linkage_available:
+        return SourcePerformanceEvaluation(
+            linkage_available=False,
+            reason=(
+                "No claim-to-market linkage table exists in the current schema "
+                "(checked for: " + ", ".join(sorted(linkage_table_candidates)) + "). "
+                "claims/claim_sources (migration 18) record which source contributed "
+                "a claim, but not which market that claim was used to forecast, so "
+                "source-vs-resolved-outcome correlation cannot be computed from real "
+                "data yet. This is a real infrastructure gap, not a sample-size issue."
+            ),
+            by_source=[], by_independence_group=[],
+        )
+
+    # Real computation path, exercised once the linkage table exists:
+    # join claim_market_links -> claim_sources -> claims -> market_resolutions,
+    # scoring each source's/independence_group's claims as directionally
+    # correct/incorrect against the resolved winning_outcome, with the same
+    # point-in-time (claim timestamp < resolved_at) and N-reporting
+    # discipline as evaluate_forecast_history above.
+    rows = conn.execute(
+        """
+        SELECT cs.source_id, c.direction, c.timestamp, r.winning_outcome, r.resolved_at
+        FROM claim_market_links l
+        JOIN claim_sources cs ON cs.claim_id = l.claim_id
+        JOIN claims c ON c.claim_id = l.claim_id
+        JOIN market_resolutions r
+          ON r.provider = l.provider AND r.provider_market_id = l.provider_market_id
+        WHERE c.timestamp IS NOT NULL AND r.resolved_at IS NOT NULL
+          AND c.timestamp < r.resolved_at
+          AND r.winning_outcome IN ('Yes', 'No')
+          AND c.direction IN ('positive', 'negative')
+        """
+    ).fetchall()
+
+    by_source: dict[str, list[tuple[float, bool]]] = {}
+    for source_id, direction, _ts, winning_outcome, _resolved_at in rows:
+        predicted_yes = 1.0 if direction == "positive" else 0.0
+        outcome = winning_outcome == "Yes"
+        by_source.setdefault(source_id, []).append((predicted_yes, outcome))
+
+    by_source_results = [
+        BreakdownResult(
+            key=key, n=len(items), too_small=len(items) < MIN_N_FOR_BREAKDOWN_CONCLUSION,
+            **dict(zip(
+                ("brier_score", "log_loss_value", "mean_predicted_probability", "observed_frequency"),
+                _summarize_pairs(items), strict=True,
+            )),
+        )
+        for key, items in sorted(by_source.items())
+    ]
+
+    return SourcePerformanceEvaluation(
+        linkage_available=True, reason="claim_market_links present; real join computed.",
+        by_source=by_source_results, by_independence_group=[],
     )

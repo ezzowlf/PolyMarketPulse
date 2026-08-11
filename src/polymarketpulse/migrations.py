@@ -1079,6 +1079,38 @@ def _migration_022_prediction_snapshot_forecast_semantics(conn: sqlite3.Connecti
     conn.commit()
 
 
+def _migration_023_prediction_snapshot_no_forecast_reason(conn: sqlite3.Connection) -> None:
+    """BLOCK G, Part 4: additive columns on the existing `prediction_snapshots`
+    table so that whenever a snapshot was written with
+    `published_forecast_probability IS NULL` (a market that correctly never
+    published a forecast), the REASON is persisted per-snapshot instead of
+    only being visible transiently in an API response. This is what makes
+    "which data is most commonly missing" a real, queryable question later,
+    instead of something that has to be re-derived (or guessed) after the
+    fact.
+
+    - no_forecast_reason: short machine-readable reason, e.g. the engine's
+      own decision_reasons (from prediction/decision.py::compute_decision_state)
+      joined with '; ', or the forecast_status literal
+      (NO_FORECAST/FORECAST_SUPPRESSED/...) when decision_reasons is empty.
+      NULL whenever published_forecast_probability was NOT null (a forecast
+      genuinely was published — there is nothing to explain).
+    - data_gap_summary_json: verbatim JSON of DataGapReport.gap_summary
+      (data_gaps.py) at snapshot time — total/critical/high/medium/low gap
+      counts — so a snapshot's "why no forecast" can be cross-referenced
+      against exactly which data was missing, not just a free-text reason.
+      NULL when data_gaps never ran or found nothing (both real, honest
+      states — never fabricated).
+
+    Both columns nullable and purely additive; no existing column dropped,
+    renamed, or altered. Every existing row reads exactly as before (NULL
+    for every pre-Block-G snapshot, which is honest: those rows genuinely
+    predate this reason being captured at all)."""
+    _add_column(conn, "prediction_snapshots", "no_forecast_reason", "TEXT")
+    _add_column(conn, "prediction_snapshots", "data_gap_summary_json", "TEXT")
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1102,6 +1134,7 @@ MIGRATIONS: list[Migration] = [
     (20, "polymarket_price_history_backfill", _migration_020_polymarket_price_history_backfill),
     (21, "claim_resolution_step", _migration_021_claim_resolution_step),
     (22, "prediction_snapshot_forecast_semantics", _migration_022_prediction_snapshot_forecast_semantics),
+    (23, "prediction_snapshot_no_forecast_reason", _migration_023_prediction_snapshot_no_forecast_reason),
 ]
 
 

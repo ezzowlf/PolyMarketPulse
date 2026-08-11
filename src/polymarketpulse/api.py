@@ -186,11 +186,16 @@ def markets(
         params.append(f"%{search}%")
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-    # Latest snapshot per market for liquidity/volume/score filtering & display.
+    # Latest snapshot per market for liquidity/volume/score filtering & display,
+    # plus (BLOCK G Part 5) the latest already-persisted prediction_snapshots
+    # row so the Markets-list can show PMP%/status without re-running the
+    # prediction engine per row here. Read-only reuse of what other flows
+    # already computed and stored — never a fresh compute_prediction() call.
     query = f"""
         SELECT m.market_id, m.provider, m.provider_market_id, m.question, m.slug, m.category,
                m.url, m.end_date, m.resolution_status,
-               ls.yes_price, ls.liquidity, ls.volume_24h, ls.spread, ls.opportunity_score
+               ls.yes_price, ls.liquidity, ls.volume_24h, ls.spread, ls.opportunity_score,
+               ps.published_forecast_probability, ps.forecast_status, ps.data_quality_composite_score
         FROM markets m
         LEFT JOIN (
             SELECT ms1.* FROM market_snapshots ms1
@@ -198,6 +203,12 @@ def markets(
                 SELECT market_id, MAX(captured_at) AS latest FROM market_snapshots GROUP BY market_id
             ) ms2 ON ms1.market_id = ms2.market_id AND ms1.captured_at = ms2.latest
         ) ls ON ls.market_id = m.market_id
+        LEFT JOIN (
+            SELECT ps1.* FROM prediction_snapshots ps1
+            JOIN (
+                SELECT market_id, MAX(created_at) AS latest FROM prediction_snapshots GROUP BY market_id
+            ) ps2 ON ps1.market_id = ps2.market_id AND ps1.created_at = ps2.latest
+        ) ps ON ps.market_id = m.market_id
         {where}
         ORDER BY ls.opportunity_score DESC NULLS LAST
         LIMIT ? OFFSET ?
@@ -224,8 +235,17 @@ def markets(
         "volume_24h",
         "spread",
         "opportunity_score",
+        "published_forecast_probability",
+        "forecast_status",
+        "data_quality_composite_score",
     )
     items = [dict(zip(columns, row, strict=True)) for row in rows]
+    # Markets-list contract (Block G Part 5): when no forecast was ever
+    # published for this market's latest snapshot (or no snapshot exists at
+    # all), the PMP% field is real-None, never the unpublished
+    # model_hypothesis number — the frontend renders "–" for None, exactly
+    # as it does for `market_probability` being None elsewhere. Nothing to
+    # backfill or guess here.
     if min_liquidity is not None:
         items = [i for i in items if (i["liquidity"] or 0) >= min_liquidity]
     if min_volume is not None:
@@ -1139,6 +1159,31 @@ def shadow_performance_endpoint(storage: Storage = Depends(get_storage)) -> dict
     report = compute_shadow_performance(storage.connection)
     submodels = compute_submodel_comparison(storage.connection)
     return {"performance": report.as_dict(), "submodels": [s.as_dict() for s in submodels]}
+
+
+@app.get("/evaluation/forecast-history")
+def evaluation_forecast_history_endpoint(storage: Storage = Depends(get_storage)) -> dict:
+    """BLOCK G Part 1/2: real, measurable resolution/learning evaluation —
+    Brier/log-loss for `published_forecast_probability` against resolved
+    outcomes, point-in-time-safe, plus category and submodel breakdowns
+    with explicit N at every level. Never fabricates a score for a market
+    that correctly published no forecast."""
+    from .evaluation import evaluate_forecast_history
+
+    report = evaluate_forecast_history(storage.connection)
+    return report.as_dict()
+
+
+@app.get("/evaluation/source-performance")
+def evaluation_source_performance_endpoint(storage: Storage = Depends(get_storage)) -> dict:
+    """BLOCK G Part 3: real source/independence-group performance
+    machinery. Honestly reports `linkage_available=False` (with the exact
+    reason) while the schema has no claim-to-market linkage table, rather
+    than fabricating a "these sources are good" claim."""
+    from .evaluation import evaluate_source_performance
+
+    report = evaluate_source_performance(storage.connection)
+    return report.as_dict()
 
 
 @app.post("/shadow/scan")

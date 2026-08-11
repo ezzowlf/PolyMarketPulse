@@ -508,6 +508,25 @@ def _persist_prediction_snapshot(storage: Storage, market: dict, prediction: Pre
     # use (DIRECT_YES/DIRECT_NO strongest, then SUPPORTS_*, then WEAK/
     # CONTEXT-only, then "no items at all") — never fabricated, "NONE"
     # honestly means independent_evidence ran but found nothing usable.
+    # Block G Part 4: persist the real reason whenever no forecast was
+    # published, so it becomes a queryable per-snapshot fact instead of
+    # only appearing transiently in an API response. Prefer the engine's
+    # own decision_reasons (prediction/decision.py::compute_decision_state)
+    # since those are the actual, specific reasons already computed for
+    # this forecast; fall back to the forecast_status literal when
+    # decision_reasons is empty. Never populated when a forecast WAS
+    # published — there is nothing to explain in that case.
+    no_forecast_reason = None
+    if prediction.published_forecast_probability is None:
+        if prediction.decision_reasons:
+            no_forecast_reason = "; ".join(prediction.decision_reasons)
+        else:
+            no_forecast_reason = prediction.forecast_status
+
+    data_gap_summary_json = (
+        json.dumps(prediction.data_gaps.gap_summary) if prediction.data_gaps is not None else None
+    )
+
     evidence_strength = None
     if ie is not None and ie.available:
         all_items = (*ie.evidence_for_yes, *ie.evidence_for_no)
@@ -563,6 +582,8 @@ def _persist_prediction_snapshot(storage: Storage, market: dict, prediction: Pre
         data_quality_composite_score=(
             prediction.data_quality_composite.score if prediction.data_quality_composite else None
         ),
+        no_forecast_reason=no_forecast_reason,
+        data_gap_summary_json=data_gap_summary_json,
     )
 
 
