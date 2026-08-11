@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
+from .source_registry import recommend_sources_for_gap
+
 # Data gap categories (spec: never claim data exists when it doesn't)
 DataGapCategory = Literal[
     "NEWS_PRIMARY",      # No primary news evidence (Reuters, AP, official feeds)
@@ -153,13 +155,23 @@ def calculate_data_gaps(
             if h.get("source_id") in ("gdelt", "un_news", "whitehouse", "state_department")
         )
     ):
+        # Real source routing (Data Gap Engine -> Source Registry): the RSS
+        # feed names above (gdelt/un_news/whitehouse/state_department) are
+        # the *live health-checked* primary feeds; `recommend_sources_for_gap`
+        # additionally routes via the structured SourceDefinition registry
+        # (e.g. reuters/apnews/congress_gov for the matching event_type),
+        # so a market with a specific event_type gets concrete, registry-
+        # backed source_ids rather than only the fixed RSS-feed tuple.
+        routed = recommend_sources_for_gap(market_category, event_type)
+        base_feeds = ("gdelt", "un_news", "whitehouse", "state_department")
+        recommended = base_feeds + tuple(s for s in routed if s not in base_feeds)
         gaps.append(DataGap(
             category="NEWS_PRIMARY",
             severity="HIGH",
             description="Keine verifizierten Primärquellen (Regierungserklärungen, offizielle Pressemitteilungen).",
             priority=GapPriority.HIGH,
             impact_on_confidence=0.15,
-            recommended_sources=("gdelt", "un_news", "whitehouse", "state_department"),
+            recommended_sources=recommended,
         ))
     
     # History is optional when a genuine structured domain-data path is
@@ -216,13 +228,18 @@ def calculate_data_gaps(
                 recommended_sources=("coingecko",),
             ))
         elif market_category == "CENTRAL_BANKS":
+            # Real registry keys (was: "federal_reserve"/"eurostat", which
+            # do not exist as SOURCE_REGISTRY ids and could never resolve to
+            # an actual SourceDefinition). Routed via
+            # MARKET_CATEGORY_TO_EVENT_TYPES["CENTRAL_BANKS"] -> fred/ecb.
+            routed = recommend_sources_for_gap(market_category, event_type) or ("fred", "ecb")
             gaps.append(DataGap(
                 category="STRUCTURED_DATA",
                 severity="MEDIUM",
                 description="Keine strukturierte Makro-Datenquelle (FRED, Eurostat) angeschlossen.",
                 priority=GapPriority.MEDIUM,
                 impact_on_confidence=0.10,
-                recommended_sources=("federal_reserve", "eurostat"),
+                recommended_sources=routed,
             ))
         elif market_category == "SPORT_OTHER":
             gaps.append(DataGap(

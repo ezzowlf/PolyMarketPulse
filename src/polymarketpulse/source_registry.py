@@ -302,6 +302,68 @@ def get_source_definition(source_domain: str) -> SourceDefinition | None:
     return SOURCE_REGISTRY.get(source_domain)
 
 
+def get_source_id_for_definition(source_def: SourceDefinition) -> str | None:
+    """Reverse-lookup the registry key (source_id) for a SourceDefinition."""
+    for key, value in SOURCE_REGISTRY.items():
+        if value is source_def:
+            return key
+    return None
+
+
+# Market-category -> event_type keys used by SourceDefinition.relevance_by_event_type.
+# This is the Data Gap Engine's routing table: a market_category alone (no
+# specific event_type detected yet) still needs a real source recommendation,
+# so each category maps to the event_type keys most representative of it.
+# Kept intentionally narrow/explicit (no guessed categories) so a gap's
+# recommended_sources are always traceable back to a real relevance entry.
+MARKET_CATEGORY_TO_EVENT_TYPES: dict[str, tuple[str, ...]] = {
+    "LEGISLATION": ("legislation",),
+    "POLITICS": ("appointment", "office_departure", "court_outcome"),
+    "ELECTIONS": ("election",),
+    "GEOPOLITICS": ("ceasefire", "war_escalation", "sanctions", "diplomatic_agreement"),
+    "WAR_PEACE": ("war_escalation", "ceasefire", "military_action", "territorial_control"),
+    "CENTRAL_BANKS": ("central_bank_decision", "rate_cut", "rate_hike", "rate_hold", "monetary_policy"),
+    "CRYPTO": ("price_above", "price_below"),
+}
+
+
+def get_source_ids_for_event_type(event_type: str | None) -> tuple[str, ...]:
+    """Registry keys (source_ids) relevant to an event_type, HIGH-relevance first."""
+    if not event_type:
+        return ()
+    return tuple(
+        get_source_id_for_definition(s) or s.source_name
+        for s in get_sources_for_event_type(event_type)
+    )
+
+
+def recommend_sources_for_gap(
+    market_category: str | None, event_type: str | None = None
+) -> tuple[str, ...]:
+    """Real source routing for the Data Gap Engine: Market Category / Event
+    Type -> concrete, registry-backed source_ids (not a disconnected list).
+
+    Prefers the specific event_type (e.g. "legislation") when known; falls
+    back to the category's mapped event_type keys via
+    `MARKET_CATEGORY_TO_EVENT_TYPES` (e.g. CENTRAL_BANKS -> fred, ecb)
+    otherwise. Dedupes while preserving priority order.
+    """
+    candidate_event_types: list[str] = []
+    if event_type:
+        candidate_event_types.append(event_type)
+    if market_category:
+        candidate_event_types.extend(MARKET_CATEGORY_TO_EVENT_TYPES.get(market_category, ()))
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for et in candidate_event_types:
+        for source_id in get_source_ids_for_event_type(et):
+            if source_id not in seen:
+                seen.add(source_id)
+                ordered.append(source_id)
+    return tuple(ordered)
+
+
 def get_sources_for_event_type(event_type: str) -> list[SourceDefinition]:
     """Hole alle Quellen, die für einen Event-Typ relevant sind."""
     relevant = []
