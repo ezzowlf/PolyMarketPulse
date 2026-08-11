@@ -175,3 +175,16 @@ def test_contribution_breakdown_weight_shares_sum_to_one_among_available(conn) -
     shares = [c.weight_share for c in result.contribution_breakdown if c.available and c.weight_share is not None]
     assert shares  # at least one available, weighted source
     assert sum(shares) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_contribution_breakdown_includes_direction_and_contribution(conn) -> None:
+    _seed(conn, n_yes=15, n_no=5)
+    result = compute_prediction(conn, "m1", "polymarket", "m1", "esports", 0.5, 100000, 90, 0, None, True)
+    contributions = [c for c in result.contribution_breakdown if c.available and c.contribution_pp is not None]
+    assert contributions
+    for c in contributions:
+        assert c.direction in ("YES", "NO", "neutral")
+        assert isinstance(c.contribution_pp, float)
+        assert c.explanation is not None
+        if c.source == "independent_evidence":
+            assert isinstance(c.source_ids, tuple)

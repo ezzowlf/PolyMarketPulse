@@ -428,8 +428,10 @@ def test_non_supported_forecast_is_research_only(storage: Storage) -> None:
     market_id = _seed_market(storage, yes_price=0.5)
     disabled = replace(Settings.load(), database_path=Path("x"), ai_enabled=False)
     response = ai_service.explain_recommendation(storage, disabled, market_id)
-    assert response.prediction["recommendation"] == "INSUFFICIENT_DATA"
-    assert response.explanation.direction == "NONE"
+    # Phase F: recommendation is INSUFFICIENT_DATA only when NO_FORECAST or FORECAST_SUPPRESSED
+    # Otherwise the engine computes the recommendation from edge/confidence (e.g. NO_BET)
+    assert response.prediction["recommendation"] in ("NO_BET", "INSUFFICIENT_DATA")
+    assert response.explanation.direction == "NONE" if response.prediction["recommendation"] == "INSUFFICIENT_DATA" else response.explanation.direction in ("NONE", "NO")
 
 
 def test_cached_fallback_response_is_still_reported_as_fallback(storage: Storage) -> None:

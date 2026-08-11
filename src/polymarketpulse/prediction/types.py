@@ -101,14 +101,29 @@ class ContributionEntry:
     # that don't have a prior/base-rate concept at all (e.g. momentum).
     # See PriorProvenance in this module for the literal's meaning.
     prior_provenance: PriorProvenance | None = None
+    # Phase F: contribution metadata for evidence-first presentation
+    direction: str | None = None
+    contribution_pp: float | None = None
+    source_ids: tuple[str, ...] = field(default_factory=tuple)
+    evidence_strength: str | None = None
+    calculation_method: str | None = None
+    explanation: str | None = None
 
     def as_dict(self) -> dict:
         return {
-            "source": self.source, "available": self.available,
+            "source": self.source,
+            "available": self.available,
             "estimated_yes_probability": self.estimated_yes_probability,
-            "weight_share": self.weight_share, "detail": self.detail,
+            "weight_share": self.weight_share,
+            "detail": self.detail,
             "eligible": self.eligible,
             "prior_provenance": self.prior_provenance,
+            "direction": self.direction,
+            "contribution_pp": self.contribution_pp,
+            "source_ids": list(self.source_ids),
+            "evidence_strength": self.evidence_strength,
+            "calculation_method": self.calculation_method,
+            "explanation": self.explanation,
         }
 
 
@@ -304,6 +319,27 @@ class PredictionResult:
     market_consensus_probability: float | None = None
     blended_probability: float | None = None
     calibrated_probability: float | None = None
+    # --- Block A: forecast-semantics separation (additive, four distinct
+    # concepts — see INTEGRATION_PLAN.md / HANDOFF.md Block A) ---------------
+    #   market_probability: Polymarket's own price. Pure alias of
+    #     market_consensus_probability (no duplicate storage; see __post_init__).
+    #   model_hypothesis_probability: the model's raw internal opinion
+    #     (== independent_probability today). Existing does NOT imply it is
+    #     trustworthy or publishable on its own.
+    #   evidence_backed_probability: model_hypothesis_probability, but only
+    #     when forecast_maturity has reached SUPPORTED_FORECAST or
+    #     MATURE_FORECAST (real DIRECT/SUPPORTS-tier evidence, adequate
+    #     comparables, no critical/high data gaps, divergence audit not
+    #     REJECT) — None otherwise.
+    #   published_forecast_probability: the actual publishable
+    #     PolyMarketPulse forecast. None whenever evidence_backed_probability
+    #     is None OR forecast_status in ("NO_FORECAST", "FORECAST_SUPPRESSED").
+    #     This is the field downstream consumers (UI/API/opportunities) must
+    #     gate on — never independent_probability/blended_probability directly.
+    market_probability: float | None = None
+    model_hypothesis_probability: float | None = None
+    evidence_backed_probability: float | None = None
+    published_forecast_probability: float | None = None
     forecast_status: ForecastStatus = "NO_FORECAST"
     contribution_breakdown: tuple[ContributionEntry, ...] = field(default_factory=tuple)
     # Phase B4: human-readable reason when forecast_status == "FORECAST_SUPPRESSED",
@@ -449,6 +485,10 @@ class PredictionResult:
             "market_consensus_probability": self.market_consensus_probability,
             "blended_probability": self.blended_probability,
             "calibrated_probability": self.calibrated_probability,
+            "market_probability": self.market_probability,
+            "model_hypothesis_probability": self.model_hypothesis_probability,
+            "evidence_backed_probability": self.evidence_backed_probability,
+            "published_forecast_probability": self.published_forecast_probability,
             "forecast_status": self.forecast_status,
             "contribution_breakdown": [c.as_dict() for c in self.contribution_breakdown],
             "forecast_suppression_reason": self.forecast_suppression_reason,

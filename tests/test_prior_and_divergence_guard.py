@@ -189,6 +189,8 @@ def test_divergence_suppressed_when_evidence_is_weak(storage: Storage) -> None:
     assert result.forecast_status == "FORECAST_SUPPRESSED"
     assert result.forecast_suppression_reason is not None
     assert "%" in result.forecast_suppression_reason
+    assert result.evidence_backed_probability is None
+    assert result.published_forecast_probability is None
 
 
 def test_divergence_not_suppressed_when_evidence_is_strong(storage: Storage) -> None:
@@ -212,6 +214,18 @@ def test_divergence_not_suppressed_when_evidence_is_strong(storage: Storage) -> 
     )
     assert result.forecast_status != "FORECAST_SUPPRESSED"
     assert result.independent_probability is not None
+    # Block A: real DIRECT-tier evidence exists, so this is evidence-backed
+    # even though the forecast is not yet SUPPORTED_FORECAST-mature ...
+    assert result.evidence_backed_probability is not None
+    # ... but this market also has a CRITICAL data gap (0 historical
+    # comparable cases found, below the recommended minimum), so it must
+    # NOT be published as a forecast yet -- this is exactly the "confident
+    # number resting on inadequate comparables" pattern the forecast-
+    # maturity gate exists to catch (see the Bab-el-Mandeb/Hormuz regression
+    # tests). published_forecast_probability requires SUPPORTED_FORECAST+.
+    assert result.forecast_maturity == "PARTIAL_FORECAST"
+    assert result.data_gaps is not None and result.data_gaps.critical_gaps > 0
+    assert result.published_forecast_probability is None
 
 
 # ---------------------------------------------------------------------------

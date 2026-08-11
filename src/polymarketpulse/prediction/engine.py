@@ -894,9 +894,34 @@ def compute_prediction(
     total_available_weight = sum(s.weight for s in all_submodels if s.available)
     contribution_breakdown = tuple(
         ContributionEntry(
-            source=s.name, available=s.available, estimated_yes_probability=s.estimated_yes_probability,
+            source=s.name,
+            available=s.available,
+            estimated_yes_probability=s.estimated_yes_probability,
             weight_share=(round(s.weight / total_available_weight, 4) if s.available and total_available_weight > 0 else None),
             detail=s.detail,
+            direction=(
+                "YES" if s.estimated_yes_probability is not None and s.estimated_yes_probability > 0.5
+                else "NO" if s.estimated_yes_probability is not None and s.estimated_yes_probability < 0.5
+                else "neutral"
+            ) if s.available and s.estimated_yes_probability is not None else None,
+            contribution_pp=(
+                round((s.estimated_yes_probability - 0.5) * (s.weight / total_available_weight), 4)
+                if s.available and s.estimated_yes_probability is not None and total_available_weight > 0 else None
+            ),
+            source_ids=(
+                tuple(str(e.news_event_id) for e in (*independent_evidence.evidence_for_yes, *independent_evidence.evidence_for_no))
+                if s.name == "independent_evidence" and independent_evidence.available else ()
+            ),
+            evidence_strength=(
+                "hoch" if s.name == "independent_evidence" and independent_evidence.source_quality_score is not None and independent_evidence.source_quality_score >= 70 else
+                "mittel" if s.name == "independent_evidence" and independent_evidence.source_quality_score is not None and independent_evidence.source_quality_score >= 40 else
+                "gering" if s.name == "independent_evidence" and independent_evidence.source_quality_score is not None else
+                None
+            ),
+            calculation_method=(
+                "weighted_average" if s.available else None
+            ),
+            explanation=s.detail,
             eligible=specialized_eligibility.get(s.name),
             prior_provenance=_PRIOR_PROVENANCE_BY_SOURCE.get(
                 s.name, "UNKNOWN" if s.name in ALL_SPECIALIZED_MODEL_NAMES else None
@@ -1018,6 +1043,14 @@ def compute_prediction(
         market_consensus_probability=market_yes,
         blended_probability=blended_probability,
         calibrated_probability=calibrated_probability,
+        market_probability=market_yes,
+        # Block A: model_hypothesis_probability is the raw internal model
+        # opinion — identical to independent_probability today (the market-
+        # blind ensemble estimate). Existing does NOT imply it is publishable;
+        # see evidence_backed_probability / published_forecast_probability below.
+        model_hypothesis_probability=independent_probability,
+        evidence_backed_probability=None,
+        published_forecast_probability=None,
         forecast_status=forecast_status,
         contribution_breakdown=contribution_breakdown,
         forecast_suppression_reason=forecast_suppression_reason,
@@ -1034,12 +1067,48 @@ def compute_prediction(
         proposition=proposition,
         resolution_semantics=resolution_semantics,
     )
-    # Forecast Maturity is classified from the fully-assembled result (it
-    # reads confidence/data_quality/data_gaps/divergence_audit, all of which
-    # only exist once `result` is built) — see maturity.py for the exact
-    # rules. dataclasses.replace keeps PredictionResult frozen/immutable.
+    # Phase F: evidence-gated forecast hierarchy
+    # evidence_backed_probability: only when sufficient evidence exists
+    # published_forecast_probability: only when not suppressed
     maturity = classify_forecast_maturity(result)
-    result = _dataclass_replace(result, forecast_maturity=maturity)
-    if maturity not in ("SUPPORTED_FORECAST", "MATURE_FORECAST"):
-        result = _dataclass_replace(result, recommendation="INSUFFICIENT_DATA")
-    return _dataclass_replace(result, maturity_breakdown=build_maturity_breakdown(result))
+    # Block A gate:
+    #   evidence_backed_probability: real DIRECT/SUPPORTS-tier evidence with
+    #     adequate comparables exists (maturity reached at least
+    #     PARTIAL_FORECAST — a real, non-thin estimate — up through
+    #     MATURE_FORECAST). NO_FORECAST / CONTEXT_ONLY / HYPOTHESIS all mean
+    #     "not enough evidence yet" -> None. This is deliberately more lenient
+    #     than the publish gate below: a real-but-incomplete forecast (data
+    #     gaps present) is still evidence-backed, just not yet publishable.
+    #   published_forecast_probability (exact spec): None whenever
+    #     forecast_maturity is below SUPPORTED_FORECAST, or the divergence
+    #     audit verdict is REJECT (folded into forecast_status ==
+    #     FORECAST_SUPPRESSED by classify_forecast_maturity), or
+    #     evidence_backed_probability is None.
+    evidence_backed_probability = (
+        result.independent_probability
+        if maturity in ("PARTIAL_FORECAST", "SUPPORTED_FORECAST", "MATURE_FORECAST")
+        else None
+    )
+    published_forecast_probability = (
+        evidence_backed_probability
+        if evidence_backed_probability is not None
+        and maturity in ("SUPPORTED_FORECAST", "MATURE_FORECAST")
+        and result.forecast_status not in ("NO_FORECAST", "FORECAST_SUPPRESSED")
+        and (result.divergence_audit is None or result.divergence_audit.verdict != "REJECT")
+        else None
+    )
+    # recommendation: only INSUFFICIENT_DATA when NO_FORECAST or FORECAST_SUPPRESSED
+    # otherwise keep the computed recommendation from earlier in the function
+    recommendation = (
+        "INSUFFICIENT_DATA"
+        if maturity == "NO_FORECAST" or result.forecast_status == "FORECAST_SUPPRESSED"
+        else result.recommendation
+    )
+    return _dataclass_replace(
+        result,
+        forecast_maturity=maturity,
+        maturity_breakdown=build_maturity_breakdown(result),
+        recommendation=recommendation,
+        evidence_backed_probability=evidence_backed_probability,
+        published_forecast_probability=published_forecast_probability,
+    )
