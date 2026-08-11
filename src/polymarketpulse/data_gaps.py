@@ -16,9 +16,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from .source_registry import recommend_sources_for_gap
+
+if TYPE_CHECKING:
+    from .prediction.world_state import ResolutionPath
 
 # Data gap categories (spec: never claim data exists when it doesn't)
 DataGapCategory = Literal[
@@ -32,7 +35,24 @@ DataGapCategory = Literal[
     "MARKET_HISTORY",    # Insufficient Polymarket price history
     "GEOGRAPHIC_DATA",   # Missing geographic context
     "ECONOMIC_DATA",     # Missing macro/economic indicators
+    # Block D Part 3: a specific, named step of a real multi-step
+    # resolution structure (Block C's ResolutionStep/ResolutionPath) whose
+    # status is genuinely "unknown" — e.g. a legislation market's senate
+    # vote never having a real dated evidence item to derive a status from.
+    "RESOLUTION_PATH",
 ]
+
+# Human-readable German step names for RESOLUTION_PATH gap descriptions —
+# real, plain translations of the literal step-name strings
+# world_state._MULTISTEP_STRUCTURE_BY_EVENT_TYPE already uses (currently
+# only the "legislation" structure), never invented text.
+_STEP_NAME_DE: dict[str, str] = {
+    "introduced": "Einbringung des Gesetzentwurfs",
+    "committee": "Ausschussphase",
+    "house_vote": "Abstimmung im Repräsentantenhaus",
+    "senate_vote": "Abstimmung im Senat",
+    "presidential_action": "Unterzeichnung/Veto durch den Präsidenten",
+}
 
 
 class GapPriority(Enum):
@@ -114,6 +134,7 @@ def calculate_data_gaps(
     time_horizon_compatible: bool | None,
     has_structured_data: bool,
     has_event_relations: bool,
+    resolution_path: ResolutionPath | None = None,
 ) -> DataGapReport:
     """Calculate data gaps for a market based on available information.
     
@@ -251,6 +272,51 @@ def calculate_data_gaps(
                 recommended_sources=("sportsdb",),
             ))
     
+    # Block D Part 3: concrete, step-named resolution-path gaps. Only ever
+    # fires for markets with a real known multi-step structure
+    # (resolution_path.applies=True) AND at least one step whose status is
+    # genuinely "unknown" — never invented for markets with no known
+    # structure (resolution_path is None or applies=False), which is the
+    # honest, correct outcome for the overwhelming majority of markets.
+    if resolution_path is not None and resolution_path.applies:
+        unknown_steps = [s for s in resolution_path.steps if s.status == "unknown"]
+        if unknown_steps:
+            # The FIRST unknown step (in real process order) is the one that
+            # actually blocks the path today — later unknown steps are
+            # unknown only because this earlier one hasn't resolved yet, so
+            # naming it specifically (not the whole list) is the concrete,
+            # actionable gap description the project owner asked for.
+            next_step = unknown_steps[0]
+            step_label = _STEP_NAME_DE.get(next_step.name, next_step.name)
+            severity = "HIGH" if resolution_path.deadline_pressure in ("HIGH", "CRITICAL") else "MEDIUM"
+            prefix = "SEHR WICHTIG: " if severity == "HIGH" else "WICHTIG: "
+            gaps.append(DataGap(
+                category="RESOLUTION_PATH",
+                severity=severity,
+                description=(
+                    f"{prefix}Status von '{step_label}' ({next_step.name}) im mehrstufigen "
+                    f"Auflösungspfad ist unbekannt — keine datierte, primärquellen-taugliche "
+                    f"Evidenz für diesen Schritt gefunden. "
+                    f"{resolution_path.steps_remaining if resolution_path.steps_remaining is not None else '?'} "
+                    f"von {len(resolution_path.steps)} Schritten insgesamt offen."
+                ),
+                priority=GapPriority.HIGH if severity == "HIGH" else GapPriority.MEDIUM,
+                impact_on_confidence=0.15 if severity == "HIGH" else 0.08,
+                recommended_sources=(),  # Filled by real evidence, not an external source feed
+            ))
+        if resolution_path.blockers:
+            gaps.append(DataGap(
+                category="RESOLUTION_PATH",
+                severity="HIGH",
+                description=(
+                    "SEHR WICHTIG: Blockierender Schritt im Auflösungspfad erkannt: "
+                    + "; ".join(resolution_path.blockers)
+                ),
+                priority=GapPriority.HIGH,
+                impact_on_confidence=0.2,
+                recommended_sources=(),
+            ))
+
     # Event graph gap (display-only, never affects probability)
     if not has_event_relations:
         gaps.append(DataGap(

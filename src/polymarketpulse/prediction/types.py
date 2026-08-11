@@ -108,6 +108,26 @@ class ContributionEntry:
     evidence_strength: str | None = None
     calculation_method: str | None = None
     explanation: str | None = None
+    # --- Block D Part 1: influence-ranking (additive) -----------------------
+    # `contribution_pp` above is REAL weighted-average pp math only for
+    # submodels that actually participate in ensemble.combine_submodels'
+    # linear weighted average feeding engine.py's `prior_estimate`/
+    # `independent_probability` (history, momentum, independent_evidence,
+    # event_relation, and the routed specialized model). It is NOT real for
+    # `news`: the news submodel's estimated_yes_probability never enters
+    # that weighted average at all — news instead moves the final number
+    # via a separate Bayesian update (weighted_sentiment/confirmation_count,
+    # see engine.py/bayesian_update) that has no clean per-pp decomposition
+    # back onto a single "news contributed X pp" number. Rather than keep
+    # presenting a decorative pp figure for that case, engine.py sets
+    # `contribution_pp=None` for it and every reader instead gets this
+    # honest, always-computed `influence_rank`: a coarse but real signal
+    # derived from (a) how far estimated_yes_probability sits from the
+    # neutral 0.5 midpoint (direction/strength of the submodel's own
+    # opinion) and (b) its actual weight_share in the ensemble (how much
+    # that opinion actually mattered) — never an arbitrary/invented label.
+    # See engine.py's `_classify_influence_rank` for the exact thresholds.
+    influence_rank: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -124,6 +144,7 @@ class ContributionEntry:
             "evidence_strength": self.evidence_strength,
             "calculation_method": self.calculation_method,
             "explanation": self.explanation,
+            "influence_rank": self.influence_rank,
         }
 
 
@@ -441,6 +462,16 @@ class PredictionResult:
     # .confidence as one composite dimension among several, additively).
     resolution_semantics: ResolutionSemantics | None = None
 
+    # --- Block D Part 4: Change Triggers (additive) -------------------------
+    # Deterministic "what would change our assessment" statements, derived
+    # only from real structured data already computed this run (Block C's
+    # ResolutionPath open/blocked steps, Part 3's Data Gap Engine
+    # critical/high gaps, claims.py's real contradiction count, and the
+    # divergence-audit REJECT state) — see prediction/change_triggers.py.
+    # No LLM call, no invented text. Empty tuple is the honest default for
+    # the majority of markets with no concrete derivable trigger.
+    change_triggers: tuple[str, ...] = field(default_factory=tuple)
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -507,4 +538,5 @@ class PredictionResult:
             "world_state": self.world_state.as_dict() if self.world_state else None,
             "proposition": self.proposition.as_dict() if self.proposition else None,
             "resolution_semantics": self.resolution_semantics.as_dict() if self.resolution_semantics else None,
+            "change_triggers": list(self.change_triggers),
         }

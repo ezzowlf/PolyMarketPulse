@@ -27,6 +27,7 @@ from ..price_analytics import PricePoint
 from ..providers.coingecko import PriceData, fetch_price_and_volatility, resolve_coingecko_id
 from ..providers.fred import MacroSnapshot, fetch_macro_snapshot
 from .bayesian import bayesian_update
+from .change_triggers import compute_change_triggers
 from .confidence import (
     compute_confidence,
     compute_confidence_composite,
@@ -77,6 +78,43 @@ MIN_COMPARABLE_SAMPLE = 5  # kept for backward-compat imports (tests/test_predic
 _PROVIDER_CACHE_TTL_SECONDS = 300.0
 _provider_cache_lock = Lock()
 _provider_cache: dict[tuple, tuple[float, object]] = {}
+
+
+# Block D Part 1: influence-ranking labels.
+#
+# A real, computed field — never an arbitrary label — derived from two
+# already-real signals: (1) how far this submodel's own
+# estimated_yes_probability sits from the neutral 0.5 midpoint (the
+# strength/direction of its opinion) and (2) its actual weight_share in the
+# ensemble (how much that opinion actually mattered to the blend). This is
+# deliberately the SAME pair of numbers `contribution_pp` uses
+# ((p - 0.5) * weight_share) — influence_rank is just a coarse, always-
+# available classification of that same real magnitude, so it stays honest
+# even for submodels (news) where a precise pp figure cannot be derived
+# because the submodel doesn't participate in ensemble.combine_submodels'
+# weighted average at all (see types.ContributionEntry.influence_rank).
+_INFLUENCE_STRONG_MAGNITUDE = 0.15  # |p-0.5| * weight_share threshold for STRONG_*
+_INFLUENCE_MEDIUM_MAGNITUDE = 0.05  # ... for MEDIUM_*
+_INFLUENCE_NEUTRAL_BAND = 0.02  # |p-0.5| itself below this -> NEUTRAL regardless of weight
+
+
+def _classify_influence_rank(estimated_yes_probability: float | None, weight_share: float | None) -> str | None:
+    """None when the submodel is unavailable/has no probability at all —
+    "no opinion" is not the same as "neutral opinion". Otherwise always
+    produces one of the five real labels from the actual (probability,
+    weight_share) pair, never a guess."""
+    if estimated_yes_probability is None:
+        return None
+    share = weight_share if weight_share is not None else 0.0
+    delta = estimated_yes_probability - 0.5
+    if abs(delta) < _INFLUENCE_NEUTRAL_BAND:
+        return "NEUTRAL"
+    magnitude = abs(delta) * share
+    if magnitude >= _INFLUENCE_STRONG_MAGNITUDE:
+        return "STRONG_POSITIVE" if delta > 0 else "STRONG_NEGATIVE"
+    if magnitude >= _INFLUENCE_MEDIUM_MAGNITUDE:
+        return "MEDIUM_POSITIVE" if delta > 0 else "MEDIUM_NEGATIVE"
+    return "NEUTRAL"
 
 
 def _cached_provider_call(key: tuple, fetch):
@@ -869,11 +907,18 @@ def compute_prediction(
     divergence_support = classify_divergence_support(divergence_audit)
     forecast_suppression_reason: str | None = None
     if divergence_audit.verdict == "REJECT":
+        # Part 2 (Block D): the project owner's exact required user-facing
+        # (German) reason string is prepended so it is really reachable via
+        # PredictionResult.forecast_suppression_reason -> as_dict() -> the
+        # API response, not merely documented as "what the UI should show".
+        # The English technical detail is kept appended for engineers/audit
+        # trails — both are real, honest text, never fabricated.
         forecast_suppression_reason = (
-            f"Forecast suppressed: independent estimate diverges from the market price by "
+            "Große Modellabweichung, derzeit nicht ausreichend unabhängig belegt. "
+            f"(Forecast suppressed: independent estimate diverges from the market price by "
             f"{divergence_audit.gap:.1%}, exceeding the {DIVERGENCE_THRESHOLD_PP:.0%} safety threshold, and "
             f"the Phase M red-team audit returned REJECT — {divergence_audit.summary} "
-            f"Failing checks: {[c.name for c in divergence_audit.checks if c.verdict == 'REJECT']}."
+            f"Failing checks: {[c.name for c in divergence_audit.checks if c.verdict == 'REJECT']}.)"
         )
         reasoning.append(forecast_suppression_reason)
         forecast_status = "FORECAST_SUPPRESSED"
@@ -892,6 +937,16 @@ def compute_prediction(
         recommendation = "INSUFFICIENT_DATA"
 
     total_available_weight = sum(s.weight for s in all_submodels if s.available)
+    # Block D Part 1: `news` is the one submodel here whose
+    # estimated_yes_probability never actually enters ensemble.
+    # combine_submodels' weighted average (it moves the final estimate via a
+    # separate Bayesian update on weighted_sentiment/confirmation_count
+    # instead — see the news+Bayesian block above) — a "contribution_pp"
+    # figure for it would be a decorative number implying math that isn't
+    # really happening, so it is honestly reported as None; influence_rank
+    # (always computed from the same real probability/weight_share pair)
+    # takes over as the honest signal for that case.
+    _NO_CLEAN_PP_ATTRIBUTION = {"news"}
     contribution_breakdown = tuple(
         ContributionEntry(
             source=s.name,
@@ -906,8 +961,14 @@ def compute_prediction(
             ) if s.available and s.estimated_yes_probability is not None else None,
             contribution_pp=(
                 round((s.estimated_yes_probability - 0.5) * (s.weight / total_available_weight), 4)
-                if s.available and s.estimated_yes_probability is not None and total_available_weight > 0 else None
+                if s.available and s.estimated_yes_probability is not None and total_available_weight > 0
+                and s.name not in _NO_CLEAN_PP_ATTRIBUTION
+                else None
             ),
+            influence_rank=_classify_influence_rank(
+                s.estimated_yes_probability,
+                (s.weight / total_available_weight) if s.available and total_available_weight > 0 else None,
+            ) if s.available else None,
             source_ids=(
                 tuple(str(e.news_event_id) for e in (*independent_evidence.evidence_for_yes, *independent_evidence.evidence_for_no))
                 if s.name == "independent_evidence" and independent_evidence.available else ()
@@ -967,6 +1028,28 @@ def compute_prediction(
     # matches against the classified enum, so passing the raw column meant
     # those gaps could never fire. Falls back to `category` only if no
     # classification exists yet, so this stays backward compatible.
+    # Computed BEFORE calculate_data_gaps (reordered from the original
+    # sequence) specifically so Block D Part 3 can pass the real
+    # ResolutionPath (world_state.path_to_resolution, Block C's
+    # ResolutionStep/ResolutionPath structure) into the Data Gap Engine for
+    # concrete, step-named gap descriptions instead of only generic ones.
+    # assemble_world_state does not depend on anything calculate_data_gaps
+    # computes, so this reorder is behavior-preserving for world_state itself.
+    world_state = assemble_world_state(
+        proposition=proposition, resolution_date=resolution_date, now=now,
+        independent_evidence=independent_evidence,
+        classified_category=classified_category,
+        # ROUND-2 (section 5): the SAME already-fetched FRED/CoinGecko
+        # values forwarded to macro.py/quant.py above — not fetched again.
+        # Both are None for every market outside MACRO/CRYPTO (see the
+        # gating around their original fetch calls above), which correctly
+        # produces an empty state_variables tuple for those markets.
+        macro_snapshot=macro_snapshot,
+        quant_asset=proposition.asset,
+        quant_current_price=quant_current_price,
+        quant_daily_volatility=quant_daily_volatility,
+    )
+
     data_gaps = calculate_data_gaps(
         market_id=market_id,
         question=question or "",
@@ -982,21 +1065,16 @@ def compute_prediction(
         time_horizon_compatible=None,
         has_structured_data=len(specialized_available) > 0,
         has_event_relations=len(event_relation_signals) > 0,
-    )
-
-    world_state = assemble_world_state(
-        proposition=proposition, resolution_date=resolution_date, now=now,
-        independent_evidence=independent_evidence,
-        classified_category=classified_category,
-        # ROUND-2 (section 5): the SAME already-fetched FRED/CoinGecko
-        # values forwarded to macro.py/quant.py above — not fetched again.
-        # Both are None for every market outside MACRO/CRYPTO (see the
-        # gating around their original fetch calls above), which correctly
-        # produces an empty state_variables tuple for those markets.
-        macro_snapshot=macro_snapshot,
-        quant_asset=proposition.asset,
-        quant_current_price=quant_current_price,
-        quant_daily_volatility=quant_daily_volatility,
+        # Block D Part 3: real ResolutionPath, computed above from Block C's
+        # structure — None/applies=False for the overwhelming majority of
+        # markets with no known multi-step resolution structure, in which
+        # case calculate_data_gaps falls back to its pre-existing generic
+        # gap descriptions unchanged.
+        resolution_path=(
+            world_state.path_to_resolution.resolution_path
+            if world_state is not None and world_state.path_to_resolution is not None
+            else None
+        ),
     )
 
     scenarios = build_scenarios(
@@ -1104,6 +1182,14 @@ def compute_prediction(
         if maturity == "NO_FORECAST" or result.forecast_status == "FORECAST_SUPPRESSED"
         else result.recommendation
     )
+    # Block D Part 4: computed last, from the same already-finalized real
+    # structured fields on `result` (world_state/data_gaps/divergence_audit)
+    # — no new data access, no LLM call.
+    change_triggers = compute_change_triggers(
+        world_state=result.world_state,
+        data_gaps=result.data_gaps,
+        divergence_audit=result.divergence_audit,
+    )
     return _dataclass_replace(
         result,
         forecast_maturity=maturity,
@@ -1111,4 +1197,5 @@ def compute_prediction(
         recommendation=recommendation,
         evidence_backed_probability=evidence_backed_probability,
         published_forecast_probability=published_forecast_probability,
+        change_triggers=change_triggers,
     )

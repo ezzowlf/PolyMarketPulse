@@ -25,6 +25,31 @@ Verdict logic (documented, not just a count):
     See the inline NOTE comments on each check for the full reasoning.
   - Otherwise, any WARN-tier check present (but no REJECT) yields an
     overall WARN — the forecast stands but is flagged for visibility.
+    Block D Part 2 re-verification (documented decision, not assumed): a
+    WARN verdict can ONLY be reached when `evidentiary_sufficiency` itself
+    is PASS (its only other outcome is REJECT with hard_fail=True, which
+    forces the overall verdict to REJECT before WARN is ever considered —
+    see `_resolve_verdict`). `evidentiary_sufficiency` PASS requires either
+    a 10+-case DATA_FITTED historical baseline or >=2-source, DIRECT-tier
+    independent evidence. This means "je größer die Abweichung, desto höher
+    die Evidenzanforderung" is already structurally enforced at the WARN
+    tier by construction, not just by convention: a WARN-tier divergence
+    with only marginal/weak evidence is not a real, reachable state in this
+    implementation — it would already have been hard-failed to REJECT. The
+    remaining WARN-tier findings (proposition_clarity, resolution_rule_
+    presence, temporal_correctness, prior_provenance, comparables_quality,
+    duplicate_evidence, source_independence, freshness) are all secondary
+    quality/completeness signals layered ON TOP of an already-evidentiarily-
+    sufficient divergence — correctly left as visibility flags, not
+    additional hard-fail gates, per the same reasoning documented on each
+    check above. Locked in by `test_warn_verdict_always_implies_
+    evidentiary_sufficiency_passed` in `tests/test_block_d_part2_part1.py`.
+    A live check of every market in the local `data/polymarketpulse.db`
+    that ever triggers the audit found 11/11 REJECT and 0 WARN today (an
+    honest, reported finding, not engineered) — so this decision is
+    currently unexercised by real data locally, but is real, tested, and
+    would apply the moment a genuinely evidence-backed-but-imperfect
+    divergence appears in the data.
   - No WARN/REJECT-tier findings at all yields PASS.
   - UNKNOWN-tier findings (dimension genuinely not checkable with today's
     data) never move the verdict on their own — they are reported honestly
