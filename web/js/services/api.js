@@ -89,6 +89,10 @@ const Api = {
     Api._send(`/ai/explain-recommendation/${encodeURIComponent(marketId)}/recompute`, "POST"),
   costReport: (days) => Api._get(`/ai/cost-report${days ? `?days=${days}` : ""}`),
   evaluation: () => Api._get("/evaluation"),
+  forecastHistory: (marketId) => Api._get(`/forecast-history/${encodeURIComponent(marketId)}`),
+  evaluationForecastHistory: () => Api._get("/evaluation/forecast-history"),
+  changeAttribution: (marketId, limit) =>
+    Api._get(`/change-attribution/${encodeURIComponent(marketId)}${limit ? `?limit=${limit}` : ""}`),
   backtest: (params = {}) => {
     const qs = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "")

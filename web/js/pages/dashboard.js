@@ -42,11 +42,41 @@ async function _runScan(button) {
   }
 }
 
+// Block H Part 4: real content from the new forecast-semantics
+// architecture (analyzed/no-forecast/watch counts, calibration) rather
+// than only raw system counters. Sourced from the real /markets and
+// /evaluation/forecast-history endpoints — no fabricated numbers.
+function _architectureOverviewHtml(marketItems, evalData) {
+  const analyzed = marketItems.filter((m) => m.forecast_status && m.forecast_status !== "NO_FORECAST").length;
+  const published = marketItems.filter((m) => m.published_forecast_probability !== null && m.published_forecast_probability !== undefined).length;
+  const noForecast = marketItems.filter((m) => !m.forecast_status || m.forecast_status === "NO_FORECAST").length;
+  const cal = evalData || {};
+  return `
+    <div class="panel">
+      <h3>Prognose-Architektur</h3>
+      <div class="widget-grid">
+        ${widgetCard({ title: "Analysierte Märkte", value: analyzed })}
+        ${widgetCard({ title: "Veröffentlichte Prognosen", value: published })}
+        ${widgetCard({ title: "Ohne Prognose (ehrlich)", value: noForecast })}
+        ${widgetCard({ title: "Kalibrierungsstatus", value: cal.status || "–" })}
+        ${widgetCard({ title: "Aufgelöste Fälle (gesamt)", value: cal.matched_pair_count !== undefined ? cal.matched_pair_count : "–" })}
+        ${widgetCard({ title: "Brier-Score", value: cal.brier_score !== null && cal.brier_score !== undefined ? fmtNum(cal.brier_score, 3) : "–" })}
+      </div>
+      <p class="sub">"Ohne Prognose" ist ein ehrliches Ergebnis, kein Fehler — siehe Datenqualität je Markt.</p>
+    </div>
+  `;
+}
+
 async function renderDashboardPage(container) {
   container.innerHTML = `<div class="empty-state">Lade Übersicht…</div>`;
   try {
-    const cc = await Api.commandCenter();
+    const [cc, marketsResult, evalData] = await Promise.all([
+      Api.commandCenter(),
+      Api.markets({ limit: 500 }).catch(() => ({ items: [] })),
+      Api.evaluationForecastHistory().catch(() => null),
+    ]);
     const u = cc.uebersicht;
+    const architectureHtml = _architectureOverviewHtml(marketsResult.items || [], evalData);
 
     container.innerHTML = `
       <div class="disclaimer">Research-Hinweis – keine Wettaufforderung, kein sicherer Gewinn. Alle Werte werden von der eigenen Prognose-Engine berechnet, nicht von einer KI erfunden.</div>
@@ -63,6 +93,8 @@ async function renderDashboardPage(container) {
         <div class="sub">Letzter Scan: ${cc.letzter_scan ? fmtDate(cc.letzter_scan) : "noch nie"}</div>
         <button class="btn" id="scan-btn">Märkte aktualisieren</button>
       </div>
+
+      ${architectureHtml}
 
       <div class="panel">
         <h3>Interessanteste Märkte jetzt</h3>

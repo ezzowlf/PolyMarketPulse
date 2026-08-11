@@ -454,6 +454,29 @@ def history(market_id: str, storage: Storage = Depends(get_storage)) -> list[dic
     return [dict(zip(cols, r, strict=True)) for r in rows]
 
 
+@app.get("/forecast-history/{market_id}")
+def forecast_history(market_id: str, storage: Storage = Depends(get_storage)) -> list[dict]:
+    """Block H (frontend): read-only exposure of the already-persisted
+    forecast-semantics snapshot history (market/model-hypothesis/evidence-
+    backed/published probabilities over time) for the Market Detail page's
+    Forecast-History section. Purely additive presentation support — no new
+    prediction logic, just a SELECT over `prediction_snapshots` (Block E
+    Part 4's four-tier fields)."""
+    rows = storage.connection.execute(
+        """
+        SELECT created_at, market_yes_probability, model_hypothesis_probability,
+               evidence_backed_probability, published_forecast_probability, category
+        FROM prediction_snapshots WHERE market_id = ? ORDER BY created_at ASC
+        """,
+        (market_id,),
+    ).fetchall()
+    cols = (
+        "created_at", "market_probability", "model_hypothesis_probability",
+        "evidence_backed_probability", "published_forecast_probability", "category",
+    )
+    return [dict(zip(cols, r, strict=True)) for r in rows]
+
+
 @app.get("/watchlist")
 def get_watchlist(storage: Storage = Depends(get_storage)) -> list[dict]:
     """Enriched with live prediction data (edge/confidence/deadline/status)

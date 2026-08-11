@@ -11,6 +11,16 @@ const RECOMMENDATION_LABEL_DE = {
 
 const DIRECTION_LABEL_DE = { YES: "YES", NO: "NO", NONE: "keine Wette" };
 
+const DECISION_STATE_LABEL_DE = {
+  NO_POSITION: "Keine Position",
+  WATCH: "Beobachten",
+  POSSIBLE_EDGE: "Mögliche Edge",
+  STRONG_EDGE: "Starke Edge",
+};
+const DECISION_STATE_BADGE = {
+  NO_POSITION: "", WATCH: "yellow", POSSIBLE_EDGE: "yellow", STRONG_EDGE: "green",
+};
+
 const DEADLINE_PHASE_LABEL_DE = {
   MORE_THAN_7_DAYS: "mehr als 7 Tage",
   SEVEN_DAYS: "7 Tage",
@@ -51,7 +61,12 @@ async function renderMarketDetailPage(container, marketId) {
 
       <div class="panel" id="headline-panel"><div class="empty-state">Lade Hauptaussage…</div></div>
       <div class="panel" id="summary-panel"></div>
-      <div class="panel" id="breakdown-panel"></div>
+      <div class="panel" id="why-panel"></div>
+      <div class="panel" id="evidence-panel"></div>
+      <div class="panel" id="change-triggers-panel"></div>
+      <div class="panel" id="scenarios-panel"></div>
+      <div class="panel" id="forecast-history-panel"><div class="empty-state">Lade Forecast-Verlauf…</div></div>
+      <div class="panel" id="historical-reliability-panel"><div class="empty-state">Lade historische Zuverlässigkeit…</div></div>
 
       <div class="panel">
         <p style="color:var(--text-dim)">${market.description || ""}</p>
@@ -68,25 +83,25 @@ async function renderMarketDetailPage(container, marketId) {
       </div>
 
       <div class="panel" id="changes-panel"></div>
-      <div class="panel" id="evidence-panel"></div>
 
-      <div class="panel" id="prediction-panel">
-        <h3>KI-Einschätzung</h3>
-        <div class="empty-state">Lade KI-Einschätzung…</div>
-      </div>
-
-      <div class="panel" id="scenarios-panel"></div>
-      <div class="panel" id="submodels-panel"></div>
-      <div class="panel" id="data-quality-panel"></div>
-
-      <div class="panel">
-        <h3>Verlauf</h3>
-        <h4>Marktpreis (YES)</h4>
-        <canvas class="chart-canvas" id="price-chart"></canvas>
-        <h4>Research-Score-Verlauf</h4>
-        <canvas class="chart-canvas" id="score-chart"></canvas>
-        ${history.length < 3 ? `<p class="sub">Historie wird seit Aufnahme dieses Marktes gesammelt — noch wenige Datenpunkte vorhanden.</p>` : ""}
-      </div>
+      <details class="panel">
+        <summary><h3 style="display:inline">Erweitert / Audit</h3></summary>
+        <div id="breakdown-panel"></div>
+        <div id="prediction-panel">
+          <h3>KI-Einschätzung</h3>
+          <div class="empty-state">Lade KI-Einschätzung…</div>
+        </div>
+        <div id="submodels-panel"></div>
+        <div id="data-quality-panel"></div>
+        <div>
+          <h3>Verlauf (Marktpreis / Score)</h3>
+          <h4>Marktpreis (YES)</h4>
+          <canvas class="chart-canvas" id="price-chart"></canvas>
+          <h4>Research-Score-Verlauf</h4>
+          <canvas class="chart-canvas" id="score-chart"></canvas>
+          ${history.length < 3 ? `<p class="sub">Historie wird seit Aufnahme dieses Marktes gesammelt — noch wenige Datenpunkte vorhanden.</p>` : ""}
+        </div>
+      </details>
 
       <div class="panel">
         <h3>Relevante Ereignisse</h3>
@@ -132,6 +147,22 @@ async function renderMarketDetailPage(container, marketId) {
     };
 
     renderPredictionPanel(marketId, market);
+
+    Api.forecastHistory(marketId).then((rows) => {
+      const el = document.getElementById("forecast-history-panel");
+      if (el) el.innerHTML = _forecastHistoryHtml(rows);
+    }).catch((err) => {
+      const el = document.getElementById("forecast-history-panel");
+      if (el) el.innerHTML = `<h3>Forecast-Verlauf</h3><div class="empty-state">Fehler: ${err.message}</div>`;
+    });
+
+    Api.evaluationForecastHistory().then((evalData) => {
+      const el = document.getElementById("historical-reliability-panel");
+      if (el) el.innerHTML = _historicalReliabilityHtml(evalData, market.category);
+    }).catch((err) => {
+      const el = document.getElementById("historical-reliability-panel");
+      if (el) el.innerHTML = `<h3>Historische Zuverlässigkeit</h3><div class="empty-state">Fehler: ${err.message}</div>`;
+    });
   } catch (err) {
     container.innerHTML = `<div class="empty-state">Fehler: ${err.message}</div>`;
   }
@@ -161,8 +192,24 @@ function _renderChangesPanel(opp) {
 
 function _headlinePanelHtml(market, opp, pred) {
   const p = pred || {};
+  const forecastPublished = p.published_forecast_probability !== null && p.published_forecast_probability !== undefined;
+  const modelHypothesis = p.model_hypothesis_probability !== null && p.model_hypothesis_probability !== undefined
+    ? fmtPct(p.model_hypothesis_probability)
+    : "keine";
+  const pulseValue = forecastPublished ? fmtPct(p.published_forecast_probability) : "Keine belastbare Prognose";
+  const pulseSub = forecastPublished ? "Evidenzgestützt" : "Nicht genügend unabhängige Evidenz";
   const statusLabel = FORECAST_STATUS_LABEL_DE[p.forecast_status] || p.forecast_status || "Datenlage unzureichend";
-  const hasIndependent = p.independent_probability !== null && p.independent_probability !== undefined;
+  const trustLabel = p.confidence_score >= 70 ? "hoch" : p.confidence_score >= 40 ? "mittel" : "gering";
+  const dataQualityLabel = p.data_quality_score >= 75 ? "Gut" : p.data_quality_score >= 45 ? "Mittel" : "Schwach";
+  const decisionLabel = DECISION_STATE_LABEL_DE[p.decision_state] || p.decision_state || "–";
+  const decisionBadge = DECISION_STATE_BADGE[p.decision_state] || "";
+  const decisionReasons = p.decision_reasons && p.decision_reasons.length
+    ? `<details><summary>Begründung Entscheidungsstatus</summary><ul>${p.decision_reasons.map((r) => `<li class="sub">${r}</li>`).join("")}</ul></details>`
+    : "";
+  const ws = p.world_state;
+  const deadlineValue = ws && ws.time_remaining_hours !== null && ws.time_remaining_hours !== undefined
+    ? fmtDeadline(ws.time_remaining_hours)
+    : (opp ? fmtDeadline(opp.deadline_hours) : "–");
   const maturityTitle = ["SUPPORTED_FORECAST", "MATURE_FORECAST"].includes(p.forecast_maturity)
     ? "Warum belastbar?"
     : "Warum noch keine belastbare Prognose?";
@@ -176,20 +223,19 @@ function _headlinePanelHtml(market, opp, pred) {
     </details>
   ` : "";
   return `
-    <h2 style="margin:0 0 4px">${market.question}</h2>
-    ${maturityDetails}
+    <h2 style="margin:0 0 12px">${market.question}</h2>
     <div class="widget-grid">
       ${widgetCard({ title: "MARKT", value: fmtPct(p.market_yes_probability) })}
-      ${widgetCard({ title: "UNABHÄNGIG", value: hasIndependent ? fmtPct(p.independent_probability) : "—" })}
-      ${widgetCard({ title: "FINAL", value: fmtPct(p.calibrated_probability !== undefined ? p.calibrated_probability : p.estimated_yes_probability) })}
-      ${widgetCard({ title: "EDGE", value: fmtEdgePp(p.net_yes_edge) })}
-      ${widgetCard({ title: "CONFIDENCE", value: p.confidence_score !== undefined ? `${fmtNum(p.confidence_score, 1)} / 100 <span class="sub">(${p.confidence_calibration_status || "UNCALIBRATED"})</span>` : "–" })}
-      ${widgetCard({ title: "DATA QUALITY", value: p.data_quality_score !== undefined ? `${fmtNum(p.data_quality_score, 0)} / 100` : "–" })}
-      ${widgetCard({ title: "STATUS", value: statusLabel })}
-      ${widgetCard({ title: "FORECAST MATURITY", value: p.forecast_maturity || "–" })}
-      ${widgetCard({ title: "Deadline", value: opp ? fmtDeadline(opp.deadline_hours) : "–" })}
+      ${widgetCard({ title: "VERÖFFENTLICHTE PROGNOSE", value: pulseValue, sub: pulseSub })}
+      ${widgetCard({ title: "ENTSCHEIDUNGSSTATUS", value: `<span class="badge ${decisionBadge}">${decisionLabel}</span>` })}
+      ${widgetCard({ title: "VERTRAUEN", value: trustLabel })}
+      ${widgetCard({ title: "DATENLAGE", value: dataQualityLabel })}
+      ${widgetCard({ title: "DEADLINE", value: deadlineValue })}
     </div>
-    ${!hasIndependent ? `<p class="sub">Keine unabhängigen Daten — Prognose basiert derzeit nicht auf einer eigenständigen Analyse.</p>` : ""}
+    ${decisionReasons}
+    ${maturityDetails}
+    <p class="sub">Modellhypothese (intern, nicht veröffentlicht): ${modelHypothesis} · Status: ${statusLabel}</p>
+    ${!forecastPublished ? `<p class="sub">Keine ausreichende unabhängige Evidenz für eine veröffentlichbare Prognose.</p>` : ""}
   `;
 }
 
@@ -419,32 +465,38 @@ function _historicalComparablesHtml(p) {
 }
 
 function _summaryPanelHtml(p) {
-  if (!p || p.estimated_yes_probability === null || p.estimated_yes_probability === undefined) {
-    return `<h3>Zusammenfassung</h3><div class="empty-state">Noch keine belastbare Prognose möglich — siehe Datenqualität unten.</div>`;
+  if (!p) {
+    return `<h3>Zusammenfassung</h3><div class="empty-state">Noch keine Prognose verfügbar.</div>`;
   }
   const marketPct = fmtPct(p.market_yes_probability);
-  const enginePct = fmtPct(p.estimated_yes_probability);
-  const edgePp = p.net_yes_edge !== null ? Math.abs(p.net_yes_edge * 100).toFixed(1) : null;
-  const hasEdge = p.net_yes_edge !== null && Math.abs(p.net_yes_edge) >= 0.03;
-  const direction = p.net_yes_edge > 0 ? "höher" : "niedriger";
-  const confidenceWord = p.confidence_score >= 70 ? "hoch" : p.confidence_score >= 40 ? "mittel" : "gering";
-  const biggestRisk =
-    p.recommendation === "INSUFFICIENT_DATA"
-      ? "Zu wenige historische Vergleichsfälle für eine robuste Prognose."
-      : p.confidence_score < 40
-      ? "Geringes Modellvertrauen — die Prognose kann sich mit neuen Daten stark ändern."
-      : "Neue Nachrichten oder Marktbewegungen können die Einschätzung schnell verändern.";
+  const forecastPublished = p.published_forecast_probability !== null && p.published_forecast_probability !== undefined;
+  const pulseLabel = forecastPublished ? fmtPct(p.published_forecast_probability) : "keine belastbare Prognose";
+  const modelHypothesis = p.model_hypothesis_probability !== null && p.model_hypothesis_probability !== undefined
+    ? fmtPct(p.model_hypothesis_probability)
+    : "nicht verfügbar";
+  const trustLabel = p.confidence_score >= 70 ? "hoch" : p.confidence_score >= 40 ? "mittel" : "gering";
 
-  const sentences = [
-    `Der Markt preist aktuell eine YES-Wahrscheinlichkeit von ${marketPct} ein.`,
-    `Die eigene Engine kommt auf ${enginePct}.`,
-    hasEdge
-      ? `Das ist ${edgePp} Prozentpunkte ${direction} als der Marktpreis — eine mögliche Abweichung.`
-      : `Es gibt keine belastbare Abweichung zum Marktpreis.`,
-    `Das Modellvertrauen ist ${confidenceWord} (${fmtNum(p.confidence_score, 0)}/100).`,
-    `Größtes Risiko: ${biggestRisk}`,
-  ];
-  return `<h3>Zusammenfassung</h3><p>${sentences.join(" ")}</p>`;
+  const keyPoints = [];
+  if (forecastPublished) {
+    keyPoints.push(`Unsere evidenzgestützte Prognose liegt bei ${pulseLabel}.`);
+    keyPoints.push(`Das ist gegenüber dem Marktpreis von ${marketPct} eine differenzierbare Auswertung.`);
+    keyPoints.push(`Das Vertrauen in diese Prognose ist ${trustLabel}.`);
+  } else {
+    keyPoints.push(`Unsere Modellhypothese liegt bei ${modelHypothesis}, aber es gibt aktuell nicht genügend unabhängige Evidenz für eine veröffentlichbare Prognose.`);
+    if (p.forecast_status === "FORECAST_SUPPRESSED") {
+      keyPoints.push("Eine Divergenz-Sicherheitsprüfung hat die Prognose unterdrückt.");
+    } else {
+      keyPoints.push("Zu wenige unabhängige Quellen oder zu viele offene Datenlücken für eine belastbare Prognose.");
+    }
+    keyPoints.push(`Das Modellvertrauen ist ${trustLabel}.`);
+  }
+
+  return `
+    <h3>Kernaussage</h3>
+    <ul class="summary-list">
+      ${keyPoints.map((point) => `<li>${point}</li>`).join("")}
+    </ul>
+  `;
 }
 
 function _submodelSectionHtml(p) {
@@ -480,11 +532,67 @@ function _submodelSectionHtml(p) {
 
 function _scenarioSectionHtml(scenarios) {
   if (!scenarios) return "";
+  const richScenarios = scenarios.scenarios || [];
+  const richHtml = richScenarios.length ? richScenarios.map((s) => `
+    <div class="source-card">
+      <div class="source-card-title"><strong>${s.outcome}</strong>${s.probability !== null && s.probability !== undefined ? ` · ${fmtPct(s.probability)}` : ""}</div>
+      <p>${s.description}</p>
+      ${s.necessary_events && s.necessary_events.length ? `<p class="sub"><strong>Notwendige Ereignisse:</strong> ${s.necessary_events.join("; ")}</p>` : ""}
+      ${s.supporting_claims && s.supporting_claims.length ? `<p class="sub"><strong>Stützende Belege:</strong> ${s.supporting_claims.join("; ")}</p>` : ""}
+      ${s.contradicting_claims && s.contradicting_claims.length ? `<p class="sub"><strong>Widersprechende Belege:</strong> ${s.contradicting_claims.join("; ")}</p>` : ""}
+      ${s.triggers && s.triggers.length ? `<p class="sub"><strong>Trigger:</strong> ${s.triggers.join("; ")}</p>` : ""}
+    </div>
+  `).join("") : "";
   return `
     <h3>Szenarien</h3>
-    <p><strong>Basisszenario:</strong> ${scenarios.base_case}</p>
-    ${scenarios.bull_case && scenarios.bull_case.length ? `<p><strong>Bull Case:</strong></p><ul>${scenarios.bull_case.map((s) => `<li>${s}</li>`).join("")}</ul>` : ""}
-    ${scenarios.bear_case && scenarios.bear_case.length ? `<p><strong>Bear Case:</strong></p><ul>${scenarios.bear_case.map((s) => `<li>${s}</li>`).join("")}</ul>` : ""}
+    ${richHtml ? `<div class="source-card-grid">${richHtml}</div>` : ""}
+    <details${richHtml ? "" : " open"}>
+      <summary>Basis-/Bull-/Bear-Case (kurz)</summary>
+      <p><strong>Basisszenario:</strong> ${scenarios.base_case}</p>
+      ${scenarios.bull_case && scenarios.bull_case.length ? `<p><strong>Bull Case:</strong></p><ul>${scenarios.bull_case.map((s) => `<li>${s}</li>`).join("")}</ul>` : ""}
+      ${scenarios.bear_case && scenarios.bear_case.length ? `<p><strong>Bear Case:</strong></p><ul>${scenarios.bear_case.map((s) => `<li>${s}</li>`).join("")}</ul>` : ""}
+    </details>
+  `;
+}
+
+const INFLUENCE_STRENGTH_ORDER = {
+  STRONG_POSITIVE: 3, STRONG_NEGATIVE: 3, MEDIUM_POSITIVE: 2, MEDIUM_NEGATIVE: 2, NEUTRAL: 1,
+};
+const INFLUENCE_LABEL_DE = {
+  STRONG_POSITIVE: "starker YES-Einfluss", STRONG_NEGATIVE: "starker NO-Einfluss",
+  MEDIUM_POSITIVE: "mittlerer YES-Einfluss", MEDIUM_NEGATIVE: "mittlerer NO-Einfluss",
+  NEUTRAL: "neutral",
+};
+
+// Part 1.4 "Why": the max 3-5 most important factors, ranked by the real
+// influence_rank on each contribution_breakdown entry (Block D).
+function _whySectionHtml(p) {
+  const entries = (p && p.contribution_breakdown) || [];
+  const ranked = entries
+    .filter((c) => c.available && c.influence_rank && c.influence_rank !== "NEUTRAL")
+    .sort((a, b) => (INFLUENCE_STRENGTH_ORDER[b.influence_rank] || 0) - (INFLUENCE_STRENGTH_ORDER[a.influence_rank] || 0))
+    .slice(0, 5);
+  if (!ranked.length) {
+    return `<h3>Warum</h3><div class="empty-state">Kein einzelner Faktor sticht mit klarem Einfluss hervor.</div>`;
+  }
+  return `
+    <h3>Warum</h3>
+    <ul>
+      ${ranked.map((c) => `<li><strong>${SOURCE_LABEL_DE[c.source] || c.source}:</strong> ${INFLUENCE_LABEL_DE[c.influence_rank] || c.influence_rank} — ${c.explanation || c.detail}</li>`).join("")}
+    </ul>
+  `;
+}
+
+// Part 1.7 "What would change our assessment" — Block D's deterministic
+// change_triggers list (plain strings, always computed, may be empty).
+function _changeTriggersHtml(p) {
+  const triggers = (p && p.change_triggers) || [];
+  if (!triggers.length) {
+    return `<h3>Was würde unsere Einschätzung ändern?</h3><div class="empty-state">Keine konkreten Trigger identifiziert.</div>`;
+  }
+  return `
+    <h3>Was würde unsere Einschätzung ändern?</h3>
+    <ul>${triggers.map((t) => `<li>${t}</li>`).join("")}</ul>
   `;
 }
 
@@ -546,67 +654,19 @@ function _dataQualityPanelHtml(p) {
 
 function _evidenceSectionHtml(p) {
   const ie = p && p.independent_evidence;
-  // I3/I4 (historical comparables, divergence audit) are independent of
-  // whether independent-evidence itself was available — always append them
-  // so they're never silently hidden just because news evidence was thin.
-  const extras = `${_worldStateHtml(p)}${_dataGapsHtml(p)}${_historicalComparablesHtml(p)}${_divergenceAuditHtml(p)}`;
-  if (!ie) {
-    return `<h3>Unabhängige Evidenz</h3><div class="empty-state">Keine unabhängige Schätzung möglich — keine unabhängige Evidenz-Infrastruktur verfügbar.</div>${extras}`;
-  }
-  if (!ie.available) {
-    return `<h3>Unabhängige Evidenz</h3><div class="empty-state">keine unabhängige Schätzung möglich — ${ie.detail}</div>${extras}`;
-  }
-  const marketPct = fmtPct(p.market_yes_probability);
-  const independentPct = fmtPct(ie.independent_yes_probability);
-  const divergenceStr = ie.divergence !== null ? fmtEdgePp(ie.divergence) : "–";
+  const hasEvidence = ie && ie.available;
+  const noEvidenceMessage = ie
+    ? `Keine unabhängige Schätzung möglich — ${ie.detail}`
+    : "Keine unabhängige Schätzung möglich — keine unabhängige Evidenz-Infrastruktur verfügbar.";
 
-  // I2: per-item evidence table — source / relation / relevance / source
-  // quality / freshness / direction / impact, not a generic bullet list.
-  const evidenceTable = (items) => {
-    if (!items || !items.length) return `<p class="sub">keine</p>`;
-    const rows = items.map((e) => `
-      <tr>
-        <td><a href="${e.url}" target="_blank" rel="noopener">${e.title}</a><div class="sub">${e.source_domain || e.source} — ${fmtDate(e.published_at)}</div></td>
-        <td>${e.relation_label}</td>
-        <td>${e.entailment}</td>
-        <td>${(e.link_confidence * 100).toFixed(0)}%</td>
-        <td>${(e.reliability * 100).toFixed(0)}%</td>
-        <td>${(e.recency_weight * 100).toFixed(0)}%</td>
-        <td>${(e.relation_weight * 100).toFixed(0)}%</td>
-      </tr>
-    `).join("");
-    return `<table><thead><tr><th>Quelle / Ereignis</th><th>Relation</th><th>Richtung</th><th>Relevanz</th><th>Quellqualität</th><th>Aktualität</th><th>Impact/Gewicht</th></tr></thead><tbody>${rows}</tbody></table>`;
-  };
+  const sourceCount = ie ? (ie.evidence_for_yes.length + ie.evidence_for_no.length) : 0;
+  const sourceSummary = ie
+    ? `${ie.evidence_for_yes.length} YES / ${ie.evidence_for_no.length} NO`
+    : "keine verknüpften Quellen";
 
-  const discarded = ie.discarded_evidence || [];
+  const evidenceCards = hasEvidence ? _sourceCardsHtml(ie) : `<div class="empty-state">${noEvidenceMessage}</div>`;
 
-  return `
-    <h3>Unabhängige Evidenz</h3>
-    <div class="widget-grid">
-      ${widgetCard({ title: "MARKT", value: marketPct })}
-      ${widgetCard({ title: "UNABHÄNGIGES MODELL", value: independentPct })}
-      ${widgetCard({ title: "DIVERGENZ", value: divergenceStr })}
-      ${widgetCard({ title: "Quellenqualität", value: ie.source_quality_score !== null ? `${fmtNum(ie.source_quality_score, 0)} / 100` : "–" })}
-      ${widgetCard({ title: "Zeit seit Erstmeldung", value: ie.time_since_first_report_hours !== null ? `${fmtNum(ie.time_since_first_report_hours, 1)} h` : "–" })}
-      ${widgetCard({ title: "Information Edge", value: ie.information_edge_score !== null ? `${fmtNum(ie.information_edge_score, 0)} / 100` : "–" })}
-    </div>
-    ${ie.breaking ? `<div class="badge yellow">Breaking (unter 48h)</div>` : ""}
-    ${ie.contradiction_detected ? `<div class="badge yellow">Widersprüchliche Quellenlage</div>` : ""}
-    <p><strong>Spricht für YES (${ie.evidence_for_yes.length}):</strong></p>
-    ${evidenceTable(ie.evidence_for_yes)}
-    <p><strong>Spricht für NO (${ie.evidence_for_no.length}):</strong></p>
-    ${evidenceTable(ie.evidence_for_no)}
-    ${
-      ie.not_yet_priced_in.length
-        ? `<p><strong>Noch nicht eingepreist:</strong></p>${evidenceTable(ie.not_yet_priced_in)}`
-        : ""
-    }
-    ${
-      discarded.length
-        ? `<details><summary>Verworfen / nicht relevant (${discarded.length}) — gesehen, aber nicht in die Schätzung eingeflossen</summary>${evidenceTable(discarded)}</details>`
-        : ""
-    }
-    <p class="sub">${ie.detail}</p>
+  const advancedDetails = `
     ${_resolutionEdgeHtml(p.resolution_edge)}
     ${_crossMarketHtml(p.cross_market)}
     ${_reactionLagHtml(p.reaction_lag)}
@@ -615,6 +675,72 @@ function _evidenceSectionHtml(p) {
     ${_dataGapsHtml(p)}
     ${_historicalComparablesHtml(p)}
     ${_divergenceAuditHtml(p)}
+  `;
+
+  return `
+    <h3>Belege & Quellen</h3>
+    <div class="widget-grid">
+      ${widgetCard({ title: "Quellenlage", value: sourceSummary })}
+      ${widgetCard({ title: "Quellenqualität", value: ie && ie.source_quality_score !== null ? `${fmtNum(ie.source_quality_score, 0)} / 100` : "–" })}
+      ${widgetCard({ title: "Verifizierte Quellen", value: sourceCount })}
+      ${widgetCard({ title: "Erste Meldung", value: ie && ie.time_since_first_report_hours !== null ? `${fmtNum(ie.time_since_first_report_hours, 1)} h` : "–" })}
+      ${widgetCard({ title: "Divergenz", value: ie && ie.divergence !== null ? fmtEdgePp(ie.divergence) : "–" })}
+    </div>
+    ${evidenceCards}
+    <details>
+      <summary>Erweiterte Forschung & Audit</summary>
+      ${hasEvidence ? _detailedEvidenceHtml(p, ie) : ""}
+      ${advancedDetails}
+    </details>
+  `;
+}
+
+function _sourceCardsHtml(ie) {
+  const items = [
+    ...(ie.evidence_for_yes || []).slice(0, 3).map((item) => ({ item, direction: "YES" })),
+    ...(ie.evidence_for_no || []).slice(0, 3).map((item) => ({ item, direction: "NO" })),
+  ];
+  if (!items.length) {
+    return `<div class="empty-state">Keine zentralen Quellen gefunden.</div>`;
+  }
+  return `
+    <div class="source-card-grid">
+      ${items.map(({ item, direction }) => `
+        <div class="source-card">
+          <div class="source-card-title"><a href="${item.url}" target="_blank" rel="noopener">${item.title}</a></div>
+          <div class="sub">${item.source_domain || item.source} · ${fmtDate(item.published_at)}</div>
+          <div><strong>${direction}</strong> · ${item.relation_label}</div>
+          <div class="sub">${item.entailment} · Qualität ${fmtNum(item.reliability * 100, 0)}%</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function _detailedEvidenceHtml(p, ie) {
+  const tableFor = (items) => {
+    if (!items || !items.length) return `<p class="sub">keine</p>`;
+    const rows = items.map((e) => `
+      <tr>
+        <td><a href="${e.url}" target="_blank" rel="noopener">${e.title}</a><div class="sub">${e.source_domain || e.source} · ${fmtDate(e.published_at)}</div></td>
+        <td>${e.relation_label}</td>
+        <td>${e.entailment}</td>
+        <td>${(e.link_confidence * 100).toFixed(0)}%</td>
+        <td>${(e.reliability * 100).toFixed(0)}%</td>
+        <td>${(e.recency_weight * 100).toFixed(0)}%</td>
+        <td>${(e.relation_weight * 100).toFixed(0)}%</td>
+      </tr>
+    `).join("");
+    return `<table><thead><tr><th>Quelle</th><th>Relation</th><th>Richtung</th><th>Relevanz</th><th>Qualität</th><th>Aktualität</th><th>Impact</th></tr></thead><tbody>${rows}</tbody></table>`;
+  };
+
+  return `
+    <h4>Unabhängige Evidenz im Detail</h4>
+    <p><strong>YES:</strong></p>${tableFor(ie.evidence_for_yes)}
+    <p><strong>NO:</strong></p>${tableFor(ie.evidence_for_no)}
+    ${ie.not_yet_priced_in && ie.not_yet_priced_in.length ? `<p><strong>Noch nicht eingepreist:</strong></p>${tableFor(ie.not_yet_priced_in)}` : ""}
+    ${ie.discarded_evidence && ie.discarded_evidence.length ? `<details><summary>Verworfen / nicht verwendet (${ie.discarded_evidence.length})</summary>${tableFor(ie.discarded_evidence)}</details>` : ""}
+    <p class="sub">${ie.detail}</p>
   `;
 }
 
@@ -712,6 +838,73 @@ function _reactionLagHtml(rl) {
   `;
 }
 
+// Part 1.9 Forecast History: real prediction_snapshots rows (four-tier
+// forecast-semantics fields) over time. Simple table — no new charting
+// dependency, per the task's explicit "lightweight" constraint.
+function _forecastHistorySparkline(rows) {
+  const vals = rows.map((r) => r.published_forecast_probability).filter((v) => v !== null && v !== undefined);
+  if (vals.length < 2) return "";
+  const w = 300, h = 40;
+  const pts = rows.map((r, i) => {
+    const v = r.published_forecast_probability;
+    const x = (i / (rows.length - 1)) * w;
+    const y = v === null || v === undefined ? null : h - v * h;
+    return { x, y };
+  }).filter((pt) => pt.y !== null);
+  const path = pts.map((pt, i) => `${i === 0 ? "M" : "L"}${pt.x.toFixed(1)},${pt.y.toFixed(1)}`).join(" ");
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="40" preserveAspectRatio="none"><path d="${path}" fill="none" stroke="#2fd67f" stroke-width="2"/></svg>`;
+}
+
+function _forecastHistoryHtml(rows) {
+  if (!rows || !rows.length) {
+    return `<h3>Forecast-Verlauf</h3><div class="empty-state">Noch keine gespeicherten Prognose-Snapshots für diesen Markt.</div>`;
+  }
+  const recent = rows.slice(-20);
+  const rowsHtml = recent.slice().reverse().map((r) => `
+    <tr>
+      <td>${fmtDate(r.created_at)}</td>
+      <td>${fmtPct(r.market_probability)}</td>
+      <td>${r.model_hypothesis_probability !== null && r.model_hypothesis_probability !== undefined ? fmtPct(r.model_hypothesis_probability) : "–"}</td>
+      <td>${r.evidence_backed_probability !== null && r.evidence_backed_probability !== undefined ? fmtPct(r.evidence_backed_probability) : "–"}</td>
+      <td>${r.published_forecast_probability !== null && r.published_forecast_probability !== undefined ? fmtPct(r.published_forecast_probability) : "–"}</td>
+    </tr>
+  `).join("");
+  return `
+    <h3>Forecast-Verlauf <span class="sub">(${rows.length} Snapshot(s))</span></h3>
+    ${_forecastHistorySparkline(recent)}
+    <table>
+      <thead><tr><th>Zeitpunkt</th><th>Markt</th><th>Modellhypothese</th><th>Evidenzgestützt</th><th>Veröffentlicht</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  `;
+}
+
+// Part 1.10 Historical reliability: Block G's real category-level
+// Brier/log-loss evaluation, filtered to this market's category. Honestly
+// shows "not enough resolved cases" — the correct state given known data
+// scarcity — rather than fabricating a track record.
+function _historicalReliabilityHtml(evalData, category) {
+  if (!evalData) {
+    return `<h3>Historische Zuverlässigkeit</h3><div class="empty-state">Evaluation nicht verfügbar.</div>`;
+  }
+  const catKey = category || "UNCATEGORIZED";
+  const slice = (evalData.by_category || []).find((c) => c.key === catKey);
+  if (!slice || slice.n === 0) {
+    return `<h3>Historische Zuverlässigkeit</h3><div class="empty-state">Keine aufgelösten Prognosen für Kategorie "${catKey}" vorhanden — noch nicht genug Fälle für eine Aussage.</div>`;
+  }
+  return `
+    <h3>Historische Zuverlässigkeit <span class="sub">(Kategorie: ${catKey})</span></h3>
+    ${slice.too_small_for_conclusion ? `<p class="sub">Nur ${slice.n} aufgelöste(r) Fall/Fälle — nicht genug für eine belastbare Aussage.</p>` : ""}
+    <div class="widget-grid">
+      ${widgetCard({ title: "Aufgelöste Fälle", value: String(slice.n) })}
+      ${widgetCard({ title: "Brier-Score", value: slice.brier_score !== null ? fmtNum(slice.brier_score, 3) : "–" })}
+      ${widgetCard({ title: "Log-Loss", value: slice.log_loss !== null ? fmtNum(slice.log_loss, 3) : "–" })}
+      ${widgetCard({ title: "Ø vorhergesagt", value: slice.mean_predicted_probability !== null ? fmtPct(slice.mean_predicted_probability) : "–" })}
+      ${widgetCard({ title: "Beobachtete Rate", value: slice.observed_frequency !== null ? fmtPct(slice.observed_frequency) : "–" })}
+    </div>
+  `;
+}
+
 function _aiCardHtml(response) {
   const p = response.prediction;
   const e = response.explanation;
@@ -754,13 +947,17 @@ async function renderPredictionPanel(marketId, market) {
   const dqPanel = document.getElementById("data-quality-panel");
   const evidencePanel = document.getElementById("evidence-panel");
   const breakdownPanel = document.getElementById("breakdown-panel");
+  const whyPanel = document.getElementById("why-panel");
+  const changeTriggersPanel = document.getElementById("change-triggers-panel");
   if (!panel) return;
 
   const paint = (response) => {
     headlinePanel.innerHTML = _headlinePanelHtml(market, market.opportunity, response.prediction);
     summaryPanel.innerHTML = _summaryPanelHtml(response.prediction);
+    if (whyPanel) whyPanel.innerHTML = _whySectionHtml(response.prediction);
     if (breakdownPanel) breakdownPanel.innerHTML = _independentBreakdownHtml(response.prediction);
     if (evidencePanel) evidencePanel.innerHTML = _evidenceSectionHtml(response.prediction);
+    if (changeTriggersPanel) changeTriggersPanel.innerHTML = _changeTriggersHtml(response.prediction);
     panel.innerHTML = _aiCardHtml(response);
     scenariosPanel.innerHTML = _scenarioSectionHtml(response.prediction.scenarios);
     submodelsPanel.innerHTML = _submodelSectionHtml(response.prediction);
