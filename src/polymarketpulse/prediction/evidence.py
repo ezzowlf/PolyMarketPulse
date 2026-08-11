@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
 from ..claims import group_claims_by_normalization
 from ..source_registry import (
+    _resolve_cluster_key,
     calculate_source_quality_score,
     get_source_definition,
 )
@@ -419,6 +420,22 @@ def compute_independent_evidence(
         # scoring math in this function.
         extracted_claim = _persist_claims_for_event(conn, event, event_id, source, source_url, published_at)
         if extracted_claim is not None:
+            # BLOCK C, Part 1/2: wire a real (often-unknown) resolution_step
+            # reference onto claims for markets whose event_type has a known
+            # multi-step resolution structure (world_state.py's
+            # ResolutionStep/ResolutionPath). Only fires when this article's
+            # title actually contains a recognized step keyword — most
+            # claims stay resolution_step=None, honestly, since
+            # extract_claim_from_event's own predicate_map only recognizes a
+            # narrow set of event actions unrelated to legislative steps.
+            if proposition.event_type == "legislation":
+                import dataclasses as _dc
+
+                from .world_state import _classify_legislation_step
+
+                classified = _classify_legislation_step(title)
+                if classified is not None:
+                    extracted_claim = _dc.replace(extracted_claim, resolution_step=classified[0])
             collected_claims.append(extracted_claim)
 
         # Sentiment is never allowed to promote a relation past the WEAK
@@ -451,6 +468,22 @@ def compute_independent_evidence(
                 matched_condition = "no"
                 relation_label, relation_weight = "DIRECT_NO", 1.0
 
+        # BLOCK C, Part 1: resolve the registry entry via the SAME
+        # `_resolve_cluster_key` helper source_registry.py's own
+        # `calculate_source_quality_score`/`_cluster_sources` already use
+        # (prefer the domain, fall back to the curated source label) rather
+        # than looking the raw URL domain up directly. Audit finding: a
+        # direct `get_source_definition(domain)` lookup here almost never
+        # matches — SOURCE_REGISTRY is keyed by short labels ("reuters",
+        # "apnews"), not URL netlocs ("reuters.com", "apnews.com") — so
+        # `independence_group`/`source_type` were effectively always
+        # "OTHER"/None for real article domains even though the registry DID
+        # know the source under its curated label. This made
+        # `independence_group` a real SCAFFOLD-vs-CONNECTED gap: computed
+        # and displayed on every factor, but silently dead for the vast
+        # majority of real evidence.
+        _resolved_key = _resolve_cluster_key(domain, source)
+        _source_def = get_source_definition(_resolved_key)
         factors.append(
             EvidenceFactor(
                 news_event_id=event_id, title=title, source=source, source_domain=domain,
@@ -458,8 +491,8 @@ def compute_independent_evidence(
                 tone=sentiment, matched_condition=matched_condition, recency_weight=recency,
                 link_confidence=link_confidence, relation_label=relation_label,
                 entailment=relation.entailment, relation_weight=relation_weight,
-                source_type=source_def.source_type.value if (source_def := get_source_definition(domain)) else "OTHER",
-                independence_group=source_def.independence_group if (source_def := get_source_definition(domain)) else None,
+                source_type=_source_def.source_type.value if _source_def else "OTHER",
+                independence_group=_source_def.independence_group if _source_def else None,
             )
         )
         if extracted_claim is not None:
@@ -484,6 +517,30 @@ def compute_independent_evidence(
     yes_domains = {f.source_domain or f.source for f in evidence_for_yes}
     no_domains = {f.source_domain or f.source for f in evidence_for_no}
     contradiction = bool(yes_domains) and bool(no_domains)
+
+    # BLOCK C, Part 1 (reconciliation): when NO per-event claim information
+    # is available at all (extract_claim_from_event only recognizes a
+    # narrow set of event actions — see claims.py — so this is common), a
+    # raw distinct-domain count is not the right fallback either —
+    # source_registry.py's own independence_group already knows, e.g., that
+    # reuters.com and apnews.com are the SAME wire-service cluster
+    # ("reuters_ap"), not two independent confirmations.
+    # EvidenceFactor.independence_group was already being computed and
+    # attached to every factor (see the loop above) but was a real
+    # SCAFFOLD-vs-CONNECTED gap: displayed on the factor for the UI, never
+    # actually fed into confirmation_count. Used ONLY as the no-claims
+    # fallback (not as a blanket cap alongside the real per-event claim-
+    # group count below) — collapsing by source cluster is correct within
+    # a single reported event, but wrongly conflates genuinely DIFFERENT
+    # events reported by sister wire services (e.g. Reuters covering one
+    # resignation, AP covering an unrelated one) if applied across an
+    # entire market side; the real event_count from claim-group dedup
+    # already handles that distinction correctly when claims exist, so the
+    # cluster-collapsed count is only trusted when nothing more precise is
+    # available.
+    yes_clusters = {f.independence_group or f.source_domain or f.source for f in evidence_for_yes}
+    no_clusters = {f.independence_group or f.source_domain or f.source for f in evidence_for_no}
+
     # ROUND-2 (section 6, Event Intelligence): domain count alone answers
     # "how many distinct outlets published a yes/no-matched article", not
     # "how many genuinely distinct underlying events/claims were reported" —
@@ -496,17 +553,17 @@ def compute_independent_evidence(
     # (_persist_claim_groups, above) — but its output was previously only
     # used for persistence side effects (claim_status_counts) and silently
     # discarded otherwise, never reaching this confirmation_count. Fixed
-    # here by capping each side's domain-based count at its real distinct-
-    # claim-group count whenever claims were actually extracted for that
-    # side (extract_claim_from_event only succeeds for a subset of event
-    # actions — see claims.py — so this is a conservative MIN, never an
-    # increase past the domain count, and never invents a count when no
-    # claims were extracted at all).
+    # here by capping each side's raw domain-based count at its real
+    # distinct-claim-group count whenever claims were actually extracted for
+    # that side, and at its independence-cluster count otherwise (this is a
+    # conservative MIN in both cases, never an increase past the raw domain
+    # count, and never invents a count when no claims/clustering signal
+    # exists at all).
     yes_event_count = (
-        len(group_claims_by_normalization(tuple(claims_for_yes))) if claims_for_yes else len(yes_domains)
+        len(group_claims_by_normalization(tuple(claims_for_yes))) if claims_for_yes else len(yes_clusters)
     )
     no_event_count = (
-        len(group_claims_by_normalization(tuple(claims_for_no))) if claims_for_no else len(no_domains)
+        len(group_claims_by_normalization(tuple(claims_for_no))) if claims_for_no else len(no_clusters)
     )
     confirmation_count = max(min(len(yes_domains), yes_event_count), min(len(no_domains), no_event_count))
 

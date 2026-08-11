@@ -434,6 +434,269 @@ class TransitionStep:
         }
 
 
+# ---------------------------------------------------------------------------
+# BLOCK C, Part 2: ResolutionStep / ResolutionPath — a genuinely NEW,
+# real multi-step resolution structure, distinct from TransitionStep above
+# (which describes a single generic state-A -> state-B transition, e.g. a
+# waterway's operational status). A market's resolution may instead require
+# several SEQUENTIAL/STRUCTURAL steps (the project owner's own example: US
+# legislation -> introduced -> committee -> house -> senate -> president ->
+# signed). This codebase has NO real legislative-status API, no court-docket
+# API, no structured multi-step-process data source for most domains, so
+# this is deliberately narrow: the STRUCTURE is real and correctly typed for
+# every market, but step STATUS is only ever populated from real, dated,
+# DIRECT_*/SUPPORTS_*-tier evidence (the same tier gate `_derive_waterway_
+# state` above already uses) — never guessed. Markets whose event_type has
+# no known multi-step structure (the overwhelming majority: price-threshold,
+# single binary events, etc.) get `applies=False` and an empty `steps`
+# tuple — never a forced, fake multi-step breakdown.
+# ---------------------------------------------------------------------------
+
+ResolutionStepStatus = Literal["not_started", "in_progress", "completed", "blocked", "unknown"]
+DeadlinePressure = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL", "UNKNOWN"]
+PathFeasibility = Literal["LOW", "MEDIUM", "HIGH", "UNKNOWN"]
+
+
+@dataclass(frozen=True)
+class ResolutionStep:
+    """One step of a market's real multi-step resolution structure.
+    `evidence` holds the real (dated, tiered) evidence-item titles the
+    status was derived from — empty when `status` is honestly "unknown"."""
+
+    name: str
+    status: ResolutionStepStatus
+    evidence: tuple[str, ...] = field(default_factory=tuple)
+    timestamp: str | None = None
+
+    def as_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "status": self.status,
+            "evidence": list(self.evidence),
+            "timestamp": self.timestamp,
+        }
+
+
+@dataclass(frozen=True)
+class ResolutionPath:
+    """Ordered multi-step resolution path for one market, plus real derived
+    fields. `applies=False` (empty `steps`) for the majority of markets that
+    have a simple binary yes/no resolution structure with no real multi-step
+    process to break down — this is a legitimate outcome, not a gap."""
+
+    applies: bool
+    steps: tuple[ResolutionStep, ...] = field(default_factory=tuple)
+    # None whenever the step structure/statuses are too unknown to count
+    # (e.g. `applies=False`, or every known step's status is "unknown") —
+    # never a fabricated 0.
+    steps_remaining: int | None = None
+    # A simple ordinal fraction (completed_steps / total_steps), not fake
+    # precision — None when `applies=False` or nothing is known yet.
+    path_completion: float | None = None
+    deadline_pressure: DeadlinePressure = "UNKNOWN"
+    path_feasibility: PathFeasibility = "UNKNOWN"
+    blockers: tuple[str, ...] = field(default_factory=tuple)
+
+    def as_dict(self) -> dict:
+        return {
+            "applies": self.applies,
+            "steps": [s.as_dict() for s in self.steps],
+            "steps_remaining": self.steps_remaining,
+            "path_completion": self.path_completion,
+            "deadline_pressure": self.deadline_pressure,
+            "path_feasibility": self.path_feasibility,
+            "blockers": list(self.blockers),
+        }
+
+
+# event_type -> ordered step names for the one multi-step structure this
+# round wires real evidence into (US federal legislation, the project
+# owner's own example). Kept deliberately narrow/explicit — no guessed
+# structure for event_types not listed here (see `_derive_resolution_path`).
+_MULTISTEP_STRUCTURE_BY_EVENT_TYPE: dict[str, tuple[str, ...]] = {
+    "legislation": ("introduced", "committee", "house_vote", "senate_vote", "presidential_action"),
+}
+
+# Per-step keyword lists (same literal-keyword style as claims.py's
+# `_detect_claim_direction`/world_state.py's `_classify_waterway_headline`)
+# used to classify a single dated evidence-item title as COMPLETING that
+# step. Checked in step order; a match for a later step implies every prior
+# step is also complete (a real, sequential legislative process), never the
+# reverse.
+_LEGISLATION_STEP_COMPLETION_TERMS: dict[str, tuple[str, ...]] = {
+    "introduced": ("introduced", "bill introduced", "introduces the bill"),
+    "committee": ("cleared committee", "committee vote", "passed committee", "advances out of committee",
+                  "committee approves", "reported out of committee"),
+    "house_vote": ("passes the house", "passed the house", "house passes", "cleared the house",
+                   "house approves"),
+    "senate_vote": ("passes the senate", "passed the senate", "senate passes", "cleared the senate",
+                     "senate approves"),
+    "presidential_action": ("signed into law", "signs the bill", "president signs", "vetoed", "veto",
+                              "pocket veto"),
+}
+
+# Keyword lists for a step that is genuinely underway but not yet complete —
+# distinct from "unknown" (no evidence at all) and "completed" (explicit
+# completion language above).
+_LEGISLATION_STEP_IN_PROGRESS_TERMS: dict[str, tuple[str, ...]] = {
+    "introduced": ("plans to introduce", "expected to introduce"),
+    "committee": ("scheduled for committee", "committee hearing", "committee markup", "under committee review"),
+    "house_vote": ("scheduled for a house vote", "house floor vote scheduled", "heads to the house floor"),
+    "senate_vote": ("scheduled for a senate vote", "senate floor vote scheduled", "heads to the senate floor"),
+    "presidential_action": ("awaits president's signature", "sent to the president", "on the president's desk"),
+}
+
+
+def _classify_legislation_step(title: str) -> tuple[str, ResolutionStepStatus] | None:
+    """Best-effort, literal keyword classification of a single evidence
+    item's title into (step_name, status). Returns None when no known term
+    is present — never a guess."""
+    lowered = (title or "").lower()
+    for step_name, terms in _LEGISLATION_STEP_COMPLETION_TERMS.items():
+        if any(t in lowered for t in terms):
+            return step_name, "completed"
+    for step_name, terms in _LEGISLATION_STEP_IN_PROGRESS_TERMS.items():
+        if any(t in lowered for t in terms):
+            return step_name, "in_progress"
+    return None
+
+
+def _deadline_pressure(
+    time_remaining_hours: float | None, steps_remaining: int | None,
+) -> DeadlinePressure:
+    """Real, ordinal-only derivation from `time_remaining_hours` (already
+    computed, real, from `resolution_date - now`) and, when known,
+    `steps_remaining` — never a fabricated probability. A market past its
+    deadline (<=0h) or with no deadline at all is reported honestly rather
+    than guessed."""
+    if time_remaining_hours is None:
+        return "UNKNOWN"
+    if time_remaining_hours <= 0:
+        return "CRITICAL"
+    # Per-remaining-step time budget when the step count is known — a tight
+    # multi-step process compresses the effective runway even if the raw
+    # deadline looks distant. Falls back to the raw deadline alone when the
+    # step count itself is unknown.
+    effective_hours = (
+        time_remaining_hours / max(1, steps_remaining) if steps_remaining else time_remaining_hours
+    )
+    if effective_hours <= 24:
+        return "CRITICAL"
+    if effective_hours <= 24 * 7:
+        return "HIGH"
+    if effective_hours <= 24 * 30:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _derive_resolution_path(
+    proposition: MarketProposition,
+    time_remaining_hours: float | None,
+    independent_evidence: IndependentEvidenceResult | None,
+) -> ResolutionPath:
+    """Builds the real ResolutionPath for one market. `applies=False` (empty
+    steps) is the correct, honest outcome for every event_type not in
+    `_MULTISTEP_STRUCTURE_BY_EVENT_TYPE` — i.e. the overwhelming majority of
+    markets (price-threshold, single binary events, etc.), which have no
+    real multi-step process to break down."""
+    step_names = _MULTISTEP_STRUCTURE_BY_EVENT_TYPE.get(proposition.event_type or "")
+    if not step_names:
+        return ResolutionPath(
+            applies=False,
+            steps=(),
+            steps_remaining=None,
+            path_completion=None,
+            deadline_pressure=_deadline_pressure(time_remaining_hours, None),
+            path_feasibility="UNKNOWN",
+            blockers=(),
+        )
+
+    # Only DIRECT_*/SUPPORTS_*-tier, dated evidence counts as a real basis
+    # for a step's status — same tier gate as `_derive_waterway_state`.
+    candidates: list = []
+    if independent_evidence is not None and independent_evidence.available:
+        candidates = [
+            f
+            for f in (*independent_evidence.evidence_for_yes, *independent_evidence.evidence_for_no)
+            if f.relation_label in ("DIRECT_YES", "SUPPORTS_YES", "DIRECT_NO", "SUPPORTS_NO") and f.published_at
+        ]
+
+    # step_name -> (status, [evidence titles], latest timestamp)
+    findings: dict[str, tuple[ResolutionStepStatus, list[str], str | None]] = {}
+    for f in candidates:
+        classified = _classify_legislation_step(f.title)
+        if classified is None:
+            continue
+        step_name, status = classified
+        prior = findings.get(step_name)
+        if prior is None or (status == "completed" and prior[0] != "completed"):
+            findings[step_name] = (status, [f.title], f.published_at)
+        elif status == prior[0]:
+            findings[step_name] = (status, [*prior[1], f.title], prior[2])
+
+    # A later step's real completion implies every prior step is also
+    # complete (sequential process) — this is a structural inference from a
+    # REAL observed later-stage event, not a guess about an unobserved
+    # earlier one.
+    highest_completed_index = -1
+    for idx, name in enumerate(step_names):
+        if findings.get(name, (None,))[0] == "completed":
+            highest_completed_index = idx
+
+    steps: list[ResolutionStep] = []
+    for idx, name in enumerate(step_names):
+        found = findings.get(name)
+        if idx <= highest_completed_index:
+            status: ResolutionStepStatus = "completed"
+            evidence = found[1] if found else ()
+            timestamp = found[2] if found else None
+        elif found is not None:
+            status = found[0]
+            evidence = tuple(found[1])
+            timestamp = found[2]
+        else:
+            status = "unknown"
+            evidence = ()
+            timestamp = None
+        steps.append(ResolutionStep(name=name, status=status, evidence=tuple(evidence), timestamp=timestamp))
+
+    known_statuses = [s for s in steps if s.status != "unknown"]
+    if not known_statuses:
+        steps_remaining = None
+        path_completion = None
+    else:
+        completed = sum(1 for s in steps if s.status == "completed")
+        # steps_remaining counts every step after the last known one as
+        # "remaining" only when at least one step's real status is known —
+        # otherwise the whole path is honestly unknown, not zero.
+        steps_remaining = len(steps) - completed
+        path_completion = round(completed / len(steps), 2)
+
+    blockers = tuple(s.name + ": " + e for s in steps if s.status == "blocked" for e in s.evidence)
+    deadline_pressure = _deadline_pressure(time_remaining_hours, steps_remaining)
+
+    if blockers:
+        path_feasibility: PathFeasibility = "LOW"
+    elif not known_statuses:
+        path_feasibility = "UNKNOWN"
+    elif deadline_pressure == "CRITICAL" and (steps_remaining or 0) > 0:
+        path_feasibility = "LOW"
+    elif path_completion is not None and path_completion >= 0.5:
+        path_feasibility = "HIGH"
+    else:
+        path_feasibility = "MEDIUM"
+
+    return ResolutionPath(
+        applies=True,
+        steps=tuple(steps),
+        steps_remaining=steps_remaining,
+        path_completion=path_completion,
+        deadline_pressure=deadline_pressure,
+        path_feasibility=path_feasibility,
+        blockers=blockers,
+    )
+
+
 @dataclass(frozen=True)
 class PathToResolution:
     current_state: str
@@ -449,6 +712,20 @@ class PathToResolution:
     # no real, evidence-derived transition to describe — never fabricated
     # placeholder steps.
     required_transition_steps: tuple[TransitionStep, ...] = field(default_factory=tuple)
+    # BLOCK C, Part 2 addition: the real multi-step ResolutionPath (distinct
+    # from `required_transition_steps` above, which describes a single
+    # generic state-A -> state-B transition). Architectural call, documented
+    # here rather than only in HANDOFF.md: `PathToResolution` is genuinely
+    # the right home for this — it is already the "what would need to happen
+    # for YES vs NO" summary object for Politics/Geopolitics markets, and
+    # `ResolutionPath` is a structural refinement of that same question for
+    # markets whose event_type has a KNOWN multi-step process, rather than a
+    # parallel, disconnected concept. Kept as its own dataclass (not merged
+    # into `required_transition_steps`) because the two model genuinely
+    # different shapes: `TransitionStep` is a single current-state ->
+    # target-state edge; `ResolutionPath` is an ORDERED SEQUENCE of named,
+    # independently-statused steps.
+    resolution_path: ResolutionPath | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -460,6 +737,7 @@ class PathToResolution:
             "supporting_conditions": list(self.supporting_conditions),
             "blocking_conditions": list(self.blocking_conditions),
             "required_transition_steps": [s.as_dict() for s in self.required_transition_steps],
+            "resolution_path": self.resolution_path.as_dict() if self.resolution_path is not None else None,
         }
 
 
@@ -525,6 +803,8 @@ def _derive_path_to_resolution(
             ),
         )
 
+    resolution_path = _derive_resolution_path(proposition, time_remaining_hours, independent_evidence)
+
     return PathToResolution(
         current_state=current_state,
         yes_condition=proposition.yes_condition,
@@ -534,6 +814,7 @@ def _derive_path_to_resolution(
         supporting_conditions=supporting_conditions,
         blocking_conditions=blocking_conditions,
         required_transition_steps=required_transition_steps,
+        resolution_path=resolution_path,
     )
 
 

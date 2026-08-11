@@ -1046,6 +1046,18 @@ def _migration_020_polymarket_price_history_backfill(conn: sqlite3.Connection) -
     """)
 
 
+def _migration_021_claim_resolution_step(conn: sqlite3.Connection) -> None:
+    """BLOCK C, Part 1/3: additive column on the existing `claims` table
+    (migration 018) linking a claim to a real ResolutionStep name (see
+    prediction/world_state.py's ResolutionStep/ResolutionPath, added in the
+    same block) for markets with a known multi-step resolution structure
+    (currently only legislation). NULL for every claim that doesn't map to
+    a recognized step — the honest, common case — never backfilled/guessed.
+    Purely additive: no existing column dropped or altered."""
+    _add_column(conn, "claims", "resolution_step", "TEXT")
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1067,6 +1079,7 @@ MIGRATIONS: list[Migration] = [
     (18, "claim_extraction_and_verification", _migration_018_claim_extraction_and_verification),
     (19, "macro_observations", _migration_019_macro_observations),
     (20, "polymarket_price_history_backfill", _migration_020_polymarket_price_history_backfill),
+    (21, "claim_resolution_step", _migration_021_claim_resolution_step),
 ]
 
 

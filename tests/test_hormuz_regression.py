@@ -175,9 +175,15 @@ def test_hormuz_with_strong_direct_evidence_shows_itemized_real_support(storage:
         storage, market, "Strait of Hormuz shipping traffic returns to normal levels, officials confirm",
         "reuters", "https://reuters.com/a", confidence=0.6, hours_ago=1,
     )
+    # Deliberately NOT apnews: apnews shares reuters's real
+    # source_registry.py independence_group ("reuters_ap" — the wire
+    # services are the SAME cluster, not two independent confirmations, see
+    # evidence.py's Block C fix), so this test uses a genuinely distinct,
+    # unclustered outlet to keep testing its actual intent (two REAL
+    # independently-confirming sources).
     _link_news(
         storage, market, "Officials confirm Hormuz shipping traffic returns to normal levels after restrictions lifted",
-        "apnews", "https://apnews.com/b", confidence=0.6, hours_ago=2,
+        "bbc", "https://bbc.com/b", confidence=0.6, hours_ago=2,
     )
     result = compute_prediction(
         storage.connection, "hormuz-strong-divergence", "polymarket", "hormuz-strong-divergence",

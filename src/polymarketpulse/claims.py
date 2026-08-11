@@ -84,6 +84,16 @@ class Claim:
     # claim persistence was never actually exercised end-to-end before.
     event_type: str | None = None
     direction: Literal["positive", "negative", "neutral"] = "neutral"
+    # BLOCK C, Part 1 (additive): links this claim to a real ResolutionStep
+    # name (see prediction/world_state.py's ResolutionStep/ResolutionPath —
+    # built in the same block, after this field was added) for markets whose
+    # event_type has a known multi-step resolution structure (currently only
+    # "legislation" — introduced/committee/house/senate/president). None is
+    # the honest, common default: only a narrow slice of extracted claims
+    # (legislation-flavoured event text that also matches a recognized step
+    # keyword) can ever populate this; nothing here guesses a step from a
+    # claim with no textual basis for one.
+    resolution_step: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -102,6 +112,7 @@ class Claim:
             "raw_reference": self.raw_reference,
             "event_type": self.event_type,
             "direction": self.direction,
+            "resolution_step": self.resolution_step,
         }
     
     def normalized(self) -> str:
@@ -195,7 +206,8 @@ class ExtractedClaim:
     certainty: Literal["confirmed", "reported", "announced", "speculative", "unknown"]
     event_type: str | None  # If this claim relates to a known event type
     direction: Literal["positive", "negative", "neutral"] = "neutral"  # YES/NO direction
-    
+    resolution_step: str | None = None  # see Claim.resolution_step
+
     def to_claim(self, claim_id: str) -> Claim:
         """Convert to a Claim with a stable ID."""
         # Map certainty to verification_status
@@ -223,8 +235,9 @@ class ExtractedClaim:
             raw_reference=self.raw_reference,
             event_type=self.event_type,
             direction=self.direction,
+            resolution_step=self.resolution_step,
         )
-    
+
     def _confidence(self) -> float:
         """Calculate confidence based on certainty and available signals."""
         base = {

@@ -1736,8 +1736,9 @@ class Storage:
                 INSERT INTO claims (
                     claim_id, subject, predicate, object, speaker, source_id,
                     source_url, timestamp, verification_status, confidence,
-                    entities_json, location, raw_reference, event_type, direction, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    entities_json, location, raw_reference, event_type, direction,
+                    resolution_step, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(claim_id) DO NOTHING
                 """,
                 (
@@ -1746,7 +1747,8 @@ class Storage:
                     claim.timestamp.isoformat() if claim.timestamp else None,
                     claim.verification_status, claim.confidence,
                     json.dumps(list(claim.entities)) if claim.entities else None,
-                    claim.location, claim.raw_reference, claim.event_type, claim.direction, now,
+                    claim.location, claim.raw_reference, claim.event_type, claim.direction,
+                    getattr(claim, "resolution_step", None), now,
                 ),
             )
             self.connection.commit()
