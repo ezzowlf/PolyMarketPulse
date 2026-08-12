@@ -98,12 +98,21 @@ def test_reuters_and_apnews_collapse_to_one_independent_cluster_when_no_claim_si
         "This market resolves YES if Strait of Hormuz shipping traffic returns to normal "
         "levels. It resolves NO otherwise."
     )
+    # Part 2 (Live Evidence Engine continuation) note: these headlines are
+    # deliberately worded with "holds steady" rather than any of world_
+    # state.py's graded waterway keywords (e.g. "returns to normal") —
+    # since semantics.extract_event now recognizes those via the new
+    # waterway_status action family (added to unlock real claim persistence
+    # for the Hormuz reference case), using them here would give this
+    # fixture real claim-group dedup signal and defeat the point of this
+    # test, which is specifically to exercise the cluster-fallback path
+    # used when NO claim signal is available.
     _link_evidence(
         storage, "polymarket", "m1", question,
         [
-            ("Strait of Hormuz shipping traffic returns to normal levels, officials confirm",
+            ("Strait of Hormuz shipping traffic holds steady, officials confirm",
              "reuters", "https://reuters.com/a", 0.6),
-            ("Officials confirm Hormuz traffic returns to normal levels after restrictions lifted",
+            ("Officials confirm Hormuz traffic holds steady after diplomatic talks",
              "apnews", "https://apnews.com/b", 0.6),
         ],
     )

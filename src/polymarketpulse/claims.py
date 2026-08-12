@@ -690,8 +690,22 @@ def extract_claim_from_event(
         "senate_vote": "passed the Senate",
         "presidential_action": "reached presidential action (signature/veto)",
     }
+    # Part 2 (Live Evidence Engine continuation, Hormuz reference case): the
+    # waterway_status action family (semantics.py's extract_event, reusing
+    # world_state._classify_waterway_headline) carries the graded NORMAL/
+    # DEGRADED/SEVERELY_RESTRICTED/CLOSED state in event.target — map it to
+    # a human-readable predicate the same way legislative_progress's step
+    # name is mapped above.
+    _WATERWAY_STATE_PREDICATES: dict[str, str] = {
+        "NORMAL": "returned to normal traffic",
+        "DEGRADED": "experienced degraded/disrupted traffic",
+        "SEVERELY_RESTRICTED": "experienced severely restricted traffic",
+        "CLOSED": "was closed/blockaded",
+    }
     if event.action == "legislative_progress":
         predicate = _LEGISLATIVE_STEP_PREDICATES.get(event.target or "", "advanced in the legislative process")
+    elif event.action == "waterway_status":
+        predicate = _WATERWAY_STATE_PREDICATES.get(event.target or "", "reported a waterway status change")
     else:
         predicate = predicate_map.get(event.action)
     if not predicate:
@@ -721,6 +735,17 @@ def extract_claim_from_event(
         # world_state.py's `_LEGISLATION_STEP_COMPLETION_TERMS` module
         # comments for the same honest gap).
         direction = "positive"
+    elif event.action == "waterway_status":
+        # This is the claim's OWN objective polarity (is the world getting
+        # better or worse for trade), not a per-market YES/NO — deliberately
+        # NOT wired to any specific market's target_waterway_state, since a
+        # single claim is shared across every market it gets linked to (a
+        # closure market and a normalization market would need opposite
+        # readings of the same claim, which is exactly what
+        # semantics.classify_evidence_relation's direction-aware waterway
+        # branch computes per-market at evidence-scoring time — this field
+        # is a coarser, claim-level signal only).
+        direction = "positive" if event.target == "NORMAL" else "negative"
     
     return ExtractedClaim(
         subject=" ".join(event.actors) if event.actors else None,

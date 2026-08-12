@@ -291,7 +291,7 @@ _WATERWAY_STATE_RANK: dict[str, int] = {
 # combining e.g. "closed" and "restricted" resolves to the more severe read.
 _CLOSED_TERMS = ("closed", "blockade", "blockaded", "shut down", "shut off", "halted", "suspended")
 _SEVERELY_RESTRICTED_TERMS = ("severely restricted", "sharply reduced", "near-halt", "near halt", "plunges", "plunged")
-_DEGRADED_TERMS = ("restricted", "reduced", "delayed", "disrupted", "limited", "slowed", "restrictions")
+_DEGRADED_TERMS = ("restricted", "reduced", "delayed", "disrupted", "disruption", "limited", "slowed", "restrictions")
 _NORMAL_TERMS = ("returns to normal", "return to normal", "back to normal", "normalized", "normalization",
                   "reopened", "reopens", "reopening", "resumed", "resumes normal", "restored")
 

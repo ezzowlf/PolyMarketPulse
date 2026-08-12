@@ -919,11 +919,38 @@ def extract_event(title: str, body: str | None = None) -> ExtractedEvent:
             matched_phrase = step_name
             certainty = _detect_certainty(text)
 
+    # Part 2 (Live Evidence Engine continuation): waterway operational-
+    # status language ("effectively closed", "traffic returns to normal",
+    # "disruption hits energy...") was entirely unrecognized by any action
+    # family, so a real, dated waterway headline could never become a
+    # persisted claim (extract_claim_from_event requires event.action to be
+    # set) regardless of how good classify_evidence_relation's Part-1
+    # direction-aware waterway branch was. Reuses
+    # world_state._classify_waterway_headline's exact graded keyword logic
+    # (same lazy-import pattern as legislative_progress above) purely to
+    # populate event.action/event.target for claim-extraction purposes.
+    # Deliberately does NOT feed classify_evidence_relation's generic same/
+    # opposite event_type branch with directional confidence — see that
+    # function's explicit strategic_waterway guard, which refuses to guess
+    # a direction from event_type equality alone and requires the title-
+    # based target_waterway_state comparison instead. This action family
+    # only unlocks claim persistence; it never bypasses the direction check.
+    waterway_state: str | None = None
+    if action is None:
+        from .world_state import _classify_waterway_headline
+
+        waterway_state = _classify_waterway_headline(text)
+        if waterway_state is not None:
+            action = "waterway_status"
+            matched_phrase = waterway_state
+
     status: Literal["actual", "intent", "call_for", "continuation", "unknown"] = _STATUS_BY_ACTION.get(action, "unknown") if action else "unknown"
     if action == "legislative_progress":
         # legislative_classified is guaranteed set whenever action was just
         # assigned above (the only place that sets this action value).
         status = "actual" if legislative_classified[1] == "completed" else "intent"
+    elif action == "waterway_status":
+        status = "actual"
 
     # K4 fix: escalation/deescalation status was hardcoded to "actual"
     # regardless of certainty (see _STATUS_BY_ACTION), so a merely proposed/
@@ -949,6 +976,8 @@ def extract_event(title: str, body: str | None = None) -> ExtractedEvent:
         event_type = "ceasefire"
     elif action == "legislative_progress":
         event_type = "legislation"
+    elif action == "waterway_status":
+        event_type = "strategic_waterway"
 
     # Negation handling: "Ceasefire denied, talks collapse" contains the
     # keyword "ceasefire" but reports the OPPOSITE of a ceasefire actually
@@ -1158,6 +1187,25 @@ def classify_evidence_relation(
         return EvidenceRelation(
             "CONTEXT", "NEUTRAL", 0.0,
             "Routinemaessiger Auftritt (z. B. Rally) — kein informativer Bezug zur YES/NO-Bedingung.",
+        )
+
+    # Part 1/2 safety guard: strategic_waterway propositions must NEVER be
+    # resolved by the generic same/opposite event_type branch below. That
+    # branch only knows event_type equality, and two real waterway markets
+    # (Hormuz "returns to normal" vs Bab el-Mandeb "effectively closed")
+    # share the identical event_type — this is exactly the misclassification
+    # Round 3 flagged and the reason `_classify_waterway_evidence` (title-
+    # based, direction-aware) exists above. Reaching this point means either
+    # no title was supplied, the headline didn't classify into a known
+    # graded waterway state, or the topic didn't overlap — in every one of
+    # those cases, honestly report "not enough to determine direction"
+    # rather than guessing from event_type alone.
+    if proposition.event_type == "strategic_waterway" and relation_kind != "none":
+        return EvidenceRelation(
+            "CONTEXT", "NEUTRAL", 0.0,
+            "Wasserstraßen-Ereignis erkannt, aber ohne titelbasierte Zustandsklassifizierung kann keine "
+            "gerichtete YES/NO-Einordnung vorgenommen werden (verhindert Verwechslung zwischen z. B. "
+            "'geschlossen'- und 'normalisiert'-Märkten mit demselben event_type).",
         )
 
     # Actor/topic overlaps but action is unrecognized or off-predicate
