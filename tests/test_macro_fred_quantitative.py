@@ -71,6 +71,23 @@ def test_no_macro_snapshot_stays_unavailable() -> None:
     )
     assert result.available is False
     assert result.probability is None
+    # Must be distinguishable from "no evidence exists" — this is a real
+    # source-fetch failure (FRED/BLS unreachable), not an absence of
+    # relevant evidence in the world.
+    assert result.data_source_status == "SOURCE_FETCH_FAILED"
+    assert "SOURCE_FETCH_FAILED" in result.reason
+
+
+def test_no_evidence_and_no_snapshot_need_reports_no_evidence_not_fetch_failure() -> None:
+    # Event types outside the quantitative fallback (e.g. monetary_policy)
+    # have no FRED/BLS signal to fail to fetch in the first place — this
+    # must report NO_EVIDENCE, not a fabricated SOURCE_FETCH_FAILED.
+    result = analyze_macro(
+        text="Some unrelated statement.", event_type="monetary_policy",
+        proposition_status="CLEAR", macro_snapshot=None,
+    )
+    assert result.available is False
+    assert result.data_source_status == "NO_EVIDENCE"
 
 
 def test_probability_genuinely_reacts_to_different_real_macro_inputs() -> None:

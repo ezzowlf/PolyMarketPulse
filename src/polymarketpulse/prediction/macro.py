@@ -155,6 +155,14 @@ class MacroResult:
     inputs_used: tuple[str, ...]
     contributions: tuple[dict, ...]
     uncertainty: float
+    # Distinguishes WHY no quantitative FRED/BLS signal was used, so the UI
+    # and downstream gap-reporting can tell "the source fetch genuinely
+    # failed" (SOURCE_FETCH_FAILED — a transport/availability problem, not
+    # a statement about the world) apart from "no relevant evidence exists"
+    # (NO_EVIDENCE) or the normal case where a real signal was used (OK).
+    # Defaulted so existing call sites/tests that construct MacroResult
+    # directly are unaffected.
+    data_source_status: str = "OK"
 
     def as_dict(self) -> dict:
         return {
@@ -166,6 +174,7 @@ class MacroResult:
             "inputs_used": list(self.inputs_used),
             "contributions": list(self.contributions),
             "uncertainty": self.uncertainty,
+            "data_source_status": self.data_source_status,
         }
 
 
@@ -423,7 +432,39 @@ def analyze_macro(
                         {"source": "fred_unemployment_trend", "weight": 0.25, "impact": "positive" if key == "cut" else "negative" if key == "hike" else "neutral"},
                     ),
                     uncertainty=max(0.0, 1.0 - 55.0 / 100.0),
+                    data_source_status="OK",
                 )
+
+        # For the quantitative event types, macro_snapshot being None here
+        # means the FRED/BLS fetch itself failed (providers/fred.py returns
+        # None on any transport error — see its module docstring) — that is
+        # a materially different situation from "no relevant evidence text
+        # exists", and must be surfaced as such rather than folded into the
+        # same generic reason string.
+        if event_type in _QUANTITATIVE_EVENT_TYPES and macro_snapshot is None:
+            return MacroResult(
+                available=False,
+                probability=None,
+                confidence=0.0,
+                data_quality=DataQualityBreakdown(
+                    vollstaendigkeit=0.0,
+                    aktualitaet=0.0,
+                    quellenuebereinstimmung=0.0,
+                    historische_fallzahl=0.0,
+                    resolution_klarheit=0.0,
+                    liquiditaet=0.0,
+                ),
+                reason=(
+                    f"{reason}; real-time macro data (FRED/BLS) could not be "
+                    f"fetched (SOURCE_FETCH_FAILED) — this is a data-source "
+                    f"availability problem, not a statement that no relevant "
+                    f"evidence exists"
+                ),
+                inputs_used=inputs_used + ("macro_source_fetch_failed",),
+                contributions=(),
+                uncertainty=1.0,
+                data_source_status="SOURCE_FETCH_FAILED",
+            )
 
         return MacroResult(
             available=False,
@@ -441,6 +482,7 @@ def analyze_macro(
             inputs_used=inputs_used,
             contributions=(),
             uncertainty=1.0,
+            data_source_status="NO_EVIDENCE",
         )
 
     # Build data quality from inputs
