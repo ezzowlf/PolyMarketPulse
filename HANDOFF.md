@@ -1,5 +1,22 @@
 # HANDOFF
 
+## PAUSE CHECKPOINT (project owner requested a stop — work is paused here, not finished)
+
+**AKTUELLER STAND**
+- Vollständig implementiert: das ganze 11-Block-Integrations-Mandat (forecast-semantics 4-Stufen-Trennung, Source Registry, Claims-Pipeline, ResolutionStep/Path, Decision Engine, Change Attribution/Triggers, Scenarios, Evaluation, Frontend-Research-Story) — siehe Blocks A-I weiter unten in dieser Datei.
+- Live-Evidence-Engine, Runde 1: echte GovTrack.us-Quelle für Clarity Act (`polymarket:1163699`) integriert, echte Claims (2→4), Resolution Path 0/5→3/5 Schritte, kategorie-bewusste Freshness-Decay-Korrektur (Legislative/Makro-Fakten zerfallen nicht mehr fälschlich nach 24h).
+- **Noch offen/unterbrochen**: ein Agent lief zum Zeitpunkt des Stopps noch — versuchte eine zweite unabhängige Quelle für Clarity Act zu finden (GDELT) und den Geopolitik-Referenzfall (Hormuz/Bab el-Mandeb) mit echten Quellen zu befüllen. Ergebnis unbekannt zum Zeitpunkt dieses Checkpoints — beim Neustart zuerst `git log`/`git status` real prüfen, nicht von hier ausgehen.
+- Letzter Teststand: 911/911 grün, ruff clean (Stand Commit `5a9cede`).
+- Letzter lokaler Commit: `5a9cede` (Freshness-Fix). 14 lokale Commits vor `origin/master`.
+- **Nichts wurde gepusht.**
+
+**NÄCHSTER AUFTRAG: „PolyMarketPulse Live Evidence Engine" fortsetzen**
+Ziel-Pipeline: Market → Resolution Rule → Data Gaps → Source Routing → echte Quellen → Claim Extraction → Market Linking → Evidence → Resolution Path Update → Forecast → Erklärung → UI → Speicherung.
+Hauptbefund (weiterhin gültig): Architektur funktioniert weitgehend, Datenbasis war praktisch leer (281/305 Märkte ohne Modellschätzung, nur 2 Claims projektweit, 0 Published Forecasts) — Ursache ist fehlende echte Dateneingabe, kein Forecast-Gate-Bug. **Nicht wieder Gates/UI von vorne umbauen.** Schwerpunkt: echte marktbezogene Datenbeschaffung.
+**Beim Neustart zuerst den dann real vorhandenen Repository-Zustand neu prüfen — alte Angaben hier nicht ungeprüft übernehmen.**
+
+---
+
 ## THIS ROUND (newest) — 85-section brief, real-data-integration slice 1/N: Clarity Act (`polymarket:1163699`, H.R.3633) end-to-end proof
 
 **Mandate**: fill the existing intelligence architecture with real, market-relevant data for ONE reference case (the project owner's own suggested starting point), not more architecture and not fabricated numbers. "KEINE ZAHL OHNE HERKUNFT. KEINE WAHRSCHEINLICHKEIT OHNE BEGRÜNDUNG. KEINE BEGRÜNDUNG OHNE EVIDENZ. KEINE EVIDENZ OHNE QUELLE."
