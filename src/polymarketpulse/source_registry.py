@@ -44,6 +44,7 @@ class SourceDomain(str, Enum):
     BILD = "bild"  # Bild
     COINGECKO = "coingecko"  # Krypto-Daten
     FRED = "fred"  # FRED Economic Data
+    GOVTRACK = "govtrack"  # GovTrack.us - echte, kostenlose, schluessellose Gesetzgebungs-Status-API
     # Weitere...
 
 
@@ -124,6 +125,26 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         },
         independence_group="us_government",
         base_reliability=0.95,
+        fetch_priority=1,
+    ),
+    # Gesetzgebungs-Status (real, free, keyless, structured — see
+    # providers/govtrack.py's module docstring for why this is used instead
+    # of congress.gov directly: congress.gov's human site 403s bot traffic
+    # and its real structured API requires an API key this project does not
+    # have; house.gov/senate.gov publish no per-bill status API/feed at all).
+    "govtrack": SourceDefinition(
+        domain=SourceDomain.GOVTRACK,
+        source_name="govtrack.us",
+        display_name="GovTrack.us",
+        source_type=SourceType.SECONDARY_REPUTABLE,
+        relevance_by_event_type={
+            "legislation": "HIGH",
+        },
+        independence_group="govtrack",
+        # Third-party aggregator of the same official government bulk-data
+        # feeds congress.gov itself publishes, not a first-party .gov
+        # domain — high but not PRIMARY_OFFICIAL-tier reliability.
+        base_reliability=0.85,
         fetch_priority=1,
     ),
     # Zentralbanken

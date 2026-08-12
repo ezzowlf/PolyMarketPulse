@@ -866,7 +866,35 @@ def extract_event(title: str, body: str | None = None) -> ExtractedEvent:
     action, matched_phrase = _detect_action(text)
     certainty = _detect_certainty(text)
 
+    # Real-data integration round (Clarity Act slice): US federal
+    # legislative-status language ("passed the House", "cleared committee",
+    # "signed into law", ...) was not recognized by ANY action family above
+    # — `_ACTION_FAMILIES` only covers office-departure/conflict phrasing —
+    # so a real, dated "H.R. 3633 passed the House" headline could never
+    # become DIRECT_YES-tier evidence for a `legislation` proposition,
+    # regardless of how good the underlying source was. Reuses
+    # `world_state._classify_legislation_step`'s exact keyword lists (no
+    # import cycle: world_state.py has no runtime dependency on this
+    # module) rather than duplicating them — one keyword table, two
+    # consumers (the ResolutionPath step classifier and this event
+    # extractor). Only checked when no other action family already matched,
+    # so this can never override a genuinely different, already-recognized
+    # action.
+    if action is None:
+        from .world_state import _classify_legislation_step
+
+        legislative_classified = _classify_legislation_step(text)
+        if legislative_classified is not None:
+            step_name, _step_status = legislative_classified
+            action = "legislative_progress"
+            matched_phrase = step_name
+            certainty = _detect_certainty(text)
+
     status: Literal["actual", "intent", "call_for", "continuation", "unknown"] = _STATUS_BY_ACTION.get(action, "unknown") if action else "unknown"
+    if action == "legislative_progress":
+        # legislative_classified is guaranteed set whenever action was just
+        # assigned above (the only place that sets this action value).
+        status = "actual" if legislative_classified[1] == "completed" else "intent"
 
     # K4 fix: escalation/deescalation status was hardcoded to "actual"
     # regardless of certainty (see _STATUS_BY_ACTION), so a merely proposed/
@@ -890,6 +918,8 @@ def extract_event(title: str, body: str | None = None) -> ExtractedEvent:
         event_type = "war_escalation"
     elif action == "deescalation":
         event_type = "ceasefire"
+    elif action == "legislative_progress":
+        event_type = "legislation"
 
     # Negation handling: "Ceasefire denied, talks collapse" contains the
     # keyword "ceasefire" but reports the OPPOSITE of a ceasefire actually

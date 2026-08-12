@@ -660,7 +660,7 @@ def extract_claim_from_event(
     """
     if not event.action:
         return None
-    
+
     # Map action to predicate
     predicate_map = {
         "resignation": "resigned",
@@ -671,11 +671,32 @@ def extract_claim_from_event(
         "escalation": "escalated conflict",
         "deescalation": "de-escalated tension",
     }
-    
-    predicate = predicate_map.get(event.action)
+
+    # Real-data-integration round (Clarity Act slice, see HANDOFF.md): US
+    # federal legislative-status events (semantics.py's new
+    # "legislative_progress" action family — real "passed the House"/
+    # "cleared committee"/"signed into law" language) were entirely absent
+    # from this predicate map, so extract_claim_from_event returned None for
+    # every one of them and no claim (nor the resolution_step it carries)
+    # was ever persisted, regardless of how good the underlying evidence
+    # was. `event.target` holds the recognized resolution-step name
+    # (world_state.py's ResolutionStep vocabulary: introduced/committee/
+    # house_vote/senate_vote/presidential_action — see semantics.py's
+    # extract_event) — a human-readable predicate per step, not a guess.
+    _LEGISLATIVE_STEP_PREDICATES: dict[str, str] = {
+        "introduced": "was introduced",
+        "committee": "cleared committee",
+        "house_vote": "passed the House",
+        "senate_vote": "passed the Senate",
+        "presidential_action": "reached presidential action (signature/veto)",
+    }
+    if event.action == "legislative_progress":
+        predicate = _LEGISLATIVE_STEP_PREDICATES.get(event.target or "", "advanced in the legislative process")
+    else:
+        predicate = predicate_map.get(event.action)
     if not predicate:
         return None
-    
+
     # Determine object based on status
     obj: str | None = None
     if event.status == "actual":
@@ -684,13 +705,22 @@ def extract_claim_from_event(
         obj = "planned"
     elif event.status == "continuation":
         obj = "continues"
-    
+
     # Determine direction
     direction: Literal["positive", "negative", "neutral"] = "neutral"
     if event.action == "deescalation":
         direction = "positive"
     elif event.action == "escalation":
         direction = "negative"
+    elif event.action == "legislative_progress":
+        # A completed/in-progress legislative step is, by construction,
+        # evidence toward this market's YES condition (see
+        # semantics.classify_evidence_relation's "yes_if_occurs" branch) —
+        # never NO (a veto/failed vote reaching this same action family is a
+        # real, documented, pre-existing simplification: see
+        # world_state.py's `_LEGISLATION_STEP_COMPLETION_TERMS` module
+        # comments for the same honest gap).
+        direction = "positive"
     
     return ExtractedClaim(
         subject=" ".join(event.actors) if event.actors else None,
