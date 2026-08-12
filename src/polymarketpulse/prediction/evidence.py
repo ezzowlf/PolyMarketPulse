@@ -51,8 +51,55 @@ _EXTRAORDINARY_MAX_SWING_BY_DIRECT_COUNT = {0: 0.03, 1: 0.08}
 
 # Evidence loses relevance faster than the general news submodel's 48h
 # half-life — "early signal" freshness is the whole point of this module.
+# This is the DEFAULT curve, used for anything not explicitly categorized
+# below — it stays exactly as it was before the category-aware fix.
 RECENCY_HALF_LIFE_HOURS = 24.0
 BREAKING_WINDOW_HOURS = 48.0
+
+# HANDOFF Part-4 fix: a single global 24h half-life conflates two different
+# things this codebase's evidence really contains: (1) fast-moving
+# situational/directional signal (a ceasefire rumor, a troop-movement
+# report) that genuinely goes stale within hours-to-days, and (2) discrete,
+# durable STATE CHANGES (a bill passing the House, a central bank's rate
+# decision) that remain just as true — and just as relevant to a market's
+# resolution — weeks or months after they happened. Root cause, proven
+# live: a real, correctly-classified DIRECT_YES claim for H.R.3633's real
+# 2025-07-17 House-passage vote decayed to recency_weight == 0.0 under the
+# flat 24h curve purely because of its age, even though the fact itself is
+# still 100% true and load-bearing for the market's resolution today.
+#
+# This lookup is keyed by `MarketProposition.event_type` (the same field
+# `semantics.py`/`world_state.py` already use to distinguish these
+# categories) and supplies a half-life in HOURS. Anything not listed here
+# falls back to the unchanged default `RECENCY_HALF_LIFE_HOURS` curve — this
+# is an additive, narrowly-scoped correction, not a global loosening.
+#
+# Design reasoning per category (real, documented, not tuned to force a
+# specific number):
+#   - "legislation": a recorded vote/committee action/signature is a
+#     discrete procedural fact, not a rumor — once true it stays true until
+#     the NEXT recorded step supersedes it. 30-day half-life (720h): still
+#     >80% weight at 1 week, ~50% at a month, decaying further only because
+#     evidence this old MIGHT have been superseded by an unfetched later
+#     step, not because the fact itself decays.
+#   - "war_escalation" / "ceasefire": explicitly the opposite direction —
+#     situational, rapidly-evolving ground truth (a ceasefire can collapse
+#     or a front can shift within hours). Kept AT OR BELOW the default,
+#     never loosened: 12h half-life, strict on purpose per this project's
+#     existing real-time-sensitive design intent for geopolitics.
+#   - "rate_cut" / "rate_hike" / "rate_hold": a Fed decision is "the
+#     current rate" until the next scheduled FOMC meeting (~6-8 week
+#     cadence), not until an arbitrary hour count — 720h (30 days) half-life
+#     mirrors that natural release cadence rather than treating a rate
+#     decision like breaking news that stales out in a day.
+EVENT_TYPE_RECENCY_HALF_LIFE_HOURS: dict[str, float] = {
+    "legislation": 24.0 * 30,  # 720h — durable procedural/state-change fact
+    "war_escalation": 12.0,  # faster than default — situational, strict
+    "ceasefire": 12.0,  # faster than default — situational, strict
+    "rate_cut": 24.0 * 30,  # 720h — matches FOMC's real meeting cadence
+    "rate_hike": 24.0 * 30,
+    "rate_hold": 24.0 * 30,
+}
 MIN_EVIDENCE_ITEMS_FOR_ESTIMATE = 2  # a single headline is not "independent evidence"
 
 # Below this term-overlap link confidence, a headline that merely mentions
@@ -405,7 +452,7 @@ def compute_independent_evidence(
         domain = urlparse(source_url).netloc if source_url else ""
         reliability = _domain_reliability(source, domain)
         sentiment, _matched_terms = score_sentiment(title)
-        recency = _recency_weight_local(published_at, now)
+        recency = _recency_weight_local(published_at, now, event_type=proposition.event_type)
 
         title_lower = title.lower()
         event = extract_event(title)
@@ -701,10 +748,18 @@ def compute_independent_evidence(
     )
 
 
-def _recency_weight_local(published_at: str | None, now: datetime) -> float:
+def _recency_weight_local(published_at: str | None, now: datetime, event_type: str | None = None) -> float:
     """Same shape as prediction/news.py's `_recency_weight`, but with this
-    module's faster 24h half-life — kept as a thin local wrapper rather than
-    parameterizing the shared one, to not change existing news.py behavior."""
+    module's faster 24h DEFAULT half-life — kept as a thin local wrapper
+    rather than parameterizing the shared one, to not change existing
+    news.py behavior.
+
+    `event_type` (optional, defaults to None) selects a category-aware
+    half-life from `EVENT_TYPE_RECENCY_HALF_LIFE_HOURS` when the market's
+    proposition has a recognized event_type (legislative/geopolitical/macro
+    — see that dict's docstring for the real reasoning per category);
+    anything else falls back to the unchanged default curve, so every
+    existing caller/behavior for uncategorized evidence is unaffected."""
     if not published_at:
         return 0.3
     try:
@@ -714,4 +769,5 @@ def _recency_weight_local(published_at: str | None, now: datetime) -> float:
     if published.tzinfo is None:
         published = published.replace(tzinfo=UTC)
     hours_ago = max(0.0, (now - published).total_seconds() / 3600)
-    return round(0.5 ** (hours_ago / RECENCY_HALF_LIFE_HOURS), 4)
+    half_life = EVENT_TYPE_RECENCY_HALF_LIFE_HOURS.get(event_type, RECENCY_HALF_LIFE_HOURS) if event_type else RECENCY_HALF_LIFE_HOURS
+    return round(0.5 ** (hours_ago / half_life), 4)
