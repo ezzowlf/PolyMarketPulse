@@ -1197,6 +1197,22 @@ def evaluation_forecast_history_endpoint(storage: Storage = Depends(get_storage)
     return report.as_dict()
 
 
+@app.get("/evaluation/model-hypothesis-history")
+def evaluation_model_hypothesis_history_endpoint(storage: Storage = Depends(get_storage)) -> dict:
+    """PART 11: distinct evaluation path scored against
+    `model_hypothesis_probability` (the raw specialized-model estimate,
+    populated far more often than `published_forecast_probability`, which
+    is 0/N whenever the evidence gate withholds publication). Never
+    conflated with `/evaluation/forecast-history` — the two score
+    different populations of snapshots; this is real diagnostic
+    infrastructure for gate-tuning ("was the model often directionally
+    right even where the gate withheld publication?")."""
+    from .evaluation import evaluate_model_hypothesis_history
+
+    report = evaluate_model_hypothesis_history(storage.connection)
+    return report.as_dict()
+
+
 @app.get("/evaluation/source-performance")
 def evaluation_source_performance_endpoint(storage: Storage = Depends(get_storage)) -> dict:
     """BLOCK G Part 3: real source/independence-group performance

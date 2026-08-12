@@ -5,6 +5,7 @@ import pytest
 
 from polymarketpulse.evaluation import (
     evaluate_forecast_history,
+    evaluate_model_hypothesis_history,
     evaluate_predictions,
     evaluate_source_performance,
 )
@@ -204,6 +205,72 @@ def test_evaluate_forecast_history_excludes_lookahead_forecasts(conn: sqlite3.Co
     _seed_resolution(conn, "1", "Yes")
 
     report = evaluate_forecast_history(conn)
+    assert report.matched_pair_count == 0
+
+
+# --- PART 11: model_hypothesis_probability evaluation (distinct from ------
+# published_forecast_probability above; scores the raw model estimate,
+# which is populated far more often than the gated published field) -------
+
+
+def _seed_model_hypothesis_snapshot(
+    conn, provider_market_id, model_hypothesis_prob, category, models_used, forecast_at=None
+):
+    conn.execute(
+        "INSERT INTO prediction_snapshots (market_id, provider, provider_market_id, category, "
+        "prediction_version, created_at, recommendation, comparable_sample_size, forecast_at, "
+        "model_hypothesis_probability, models_used) "
+        "VALUES (?, 'polymarket', ?, ?, 'v2', ?, 'WATCH', 10, ?, ?, ?)",
+        (
+            provider_market_id, provider_market_id, category,
+            datetime.now(UTC).isoformat(), forecast_at or datetime(2020, 1, 1, tzinfo=UTC).isoformat(),
+            model_hypothesis_prob, models_used,
+        ),
+    )
+    conn.commit()
+
+
+def test_evaluate_model_hypothesis_history_on_empty_db(conn: sqlite3.Connection) -> None:
+    report = evaluate_model_hypothesis_history(conn)
+    assert report.status == "UNCALIBRATED"
+    assert report.matched_pair_count == 0
+
+
+def test_evaluate_model_hypothesis_history_never_scores_null_model_hypothesis(conn: sqlite3.Connection) -> None:
+    # A published forecast with no model_hypothesis_probability must never
+    # be coerced into a scored pair for this path.
+    _seed_block_e_snapshot(conn, "1", 0.9, "politics", "history")
+    _seed_resolution(conn, "1", "Yes")
+
+    report = evaluate_model_hypothesis_history(conn)
+    assert report.matched_pair_count == 0
+
+
+def test_evaluate_model_hypothesis_history_scores_suppressed_forecasts(conn: sqlite3.Connection) -> None:
+    # Real-world case this exists for: a market where the evidence gate
+    # withheld publication (published_forecast_probability stays NULL) but
+    # the specialized model still produced a raw hypothesis. This must be
+    # scoreable here even though evaluate_forecast_history would report 0.
+    _seed_model_hypothesis_snapshot(conn, "1", 0.85, "geopolitics", "history,momentum")
+    _seed_resolution(conn, "1", "No")
+
+    published_report = evaluate_forecast_history(conn)
+    hypothesis_report = evaluate_model_hypothesis_history(conn)
+
+    assert published_report.matched_pair_count == 0
+    assert hypothesis_report.matched_pair_count == 1
+    assert hypothesis_report.by_category[0].key == "geopolitics"
+    submodel_keys = {s.key for s in hypothesis_report.by_submodel}
+    assert submodel_keys == {"history", "momentum"}
+
+
+def test_evaluate_model_hypothesis_history_excludes_lookahead_forecasts(conn: sqlite3.Connection) -> None:
+    _seed_model_hypothesis_snapshot(
+        conn, "1", 0.7, "politics", "history", forecast_at=datetime(2099, 1, 1, tzinfo=UTC).isoformat()
+    )
+    _seed_resolution(conn, "1", "Yes")
+
+    report = evaluate_model_hypothesis_history(conn)
     assert report.matched_pair_count == 0
 
 

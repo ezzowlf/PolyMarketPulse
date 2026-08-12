@@ -270,9 +270,37 @@ def evaluate_forecast_history(conn: sqlite3.Connection) -> ForecastHistoryEvalua
     where it is non-null and only for snapshots taken strictly before
     resolution. Reuses calibration.py's brier_score/log_loss/
     calibration_bins — no metric logic is reimplemented here."""
+    return _evaluate_snapshot_field(conn, "published_forecast_probability")
+
+
+def evaluate_model_hypothesis_history(conn: sqlite3.Connection) -> ForecastHistoryEvaluation:
+    """PART 11: same point-in-time-safe join and Brier/log-loss machinery as
+    `evaluate_forecast_history`, but scored against `model_hypothesis_probability`
+    instead of `published_forecast_probability`. `model_hypothesis_probability`
+    is the raw specialized-model estimate BEFORE the evidence gate decides
+    whether to publish, so it is populated far more often than the published
+    field (which is 0/N whenever the evidence gate withholds publication).
+    This exists to answer a diagnostic question the published-only metric
+    structurally cannot: was the model's raw hypothesis directionally right
+    even on markets the gate correctly/incorrectly suppressed? It is a
+    distinct, separately labeled result — never merged or conflated with
+    `evaluate_forecast_history`'s output, since the two score different
+    populations of snapshots (model_hypothesis_probability is non-null far
+    more often than published_forecast_probability, so matched_pair_count
+    will typically differ, sometimes substantially, between the two)."""
+    return _evaluate_snapshot_field(conn, "model_hypothesis_probability")
+
+
+def _evaluate_snapshot_field(conn: sqlite3.Connection, probability_column: str) -> ForecastHistoryEvaluation:
+    """Shared implementation behind `evaluate_forecast_history` and
+    `evaluate_model_hypothesis_history`: identical point-in-time-safe join,
+    identical Brier/log-loss/calibration-bin machinery, differing only in
+    which snapshot probability column is scored. `probability_column` is
+    never user input (always one of the two literal column names above),
+    so building the SQL string with it is safe."""
     rows = conn.execute(
-        """
-        SELECT s.published_forecast_probability, s.category, s.models_used,
+        f"""
+        SELECT s.{probability_column}, s.category, s.models_used,
                r.winning_outcome
         FROM prediction_snapshots s
         JOIN market_resolutions r
@@ -281,7 +309,7 @@ def evaluate_forecast_history(conn: sqlite3.Connection) -> ForecastHistoryEvalua
           AND r.resolved_at IS NOT NULL
           AND s.forecast_at < r.resolved_at
           AND r.winning_outcome IN ('Yes', 'No')
-          AND s.published_forecast_probability IS NOT NULL
+          AND s.{probability_column} IS NOT NULL
         """
     ).fetchall()
 
