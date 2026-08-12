@@ -456,7 +456,7 @@ def compute_independent_evidence(
 
         title_lower = title.lower()
         event = extract_event(title)
-        relation = classify_evidence_relation(proposition, event, sentiment, link_confidence)
+        relation = classify_evidence_relation(proposition, event, sentiment, link_confidence, title=title)
         # Phase H: persist the structured event alongside the market it was
         # scored for (provenance: source, certainty, timestamp) — purely
         # additive, does not affect any of the scoring below.

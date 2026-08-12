@@ -577,6 +577,20 @@ class MarketProposition:
     # existing proposition_status CLEAR/AMBIGUOUS enum — see
     # _derive_semantic_confidence.
     semantic_confidence: float | None = None
+    # target_waterway_state: only populated when event_type=="strategic_
+    # waterway". This market's own YES-direction on world_state.py's graded
+    # NORMAL/DEGRADED/SEVERELY_RESTRICTED/CLOSED scale, derived by reusing
+    # world_state._classify_waterway_headline() against this market's own
+    # question/resolution text (NOT against any evidence headline) — e.g.
+    # "...returns to normal..." -> "NORMAL", "...effectively closed..." ->
+    # "CLOSED". None when the market is waterway-flavoured but the
+    # classifier can't confidently read a target state from the question
+    # text either (never guessed). This is what lets
+    # classify_evidence_relation tell two waterway markets with the exact
+    # same event_type apart by their actual resolution direction instead of
+    # treating "strategic_waterway == strategic_waterway" as automatically
+    # DIRECT_YES for both.
+    target_waterway_state: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -590,6 +604,7 @@ class MarketProposition:
             "subject_type": self.subject_type, "actor": self.actor, "domain": self.domain,
             "contract_type": self.contract_type, "resolution_mechanism": self.resolution_mechanism,
             "resolution_source": self.resolution_source, "semantic_confidence": self.semantic_confidence,
+            "target_waterway_state": self.target_waterway_state,
         }
 
 
@@ -700,6 +715,19 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
     actor = _derive_actor(question, subject)
     semantic_confidence = _derive_semantic_confidence(proposition_status, tuple(ambiguity_flags))
 
+    # target_waterway_state (Part 1, waterway direction disambiguation):
+    # reuse world_state._classify_waterway_headline's exact graded keyword
+    # logic against THIS market's own question/resolution text (not any
+    # evidence headline) to learn which operational state its YES condition
+    # actually points at. Local import to avoid an import cycle — mirrors
+    # the existing extract_event() -> world_state._classify_legislation_step
+    # lazy import a few lines above in this same module.
+    target_waterway_state: str | None = None
+    if event_type == "strategic_waterway":
+        from .world_state import _classify_waterway_headline
+
+        target_waterway_state = _classify_waterway_headline(primary_text) or _classify_waterway_headline(question)
+
     return MarketProposition(
         subject=subject, predicate=predicate, object=object_, event_type=event_type, direction=direction,
         threshold=threshold, unit=unit, location=None, start_time=None, deadline=deadline,
@@ -708,6 +736,7 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
         deadline_semantics=deadline_semantics, asset=asset,
         subject_type=subject_type, actor=actor, domain=domain, contract_type=contract_type,
         resolution_mechanism=resolution_mechanism, resolution_source=resolution_authority,
+        target_waterway_state=target_waterway_state,
         semantic_confidence=semantic_confidence,
     )
 
@@ -986,18 +1015,117 @@ def _relation_kind(proposition: MarketProposition, event: ExtractedEvent) -> Lit
     return "none"
 
 
+def _waterway_topic_overlap(proposition: MarketProposition, title: str) -> bool:
+    """Guards the waterway-specific branch against cross-waterway false
+    positives (a Bab el-Mandeb headline should never be read as evidence
+    for a Hormuz market just because both share event_type=
+    strategic_waterway). If the proposition's parsed `subject` names a
+    specific place (e.g. "Strait of Hormuz"), require at least one
+    significant (len > 3) word from it to appear in the headline. If no
+    subject was parsed at all, don't block — there is nothing more specific
+    to gate on, matching this module's existing "subject-less falls back to
+    event-type overlap" convention (see classify_evidence_relation's topic
+    gate below)."""
+    if not proposition.subject:
+        return True
+    lowered_title = title.lower()
+    subject_terms = [w for w in re.findall(r"[a-zA-Z]+", proposition.subject.lower()) if len(w) > 3]
+    if not subject_terms:
+        return True
+    return any(term in lowered_title for term in subject_terms)
+
+
+def _classify_waterway_evidence(
+    proposition: MarketProposition,
+    event: ExtractedEvent,
+    title: str,
+    link_confidence: float,
+) -> EvidenceRelation | None:
+    """Direction-aware waterway evidence classification (Part 1). Reuses
+    world_state._classify_waterway_headline's exact graded NORMAL/DEGRADED/
+    SEVERELY_RESTRICTED/CLOSED keyword logic (single source of truth, not
+    duplicated) against the evidence headline, then compares it to THIS
+    market's own `target_waterway_state` (also derived via the same
+    classifier, but against the market's question text — see
+    parse_market_proposition) rather than a flat event_type equality check.
+    Returns None (defer to the generic same/opposite-event_type logic
+    below) whenever the headline doesn't classify into a known waterway
+    state at all — e.g. "Rally held near Strait of Hormuz" — or when the
+    headline isn't topically about the same waterway as this market."""
+    from .world_state import _WATERWAY_STATE_RANK, _classify_waterway_headline
+
+    headline_state = _classify_waterway_headline(title)
+    if headline_state is None:
+        return None
+    if not _waterway_topic_overlap(proposition, title):
+        return None
+
+    target = proposition.target_waterway_state
+    if target not in _WATERWAY_STATE_RANK:
+        return None
+
+    strong_certainty = event.certainty in ("confirmed", "reported", "announced")
+    matches_target = headline_state == target
+
+    if matches_target:
+        if strong_certainty:
+            return EvidenceRelation(
+                "DIRECT_YES", "ENTAILS", 1.0,
+                f"Schlagzeile klassifiziert die Wasserstraße als '{headline_state}', was direkt der "
+                f"YES-Bedingung dieses Marktes ('{target}') entspricht.",
+            )
+        return EvidenceRelation(
+            "SUPPORTS_YES", "ENTAILS", 0.55,
+            f"Schlagzeile deutet auf Zustand '{headline_state}' hin (passend zur YES-Bedingung "
+            f"'{target}'), Sicherheit/Quellenlage aber noch nicht bestätigt.",
+        )
+
+    if strong_certainty:
+        return EvidenceRelation(
+            "DIRECT_NO", "CONTRADICTS", 1.0,
+            f"Schlagzeile klassifiziert die Wasserstraße als '{headline_state}', was der YES-Bedingung "
+            f"dieses Marktes ('{target}') widerspricht.",
+        )
+    return EvidenceRelation(
+        "SUPPORTS_NO", "CONTRADICTS", 0.55,
+        f"Schlagzeile deutet auf Zustand '{headline_state}' hin (widerspricht der YES-Bedingung "
+        f"'{target}'), Sicherheit/Quellenlage aber noch nicht bestätigt.",
+    )
+
+
 def classify_evidence_relation(
     proposition: MarketProposition,
     event: ExtractedEvent,
     sentiment: float,
     link_confidence: float,
+    title: str | None = None,
 ) -> EvidenceRelation:
     """Does this specific extracted event change the probability of this
     proposition's YES condition? This is the entailment question, not a
     tone question. Sentiment is only ever consulted as a last-resort, weak
     signal — and only when the event is already topically on-predicate
     (subject/topic overlap AND a recognized action family related to the
-    proposition's event_type), never from a bare actor-name match."""
+    proposition's event_type), never from a bare actor-name match.
+
+    `title` (Part 1, waterway direction disambiguation, additive/optional —
+    every existing caller that doesn't pass it keeps its prior behaviour
+    unchanged): the raw evidence headline text. Only consulted for
+    `event_type == "strategic_waterway"` propositions, where a flat same/
+    opposite event_type comparison is not enough — "Strait of Hormuz
+    disruption..." and "Hormuz traffic returns to normal..." share the same
+    event_type but describe opposite operational states, and which one is
+    DIRECT_YES vs DIRECT_NO depends on the SPECIFIC market's own
+    `target_waterway_state` (see MarketProposition), not on event_type
+    equality alone."""
+    if (
+        title is not None
+        and proposition.event_type == "strategic_waterway"
+        and proposition.target_waterway_state is not None
+    ):
+        waterway_relation = _classify_waterway_evidence(proposition, event, title, link_confidence)
+        if waterway_relation is not None:
+            return waterway_relation
+
     actor_overlap = _actor_overlaps_subject(event, proposition)
     relation_kind = _relation_kind(proposition, event)
 
