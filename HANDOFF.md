@@ -1,6 +1,17 @@
 # HANDOFF
 
-## THIS ROUND (newest) — Live Evidence Engine continuation: waterway direction fix (Parts 1-2), Fed reference case (Part 3)
+## THIS ROUND (newest) — Live Evidence Engine continuation: FRED root cause + BLS fallback + SOURCE_FETCH_FAILED distinction
+
+Direct work in the main session (no Agent-tool delegation, per explicit user instruction — repeated subagent refusals on authorization-verification grounds were costing time).
+
+**Item 7 of the current 15-item order, now fully closed:**
+- Root-caused FRED's real failure mode via live `httpx.get` testing: `fred.stlouisfed.org` completes TCP+TLS instantly, then hangs to `httpx.ReadTimeout` on every endpoint tried, including its bare root page. Confirmed via the same live test that `api.bls.gov`, `www.bea.gov`, `www.federalreserve.gov` all return real 200s in <1.5s in the same run — rules out a general network/TLS block, points at something specific to that one host (likely a local network intermediary failing to forward it).
+- Built `src/polymarketpulse/providers/bls.py` (new, real, free, keyless BLS public API client) as a genuine fallback for CPI/unemployment (BLS publishes the same underlying government series FRED does). No fallback exists for the Fed Funds policy rate itself — deliberately not fabricated; `fetch_macro_snapshot()`'s existing all-or-nothing design is preserved. Commit `59e5e2c`.
+- Added the explicit `SOURCE_FETCH_FAILED` vs "no evidence exists" distinction requested by the user: `MacroResult` gained a `data_source_status` field (`OK` / `SOURCE_FETCH_FAILED` / `NO_EVIDENCE`). When a quantitative rate-event market has no `macro_snapshot` because the FRED/BLS fetch itself failed, this is now reported as `SOURCE_FETCH_FAILED` (both in the new field and inline in `reason`) — never silently folded into the same generic "no evidence" reason used for markets with genuinely no relevant text signal. This reason string already propagates through `specialized_router.py`'s `_run_model_if_available` into the reasons/data-gap surface used by callers, so the distinction reaches the existing UI/reporting paths without a UI rewrite. Commit `33d5c2b`. 933/933 tests pass (2 new), ruff clean, still no push.
+
+**Remaining, from the same 15-item order — not done this round, honestly flagged:** Observability structure, Research Queue wired into the scan/CLI pipeline, Recurring Ingestion, Dashboard Coverage API, Research Queue API+UI, automatic best-market selection, Hormuz second-independent-source attempt, end-to-end Source→Claims→Evidence re-verification, NO_FORECAST UI explanatory sections, 4-case Live Acceptance re-run, before/after metrics table. This session's turn covered item 7 only (FRED root cause + BLS fallback + SOURCE_FETCH_FAILED were the most self-contained, verifiable unit of the order); the rest genuinely requires substantially more turns to do to the same standard (real data, real tests, no fabrication) rather than being skipped.
+
+## PRIOR ROUND — Live Evidence Engine continuation: waterway direction fix (Parts 1-2), Fed reference case (Part 3)
 
 Starting HEAD `20eb432` (Round 3's pause checkpoint). 911/911 baseline confirmed at start.
 
