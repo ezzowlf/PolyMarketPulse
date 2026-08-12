@@ -200,10 +200,25 @@ def fetch_macro_snapshot(timeout: float = 10.0) -> MacroSnapshot | None:
     endpoint, derives CPI YoY inflation, and returns a MacroSnapshot with
     a real trend reference point (~3 months earlier) for CPI YoY and
     unemployment. Returns None if ANY required series fails to fetch or
-    parse — never returns a partially-fabricated snapshot."""
+    parse — never returns a partially-fabricated snapshot.
+
+    CPI/unemployment have a real fallback: if FRED's own copy fails to
+    fetch, this falls back to BLS's public API (`providers/bls.py`),
+    which publishes the same underlying government statistics via a
+    different, independently-reachable host. There is no equivalent
+    keyless fallback for the Fed Funds policy rate itself, so a FRED
+    failure there still leaves the whole snapshot unavailable (rather
+    than publishing a snapshot with a fabricated or stale policy rate)."""
     fedfunds = _fetch_series_csv(SERIES_FEDFUNDS, timeout=timeout)
     cpi = _fetch_series_csv(SERIES_CPI, timeout=timeout)
     unrate = _fetch_series_csv(SERIES_UNRATE, timeout=timeout)
+
+    if cpi is None:
+        from . import bls
+        cpi = bls.fetch_cpi_index_series(timeout=timeout)
+    if unrate is None:
+        from . import bls
+        unrate = bls.fetch_unemployment_rate_series(timeout=timeout)
 
     return build_macro_snapshot(fedfunds, cpi, unrate)
 
