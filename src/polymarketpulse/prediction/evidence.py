@@ -420,11 +420,30 @@ def compute_independent_evidence(
         (provider, provider_market_id, now.isoformat()),
     ).fetchall()
 
-    if len(rows) < MIN_EVIDENCE_ITEMS_FOR_ESTIMATE:
+    if len(rows) == 0:
         return _unavailable(
             "keine unabhängige Schätzung möglich — zu wenige verknüpfte öffentliche Primärquellen "
-            f"({len(rows)} gefunden, mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig)."
+            f"(0 gefunden, mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig)."
         )
+    # A real root-cause fix (not previously diagnosed): with fewer than
+    # MIN_EVIDENCE_ITEMS_FOR_ESTIMATE *linked* rows (most commonly exactly
+    # 1 — e.g. Hormuz), this function used to return unavailable BEFORE the
+    # per-article loop below ever ran, which meant claim extraction/
+    # persistence (_persist_claims_for_event/_persist_claim_groups) never
+    # executed for these markets either, even though that persistence is
+    # explicitly documented as unconditional ("regardless of whether an
+    # independent probability ends up computable"). That contract was only
+    # honored for markets with >=2 linked rows. Markets with exactly 1
+    # linked article never got a real claim extracted or persisted purely
+    # because of this early return — a genuine "sources fetched but claims
+    # never generated" gap, not a data-scarcity limitation. Fixed by always
+    # letting the loop run when there is at least 1 row; the two SEPARATE,
+    # unchanged probability-computation gates below (line ~423 equivalent
+    # now folded into the `len(scored) < MIN...` check, and the historical
+    # 2-row check preserved via `insufficient_rows`) still make an estimate
+    # unavailable on thin evidence — this only unblocks claim persistence,
+    # never the probability math.
+    insufficient_rows = len(rows) < MIN_EVIDENCE_ITEMS_FOR_ESTIMATE
 
     # Legacy resolution-condition term lists — still consulted as a
     # defense-in-depth secondary check (see SENTIMENT_FALLBACK_MIN_RELEVANCE
@@ -613,6 +632,16 @@ def compute_independent_evidence(
         len(group_claims_by_normalization(tuple(claims_for_no))) if claims_for_no else len(no_clusters)
     )
     confirmation_count = max(min(len(yes_domains), yes_event_count), min(len(no_domains), no_event_count))
+
+    if insufficient_rows:
+        # Claims (if any) were already extracted/persisted by the loop
+        # above — this only withholds the probability estimate, which is
+        # correct and unchanged: 1 linked article is still not enough
+        # independent confirmation to move a probability.
+        return _unavailable(
+            "keine unabhängige Schätzung möglich — zu wenige verknüpfte öffentliche Primärquellen "
+            f"({len(rows)} gefunden, mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig)."
+        )
 
     scored = [f for f in factors if f.matched_condition is not None]
     if len(scored) < MIN_EVIDENCE_ITEMS_FOR_ESTIMATE:

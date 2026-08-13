@@ -58,6 +58,26 @@ def test_single_linked_news_item_still_unavailable(storage: Storage) -> None:
     assert result.available is False
 
 
+def test_single_linked_news_item_still_extracts_and_persists_a_real_claim(storage: Storage) -> None:
+    """Regression for the real root cause behind Hormuz-shaped markets never
+    accumulating claims: exactly 1 linked article used to short-circuit
+    compute_independent_evidence BEFORE the per-article extraction/
+    persistence loop ever ran, even though claim persistence is documented
+    as unconditional on the probability outcome. A single real article must
+    still produce a real, persisted claim — the probability itself
+    correctly stays unavailable (1 article is not independent confirmation)."""
+    market = _market()
+    _link_news(storage, market, "Ceasefire confirmed by officials", "reuters", "https://reuters.com/a", hours_ago=2)
+    result = compute_independent_evidence(
+        storage.connection, provider="polymarket", provider_market_id="evidence-1",
+        question=market.question, resolution_text=None, market_yes_price=0.9,
+    )
+    assert result.available is False  # unchanged: still not enough for an estimate
+
+    claim_rows = storage.connection.execute("SELECT COUNT(*) FROM claims").fetchone()
+    assert claim_rows[0] >= 1  # but a real claim was extracted and persisted
+
+
 def test_confirming_evidence_from_independent_sources_produces_estimate_not_anchored_to_market_price(
     storage: Storage,
 ) -> None:
