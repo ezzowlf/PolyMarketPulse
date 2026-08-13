@@ -2098,5 +2098,13 @@ class Storage:
         except sqlite3.Error:
             return []
 
+    def social_reputation(self, provider: str) -> dict:
+        """Discovery reputation, intentionally separate from evidence authority."""
+        rows = self.connection.execute("SELECT signal_status,origin_cluster FROM social_signals WHERE provider=?", (provider,)).fetchall()
+        total = len(rows)
+        statuses = [row[0] for row in rows]
+        clusters = {row[1] for row in rows}
+        return {"provider": provider, "signals_seen": total, "confirmed": statuses.count("CONFIRMED"), "refuted": statuses.count("REFUTED"), "unresolved": sum(s in {"RUMOR","EARLY_SIGNAL","PARTIALLY_CONFIRMED"} for s in statuses), "stale": statuses.count("STALE"), "duplicate_rate": round(1 - len(clusters) / total, 3) if total else None, "discovery_reputation": round(statuses.count("CONFIRMED") / total, 3) if total else None, "evidence_authority": 0.0}
+
     def close(self) -> None:
         self.connection.close()

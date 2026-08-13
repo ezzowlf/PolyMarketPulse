@@ -1230,6 +1230,27 @@ def _migration_027_social_discovery(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migration_028_information_observability(conn: sqlite3.Connection) -> None:
+    """Additive shock and lead records, bound to source signal/claim ids."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS information_shocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, market_id TEXT NOT NULL REFERENCES markets(market_id),
+            signal_id TEXT REFERENCES social_signals(signal_id), claim_id TEXT REFERENCES claims(claim_id),
+            assessed_at TEXT NOT NULL, level TEXT NOT NULL, novelty REAL NOT NULL, authority REAL NOT NULL,
+            independence REAL NOT NULL, resolution_relevance REAL NOT NULL, state_change_size REAL NOT NULL,
+            detail TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_information_shocks_market ON information_shocks(market_id, assessed_at);
+        CREATE TABLE IF NOT EXISTS information_lead_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, market_id TEXT NOT NULL REFERENCES markets(market_id),
+            signal_id TEXT REFERENCES social_signals(signal_id), claim_id TEXT REFERENCES claims(claim_id),
+            signal_detected_at TEXT, claim_confirmed_at TEXT, state_changed_at TEXT, forecast_changed_at TEXT,
+            market_repriced_at TEXT, resolution_at TEXT, quality_status TEXT NOT NULL
+        );
+    """)
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1258,6 +1279,7 @@ MIGRATIONS: list[Migration] = [
     (25, "claim_market_links", _migration_025_claim_market_links),
     (26, "claim_temporal_state", _migration_026_claim_temporal_state),
     (27, "social_discovery", _migration_027_social_discovery),
+    (28, "information_observability", _migration_028_information_observability),
 ]
 
 
