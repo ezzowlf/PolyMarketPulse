@@ -1110,6 +1110,7 @@ def prediction(market_id: str, storage: Storage = Depends(get_storage)) -> dict:
     result = ai_service.get_prediction(storage, market_id).as_dict()
     from .research_status import source_availability
     result["source_availability"] = source_availability(storage, market_id)
+    result["early_signals"] = storage.get_social_signals(market_id)
     return result
 
 
@@ -1134,6 +1135,7 @@ def ai_explain_recommendation(market_id: str, storage: Storage = Depends(get_sto
     response = ai_service.explain_recommendation(storage, settings, market_id)
     from .research_status import source_availability
     response.prediction["source_availability"] = source_availability(storage, market_id)
+    response.prediction["early_signals"] = storage.get_social_signals(market_id)
     return response
 
 

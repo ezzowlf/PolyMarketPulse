@@ -230,6 +230,8 @@ function _headlinePanelHtml(market, opp, pred) {
       <strong>⚠ ${availability.title}</strong><br/><span class="sub">${availability.message}</span>
       <details><summary>Technische Details</summary><p class="sub">Betroffene Quelle(n): ${(availability.provider_attempts || []).filter((a) => a.status === "SOURCE_FETCH_FAILED").map((a) => a.provider).join(", ") || "unbekannt"}<br/>Letzter erfolgreicher Abruf: ${fmtDate(availability.last_successful_fetch)}<br/>Letzter Fehlversuch: ${fmtDate(availability.last_failed_fetch)}<br/>Status: ${availability.retry_status || "–"}; nächste Prüfung: ${fmtDate(availability.next_check_at)}</p></details>
     </div>` : "";
+  const earlySignals = (p.early_signals || []).filter((s) => ["RUMOR", "EARLY_SIGNAL", "PARTIALLY_CONFIRMED"].includes(s.signal_status));
+  const earlySignalNotice = earlySignals.length ? `<section><h3>Frühe Signale</h3>${earlySignals.slice(0, 3).map((s) => `<div class="empty-state"><strong>⚡ Frühes Signal erkannt</strong> · ${s.provider}<br/>${s.summary}<br/><span class="sub">Status: noch nicht unabhängig bestätigt. Nächster Schritt: passende Primär- und unabhängige Quellen prüfen.</span></div>`).join("")}</section>` : "";
   return `
     <h2 style="margin:0 0 12px">${market.question}</h2>
     <div class="widget-grid">
@@ -242,6 +244,7 @@ function _headlinePanelHtml(market, opp, pred) {
     </div>
     ${decisionReasons}
     ${sourceNotice}
+    ${earlySignalNotice}
     ${maturityDetails}
     <p class="sub">Modellhypothese (intern, nicht veröffentlicht): ${modelHypothesis} · Status: ${statusLabel}</p>
     ${!forecastPublished ? `<p class="sub">Keine ausreichende unabhängige Evidenz für eine veröffentlichbare Prognose.</p>` : ""}

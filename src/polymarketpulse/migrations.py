@@ -1201,6 +1201,35 @@ def _migration_026_claim_temporal_state(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migration_027_social_discovery(conn: sqlite3.Connection) -> None:
+    """Public social/OSINT discovery only. Signals are deliberately separate
+    from claims: an EARLY_SIGNAL may schedule verification but cannot enter
+    evidence.py or alter a forecast merely by being stored here."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS social_signals (
+            signal_id TEXT PRIMARY KEY, source_type TEXT NOT NULL, provider TEXT NOT NULL,
+            account TEXT, canonical_url TEXT NOT NULL, detected_at TEXT NOT NULL,
+            published_at TEXT, summary TEXT NOT NULL, raw_reference TEXT NOT NULL,
+            origin_cluster TEXT NOT NULL, signal_status TEXT NOT NULL,
+            verification_status TEXT NOT NULL, confidence REAL NOT NULL,
+            category TEXT, event_id INTEGER REFERENCES events(id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_social_signals_url ON social_signals(canonical_url);
+        CREATE INDEX IF NOT EXISTS idx_social_signals_status ON social_signals(signal_status, detected_at);
+        CREATE TABLE IF NOT EXISTS social_signal_markets (
+            signal_id TEXT NOT NULL REFERENCES social_signals(signal_id),
+            market_id TEXT NOT NULL REFERENCES markets(market_id),
+            match_method TEXT NOT NULL, confidence REAL NOT NULL,
+            PRIMARY KEY(signal_id, market_id)
+        );
+        CREATE TABLE IF NOT EXISTS social_signal_entities (
+            signal_id TEXT NOT NULL REFERENCES social_signals(signal_id),
+            entity_id INTEGER NOT NULL REFERENCES entities(id), PRIMARY KEY(signal_id, entity_id)
+        );
+    """)
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1228,6 +1257,7 @@ MIGRATIONS: list[Migration] = [
     (24, "research_runs", _migration_024_research_runs),
     (25, "claim_market_links", _migration_025_claim_market_links),
     (26, "claim_temporal_state", _migration_026_claim_temporal_state),
+    (27, "social_discovery", _migration_027_social_discovery),
 ]
 
 

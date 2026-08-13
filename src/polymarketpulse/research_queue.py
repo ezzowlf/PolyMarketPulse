@@ -40,6 +40,7 @@ class MarketSignal:
     critical_gap_count: int
     high_gap_count: int
     has_source_coverage: bool
+    early_signal_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,9 @@ def compute_priority(signal: MarketSignal) -> QueueEntry:
     score += gap_score
     if gap_reason:
         reasons.append(gap_reason)
+    if signal.early_signal_count:
+        score += min(signal.early_signal_count * 6.0, 18.0)
+        reasons.append(f"{signal.early_signal_count} unbestätigte Frühwarnsignal(e) — Verifikation ausstehend")
 
     if not signal.has_source_coverage:
         # Deprioritized, not zeroed: real source coverage may improve

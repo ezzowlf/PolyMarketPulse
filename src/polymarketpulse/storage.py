@@ -2065,5 +2065,38 @@ class Storage:
         except sqlite3.Error:
             return None
 
+    def save_social_signal(self, signal: dict, market_ids: tuple[str, ...] = (), entity_ids: tuple[int, ...] = ()) -> bool:
+        """Persist an auditable public discovery signal and graph links.
+        Missing source references are rejected; this is intentionally not a
+        claim writer and therefore cannot move forecast evidence."""
+        required = ("signal_id", "source_type", "provider", "canonical_url", "detected_at", "summary", "raw_reference", "origin_cluster", "signal_status", "verification_status")
+        if any(not signal.get(name) for name in required):
+            return False
+        try:
+            self.connection.execute("""INSERT INTO social_signals
+                (signal_id,source_type,provider,account,canonical_url,detected_at,published_at,summary,raw_reference,origin_cluster,signal_status,verification_status,confidence,category,event_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(signal_id) DO UPDATE SET
+                signal_status=excluded.signal_status, verification_status=excluded.verification_status, confidence=excluded.confidence""", (
+                signal["signal_id"], signal["source_type"], signal["provider"], signal.get("account"), signal["canonical_url"], signal["detected_at"], signal.get("published_at"), signal["summary"], signal["raw_reference"], signal["origin_cluster"], signal["signal_status"], signal["verification_status"], signal.get("confidence", 0.0), signal.get("category"), signal.get("event_id"),
+            ))
+            for market_id in market_ids:
+                self.connection.execute("INSERT INTO social_signal_markets(signal_id,market_id,match_method,confidence) VALUES(?,?,?,?) ON CONFLICT(signal_id,market_id) DO NOTHING", (signal["signal_id"], market_id, "GRAPH_LINK", signal.get("match_confidence", 1.0)))
+            for entity_id in entity_ids:
+                self.connection.execute("INSERT INTO social_signal_entities(signal_id,entity_id) VALUES(?,?) ON CONFLICT(signal_id,entity_id) DO NOTHING", (signal["signal_id"], entity_id))
+            self.connection.commit()
+            return True
+        except sqlite3.Error:
+            return False
+
+    def get_social_signals(self, market_id: str, limit: int = 10) -> list[dict]:
+        try:
+            rows = self.connection.execute("""SELECT s.signal_id,s.source_type,s.provider,s.account,s.canonical_url,s.detected_at,s.published_at,s.summary,s.raw_reference,s.origin_cluster,s.signal_status,s.verification_status,s.confidence,s.category
+                FROM social_signals s JOIN social_signal_markets m ON m.signal_id=s.signal_id
+                WHERE m.market_id=? ORDER BY s.detected_at DESC LIMIT ?""", (market_id, limit)).fetchall()
+            cols = ("signal_id","source_type","provider","account","canonical_url","detected_at","published_at","summary","raw_reference","origin_cluster","signal_status","verification_status","confidence","category")
+            return [dict(zip(cols, row, strict=True)) for row in rows]
+        except sqlite3.Error:
+            return []
+
     def close(self) -> None:
         self.connection.close()

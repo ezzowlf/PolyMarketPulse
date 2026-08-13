@@ -574,7 +574,9 @@ def build_queue_from_db(storage: Storage):
                p.market_yes_probability, p.model_hypothesis_probability,
                p.data_gap_summary_json,
                EXISTS(SELECT 1 FROM news_market_links n
-                      WHERE n.provider = m.provider AND n.provider_market_id = m.provider_market_id)
+                      WHERE n.provider = m.provider AND n.provider_market_id = m.provider_market_id),
+               (SELECT COUNT(*) FROM social_signal_markets sm JOIN social_signals ss ON ss.signal_id=sm.signal_id
+                WHERE sm.market_id=m.market_id AND ss.signal_status IN ('RUMOR','EARLY_SIGNAL','PARTIALLY_CONFIRMED'))
         FROM markets m
         LEFT JOIN prediction_snapshots p ON p.id = (
             SELECT ps.id FROM prediction_snapshots ps
@@ -590,7 +592,7 @@ def build_queue_from_db(storage: Storage):
     for (
         market_id, provider, provider_market_id, question, category, classified_category,
         resolution_source, description, end_date, market_probability, model_probability,
-        gap_summary_json, has_news_links,
+        gap_summary_json, has_news_links, early_signal_count,
     ) in unresolved:
         row = {
             "market_id": market_id, "provider": provider, "provider_market_id": provider_market_id,
@@ -620,6 +622,7 @@ def build_queue_from_db(storage: Storage):
             critical_gap_count=int(gap_summary.get("critical", 0) or 0),
             high_gap_count=int(gap_summary.get("high", 0) or 0),
             has_source_coverage=bool(has_news_links),
+            early_signal_count=early_signal_count,
         ))
     return rows_by_id, build_research_queue(signals)
 
