@@ -1181,6 +1181,97 @@ def cmd_predict(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_research_run(args: argparse.Namespace) -> int:
+    """Runs the real Live Evidence pipeline (source fetch -> claim
+    extraction -> evidence -> forecast recompute) for one specific market,
+    or for the top N markets from the real Research Queue when --queue is
+    given, and prints the persisted Observability record(s)."""
+    from .research_queue import MarketSignal, build_research_queue
+    from .research_runner import run_research_for_market
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        if args.market_id:
+            row = storage.connection.execute(
+                "SELECT market_id, provider, provider_market_id, question, category, "
+                "resolution_source, end_date, last_seen_at, classified_category "
+                "FROM markets WHERE market_id = ?",
+                (args.market_id,),
+            ).fetchone()
+            if row is not None:
+                cols = ("market_id", "provider", "provider_market_id", "question", "category",
+                        "resolution_source", "end_date", "last_seen_at", "classified_category")
+                row = dict(zip(cols, row, strict=True))
+            if row is None:
+                print(f"Markt '{args.market_id}' nicht gefunden.", file=sys.stderr)
+                return 1
+            records = [run_research_for_market(storage, settings, row, trigger="cli_manual")]
+        else:
+            unresolved = storage.connection.execute(
+                "SELECT market_id, provider, provider_market_id, question, category, "
+                "classified_category, resolution_source FROM markets "
+                "WHERE resolution_status IS NULL OR resolution_status != 'resolved'"
+            ).fetchall()
+            signals = []
+            rows_by_id: dict[str, dict] = {}
+            for market_id, provider, provider_market_id, question, category, classified_category, resolution_source in unresolved:
+                row = {
+                    "market_id": market_id, "provider": provider, "provider_market_id": provider_market_id,
+                    "question": question, "category": category, "classified_category": classified_category,
+                    "resolution_source": resolution_source,
+                }
+                rows_by_id[market_id] = row
+                link_count = storage.connection.execute(
+                    "SELECT COUNT(*) FROM news_market_links WHERE provider = ? AND provider_market_id = ?",
+                    (provider, provider_market_id),
+                ).fetchone()[0]
+                signals.append(MarketSignal(
+                    market_id=market_id, question=question or "", category=classified_category or category,
+                    event_type=None, market_probability=None, model_hypothesis_probability=None,
+                    time_remaining_hours=None, critical_gap_count=0, high_gap_count=0,
+                    has_source_coverage=link_count > 0,
+                ))
+            queue = build_research_queue(signals, limit=args.limit)
+            records = [
+                run_research_for_market(storage, settings, rows_by_id[entry.market_id], trigger="research_queue")
+                for entry in queue
+            ]
+    finally:
+        storage.close()
+
+    result = [r.as_dict() for r in records]
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    else:
+        for r in result:
+            print(
+                f"{r['provider_market_id']}: fetched={r['sources_fetched']} accepted={r['sources_accepted']} "
+                f"claims={r['claims_extracted']} status={r['final_status']} "
+                f"published={r['published_forecast_after']}"
+            )
+    return 0
+
+
+def cmd_coverage(args: argparse.Namespace) -> int:
+    """Prints real, DB-derived Live Evidence Engine coverage numbers."""
+    from .coverage import compute_coverage
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        report = compute_coverage(storage)
+    finally:
+        storage.close()
+    data = report.as_dict()
+    if args.json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+    else:
+        for key, value in data.items():
+            print(f"{key}: {value}")
+    return 0
+
+
 def _fmt_pct(value: float | None, signed: bool = False) -> str:
     if value is None:
         return "n/a"
@@ -1589,6 +1680,19 @@ def build_parser() -> argparse.ArgumentParser:
     predict_parser.add_argument("market_id")
     predict_parser.add_argument("--json", action="store_true")
     predict_parser.set_defaults(func=cmd_predict)
+
+    research_run_parser = subparsers.add_parser(
+        "research-run", help="Echten Research-Lauf (Source->Claim->Evidence->Forecast) ausführen"
+    )
+    research_run_parser.add_argument("market_id", nargs="?", default=None, help="Einzelnen Markt ausführen")
+    research_run_parser.add_argument("--queue", action="store_true", help="Top-N aus der realen Research Queue ausführen")
+    research_run_parser.add_argument("--limit", type=int, default=5)
+    research_run_parser.add_argument("--json", action="store_true")
+    research_run_parser.set_defaults(func=cmd_research_run)
+
+    coverage_parser = subparsers.add_parser("coverage", help="Echte, DB-basierte Live-Evidence-Coverage-Kennzahlen")
+    coverage_parser.add_argument("--json", action="store_true")
+    coverage_parser.set_defaults(func=cmd_coverage)
 
     explain_reco_parser = subparsers.add_parser(
         "explain-recommendation",

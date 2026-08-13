@@ -401,6 +401,25 @@ def stats(storage: Storage = Depends(get_storage)) -> dict:
     return compute_signal_stats(storage.connection).as_dict()
 
 
+@app.get("/coverage")
+def coverage(storage: Storage = Depends(get_storage)) -> dict:
+    """Real, DB-derived Live Evidence Engine coverage numbers (see
+    coverage.py) — sources/claims/evidence/forecast counts across all
+    unresolved markets, plus real top blockers. No fabricated numbers."""
+    from .coverage import compute_coverage
+
+    return compute_coverage(storage).as_dict()
+
+
+@app.get("/research-runs")
+def research_runs(
+    market_id: str | None = None, limit: int = 50, storage: Storage = Depends(get_storage)
+) -> list[dict]:
+    """Persisted Observability records for real research runs (see
+    research_runner.py) — API/audit-retrievable, not just log lines."""
+    return storage.get_research_runs(provider_market_id=market_id, limit=limit)
+
+
 @app.get("/news")
 def news(
     market_id: str | None = None,
