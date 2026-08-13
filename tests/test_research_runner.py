@@ -296,6 +296,61 @@ def test_legislation_run_twice_does_not_duplicate_event_relation_graph(storage: 
     assert storage.connection.execute("SELECT COUNT(*) FROM event_relations").fetchone()[0] == 1
 
 
+def test_legislation_status_change_supersedes_prior_govtrack_claim(storage: Storage) -> None:
+    """Phase D: when a real GovTrack status update changes (house passed ->
+    senate passed), the prior GovTrack claim for this bill must be marked
+    superseded, and evidence.py's structured-claim reader must stop
+    returning it -- an outdated PATH_STEP claim must not keep influencing
+    the resolution path once a newer real status exists."""
+    from polymarketpulse.prediction.evidence import _structured_path_step_claims
+    from polymarketpulse.providers.govtrack import BillStatus
+
+    market_row = _seed_market(storage)
+    storage.connection.execute(
+        "UPDATE markets SET question = ? WHERE market_id = 'rr-1'",
+        ("Clarity Act (H.R.3633) signed into law in 2026?",),
+    )
+    storage.connection.commit()
+    market_row["question"] = "Clarity Act (H.R.3633) signed into law in 2026?"
+    settings = Settings.load()
+
+    status_1 = BillStatus(
+        congress=119, bill_type="house_bill", number=3633, display_number="H.R. 3633",
+        title="H.R. 3633: Digital Asset Market Clarity Act",
+        current_status="pass_over_house", current_status_label="Passed House (Senate next)",
+        current_status_description="", current_status_date=None, introduced_date=None,
+        is_alive=True, link="https://www.govtrack.us/congress/bills/119/hr3633",
+        major_actions=(), fetched_at=datetime.now(UTC),
+    )
+    status_2 = BillStatus(
+        congress=119, bill_type="house_bill", number=3633, display_number="H.R. 3633",
+        title="H.R. 3633: Digital Asset Market Clarity Act",
+        current_status="pass_over_senate", current_status_label="Passed Senate (President next)",
+        current_status_description="", current_status_date=None, introduced_date=None,
+        is_alive=True, link="https://www.govtrack.us/congress/bills/119/hr3633",
+        major_actions=(), fetched_at=datetime.now(UTC),
+    )
+
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "OK")), \
+         patch("polymarketpulse.providers.govtrack.fetch_bill_status", return_value=status_1):
+        run_research_for_market(storage, settings, market_row, trigger="test")
+
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "OK")), \
+         patch("polymarketpulse.providers.govtrack.fetch_bill_status", return_value=status_2):
+        run_research_for_market(storage, settings, market_row, trigger="test")
+
+    rows = storage.connection.execute(
+        "SELECT claim_id, superseded_by, resolution_step FROM claims WHERE source_id = 'govtrack' ORDER BY created_at"
+    ).fetchall()
+    assert len(rows) == 2
+    assert rows[0][1] == rows[1][0]  # first claim's superseded_by points at the second claim's id
+    assert rows[1][1] is None  # the newest claim is not itself superseded
+
+    remaining = _structured_path_step_claims(storage.connection, market_row["provider"], market_row["provider_market_id"])
+    assert len(remaining) == 1
+    assert remaining[0]["resolution_step"] == "senate_vote"
+
+
 def test_hormuz_market_fetches_real_chokepoint_data_and_derives_direction(storage: Storage) -> None:
     """Real, targeted second-source integration for strategic-waterway
     markets: a question mentioning "Hormuz" must trigger a real IMF

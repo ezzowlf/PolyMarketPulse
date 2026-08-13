@@ -424,6 +424,11 @@ def _structured_claim_factors(
     path (world_state.py), never the yes/no probability directly -- a
     PATH_STEP claim participating here too would be exactly the double
     counting the project owner explicitly asked to be audited against.
+
+    Phase D: also excludes any claim whose real temporal status
+    (temporal_state.py) is EXPIRED, SUPERSEDED, or DISPUTED -- a stale,
+    replaced, or contradicted claim must not silently keep moving the
+    probability.
     """
     try:
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
@@ -443,10 +448,20 @@ def _structured_claim_factors(
     except sqlite3.Error:
         return []
 
+    from .temporal_state import (
+        STATUS_DISPUTED,
+        STATUS_EXPIRED,
+        STATUS_SUPERSEDED,
+        get_claim_temporal_status,
+    )
+
     factors: list[EvidenceFactor] = []
     for claim_id, subject, predicate, source_id, source_url, timestamp, direction, claim_type in rows:
         if timestamp and timestamp > now.isoformat():
             continue  # point-in-time safety: never use a claim from the future
+        temporal_status = get_claim_temporal_status(conn, claim_id, claim_type, timestamp, now)
+        if temporal_status in (STATUS_EXPIRED, STATUS_SUPERSEDED, STATUS_DISPUTED):
+            continue
         matched_condition = {"positive": "yes", "negative": "no"}.get(direction)
         is_direct = claim_type == "DIRECT_RESOLUTION"
         relation_label = (
@@ -476,14 +491,18 @@ def _structured_path_step_claims(
     this is the real data source world_state.py's _derive_resolution_path
     needs to update completed_steps/current_stage, but a PATH_STEP claim
     must never also be counted as yes/no evidence (the double-counting
-    guard)."""
+    guard).
+
+    Phase D: a PATH_STEP claim that has been explicitly superseded or is
+    under an unresolved contradiction is excluded -- a structural fact
+    does not decay with age, but it can still be replaced or disputed."""
     try:
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         if "claim_market_links" not in tables:
             return ()
         rows = conn.execute(
             """
-            SELECT c.resolution_step, c.source_id, c.timestamp, c.predicate
+            SELECT c.claim_id, c.resolution_step, c.source_id, c.timestamp, c.predicate
             FROM claim_market_links cml
             JOIN claims c ON c.claim_id = cml.claim_id
             WHERE cml.provider = ? AND cml.provider_market_id = ?
@@ -493,10 +512,19 @@ def _structured_path_step_claims(
         ).fetchall()
     except sqlite3.Error:
         return ()
-    return tuple(
-        {"resolution_step": step, "source": source, "timestamp": ts, "detail": predicate}
-        for step, source, ts, predicate in rows
-    )
+
+    from datetime import UTC, datetime
+
+    from .temporal_state import STATUS_DISPUTED, STATUS_SUPERSEDED, get_claim_temporal_status
+
+    now = datetime.now(UTC)
+    claims: list[dict] = []
+    for claim_id, step, source, ts, predicate in rows:
+        temporal_status = get_claim_temporal_status(conn, claim_id, "PATH_STEP", ts, now)
+        if temporal_status in (STATUS_SUPERSEDED, STATUS_DISPUTED):
+            continue
+        claims.append({"resolution_step": step, "source": source, "timestamp": ts, "detail": predicate})
+    return tuple(claims)
 
 
 def compute_independent_evidence(

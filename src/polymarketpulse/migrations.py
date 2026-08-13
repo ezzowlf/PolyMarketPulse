@@ -1187,6 +1187,20 @@ def _migration_025_claim_market_links(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migration_026_claim_temporal_state(conn: sqlite3.Connection) -> None:
+    """Phase D: additive temporal-state columns on the existing `claims`
+    table. `timestamp`/`created_at` already serve as occurred_at/
+    retrieved_at; this adds the two genuinely new fields temporal_state.py
+    needs: `superseded_by` (a claim explicitly replaced by a newer one --
+    set only when real dedup/replacement logic identifies a successor,
+    never guessed) and `expected_at` (for claims that describe a future
+    expected event rather than an observed one). Both nullable, purely
+    additive."""
+    _add_column(conn, "claims", "superseded_by", "TEXT")
+    _add_column(conn, "claims", "expected_at", "TEXT")
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1213,6 +1227,7 @@ MIGRATIONS: list[Migration] = [
     (23, "prediction_snapshot_no_forecast_reason", _migration_023_prediction_snapshot_no_forecast_reason),
     (24, "research_runs", _migration_024_research_runs),
     (25, "claim_market_links", _migration_025_claim_market_links),
+    (26, "claim_temporal_state", _migration_026_claim_temporal_state),
 ]
 
 

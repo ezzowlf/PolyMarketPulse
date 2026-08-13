@@ -1948,6 +1948,18 @@ class Storage:
         except sqlite3.Error:
             pass
 
+    def mark_claim_superseded(self, old_claim_id: str, new_claim_id: str) -> None:
+        """Phase D: explicit replacement -- only set by real
+        dedup/replacement logic that has identified a genuine successor
+        claim, never inferred from age alone."""
+        try:
+            self.connection.execute(
+                "UPDATE claims SET superseded_by = ? WHERE claim_id = ?", (new_claim_id, old_claim_id)
+            )
+            self.connection.commit()
+        except sqlite3.Error:
+            pass
+
     # --- Phase C: Event/Entity/Relation write path --- #
     # migration 12 (events.py) defined the real schema but, until now, had
     # no writer anywhere in the codebase -- real events/relations existed

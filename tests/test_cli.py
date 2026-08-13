@@ -51,7 +51,7 @@ def test_db_status_on_fresh_db(capsys) -> None:
     exit_code = args.func(args)
     data = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert data["schema_version"] == 25
+    assert data["schema_version"] == 26
     assert data["markets"] == 0
 
 
@@ -61,7 +61,7 @@ def test_db_migrate_reports_schema_version(capsys) -> None:
     exit_code = args.func(args)
     data = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert data["schema_version"] == 25
+    assert data["schema_version"] == 26
 
 
 def test_signal_stats_on_empty_db_does_not_crash(capsys) -> None:

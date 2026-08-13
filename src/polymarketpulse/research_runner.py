@@ -173,6 +173,15 @@ def _fetch_and_persist_legislation_claim(
     newly_inserted = storage.save_claim(claim)
     storage.save_claim_source(claim.claim_id, "govtrack", status.link, claim.timestamp.isoformat() if claim.timestamp else None)
 
+    # Phase D: a genuinely new GovTrack status for this exact bill
+    # supersedes every prior GovTrack claim already linked to this market
+    # -- a real, identified successor, not an age-based guess.
+    if newly_inserted:
+        prior_links = storage.get_claim_market_links(provider, provider_market_id)
+        for link in prior_links:
+            if link["source_id"] == "govtrack" and link["claim_id"] != claim.claim_id:
+                storage.mark_claim_superseded(link["claim_id"], claim.claim_id)
+
     # Real claim-type classification (not a fuzzy guess): a final
     # presidential action (signed/vetoed) directly resolves most
     # legislation markets; any other real GovTrack status update only
