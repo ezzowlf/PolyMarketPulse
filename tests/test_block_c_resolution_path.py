@@ -268,6 +268,43 @@ def test_legislation_market_with_real_evidence_populates_sequential_steps() -> N
     assert path.path_completion == 0.8
 
 
+def test_path_step_claim_completes_step_even_when_evidence_unavailable() -> None:
+    """The real fix this round: a PATH_STEP claim (GovTrack's real
+    "House passed" status) must update the resolution path even when
+    `independent_evidence.available` is False -- exactly Clarity Act's real
+    situation (no article-based evidence clears the probability gate, but
+    a real government-status claim exists). This is the whole point of
+    separating PATH_STEP claims from the probability-affecting evidence
+    the double-counting guard excludes them from."""
+    from polymarketpulse.prediction.evidence import IndependentEvidenceResult
+
+    question = "Will the Example Act be signed into law in 2026?"
+    resolution_text = "Resolves YES if the bill is signed into law. Resolves NO otherwise."
+    proposition = parse_market_proposition(question, resolution_text)
+    assert proposition.event_type == "legislation"
+
+    ev = IndependentEvidenceResult(
+        available=False, independent_yes_probability=None, confirmation_count=0,
+        source_quality_score=None, time_since_first_report_hours=None,
+        contradiction_detected=False, breaking=False, information_edge_score=None,
+        divergence=None,
+        path_step_claims=({"resolution_step": "house_vote", "source": "govtrack",
+                            "timestamp": "2025-07-17T00:00:00+00:00",
+                            "detail": "Passed House (Senate next)"},),
+    )
+
+    path = _derive_resolution_path(proposition, time_remaining_hours=500.0, independent_evidence=ev)
+    assert path.applies is True
+    statuses = {s.name: s.status for s in path.steps}
+    assert statuses["introduced"] == "completed"
+    assert statuses["committee"] == "completed"
+    assert statuses["house_vote"] == "completed"
+    assert statuses["senate_vote"] == "unknown"
+    assert statuses["presidential_action"] == "unknown"
+    assert path.steps_remaining == 2
+    assert "govtrack" in path.steps[2].evidence[0]
+
+
 def test_deadline_pressure_derived_from_real_time_remaining_hours() -> None:
     assert _deadline_pressure(None, None) == "UNKNOWN"
     assert _deadline_pressure(0.0, None) == "CRITICAL"

@@ -634,6 +634,25 @@ def _derive_resolution_path(
         elif status == prior[0]:
             findings[step_name] = (status, [*prior[1], f.title], prior[2])
 
+    # Real PATH_STEP structured claims (GovTrack/etc, via claim_market_links)
+    # update the resolution path DIRECTLY, independent of whether
+    # `independent_evidence.available` is True -- this is the whole point
+    # of a PATH_STEP claim (Priority "PATH_STEP -> Resolution Path"): a
+    # market can have zero article-based evidence for a probability while
+    # still having a real, confirmed resolution-step fact. A PATH_STEP
+    # claim always means the named step is a real, confirmed government
+    # record ("completed"), not a guess -- unlike the text-classified
+    # "in_progress" tier above, which has genuine ambiguity to express.
+    if independent_evidence is not None:
+        for claim in independent_evidence.path_step_claims:
+            step_name = claim.get("resolution_step")
+            if step_name not in step_names:
+                continue
+            prior = findings.get(step_name)
+            label = f"{claim.get('source', 'unknown')}: {claim.get('detail', '')}"
+            if prior is None or prior[0] != "completed":
+                findings[step_name] = ("completed", [label], claim.get("timestamp"))
+
     # A later step's real completion implies every prior step is also
     # complete (sequential process) — this is a structural inference from a
     # REAL observed later-stage event, not a guess about an unobserved

@@ -187,6 +187,16 @@ class IndependentEvidenceResult:
     # only its presence (> 0) is meaningful.
     counter_evidence_count: int = 0
     claim_status_counts: dict = field(default_factory=dict)
+    # Real PATH_STEP structured claims (via claim_market_links) for this
+    # market -- deliberately NOT folded into evidence_for_yes/no (the
+    # double-counting guard: a PATH_STEP claim's job is to update the
+    # resolution path, world_state.py's _derive_resolution_path, never the
+    # yes/no probability). Populated regardless of `available`, since a
+    # market can have real path progress even while lacking enough
+    # article-based evidence for a probability estimate (e.g. Clarity Act).
+    # Each item: {"resolution_step": str, "source": str, "timestamp": str|None,
+    # "detail": str}.
+    path_step_claims: tuple[dict, ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict:
         return {
@@ -208,11 +218,12 @@ class IndependentEvidenceResult:
             "extraordinary_guard_detail": self.extraordinary_guard_detail,
             "counter_evidence_count": self.counter_evidence_count,
             "claim_status_counts": dict(self.claim_status_counts),
+            "path_step_claims": list(self.path_step_claims),
         }
 
 
 def _unavailable(
-    detail: str, factors: tuple = (),
+    detail: str, factors: tuple = (), path_step_claims: tuple = (),
 ) -> IndependentEvidenceResult:
     """`factors`, when passed, are real already-extracted EvidenceFactor
     items (e.g. the one real linked article for a Hormuz-shaped market) —
@@ -230,7 +241,7 @@ def _unavailable(
         contradiction_detected=False, breaking=False, information_edge_score=None,
         divergence=None, detail=detail,
         evidence_for_yes=evidence_for_yes, evidence_for_no=evidence_for_no,
-        discarded_evidence=discarded,
+        discarded_evidence=discarded, path_step_claims=path_step_claims,
     )
 
 
@@ -457,6 +468,37 @@ def _structured_claim_factors(
     return factors
 
 
+def _structured_path_step_claims(
+    conn: sqlite3.Connection, provider: str, provider_market_id: str,
+) -> tuple[dict, ...]:
+    """Real PATH_STEP claims (GovTrack/etc, via claim_market_links) for
+    this market. Returned separately from evidence_for_yes/no by design --
+    this is the real data source world_state.py's _derive_resolution_path
+    needs to update completed_steps/current_stage, but a PATH_STEP claim
+    must never also be counted as yes/no evidence (the double-counting
+    guard)."""
+    try:
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "claim_market_links" not in tables:
+            return ()
+        rows = conn.execute(
+            """
+            SELECT c.resolution_step, c.source_id, c.timestamp, c.predicate
+            FROM claim_market_links cml
+            JOIN claims c ON c.claim_id = cml.claim_id
+            WHERE cml.provider = ? AND cml.provider_market_id = ?
+              AND cml.claim_type = 'PATH_STEP' AND c.resolution_step IS NOT NULL
+            """,
+            (provider, provider_market_id),
+        ).fetchall()
+    except sqlite3.Error:
+        return ()
+    return tuple(
+        {"resolution_step": step, "source": source, "timestamp": ts, "detail": predicate}
+        for step, source, ts, predicate in rows
+    )
+
+
 def compute_independent_evidence(
     conn: sqlite3.Connection,
     provider: str,
@@ -480,6 +522,7 @@ def compute_independent_evidence(
     # stronger evidence than a single ambiguous news article, and must not
     # be blocked by a gate designed for press coverage.
     structured_factors = _structured_claim_factors(conn, provider, provider_market_id, now)
+    path_step_claims = _structured_path_step_claims(conn, provider, provider_market_id)
     has_direct_structured_evidence = any(
         f.matched_condition is not None and f.relation_label in ("DIRECT_YES", "DIRECT_NO")
         for f in structured_factors
@@ -506,7 +549,8 @@ def compute_independent_evidence(
     if len(rows) == 0 and not has_direct_structured_evidence:
         return _unavailable(
             "keine unabhängige Schätzung möglich — zu wenige verknüpfte öffentliche Primärquellen "
-            f"(0 gefunden, mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig)."
+            f"(0 gefunden, mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig).",
+            path_step_claims=path_step_claims,
         )
     # A real root-cause fix (not previously diagnosed): with fewer than
     # MIN_EVIDENCE_ITEMS_FOR_ESTIMATE *linked* rows (most commonly exactly
@@ -738,7 +782,7 @@ def compute_independent_evidence(
             "keine unabhängige Schätzung möglich — zu wenige verknüpfte öffentliche Primärquellen "
             f"({len(rows)} gefunden, mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig). "
             f"{len(rows)} relevante Quelle(n) vorhanden; unabhängige Bestätigung fehlt.",
-            factors=tuple(factors),
+            factors=tuple(factors), path_step_claims=path_step_claims,
         )
 
     scored = [f for f in factors if f.matched_condition is not None]
@@ -758,7 +802,7 @@ def compute_independent_evidence(
             f"keine unabhängige Schätzung möglich — nur {len(scored)} Nachrichtentreffer mit erkennbarem "
             f"Bezug zur Resolution-Bedingung (mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig), "
             f"von {len(rows)} verknüpften Quellen insgesamt.",
-            factors=tuple(factors),
+            factors=tuple(factors), path_step_claims=path_step_claims,
         )
 
     # relation_weight (0..1, from semantics.classify_evidence_relation) is
@@ -769,7 +813,10 @@ def compute_independent_evidence(
     # reaches this point at all (filtered out of `scored` above).
     weight_sum = sum(f.reliability * f.recency_weight * f.link_confidence * f.relation_weight for f in scored)
     if weight_sum <= 0:
-        return _unavailable("keine unabhängige Schätzung möglich — Quellvertrauen/Aktualität zu gering.")
+        return _unavailable(
+            "keine unabhängige Schätzung möglich — Quellvertrauen/Aktualität zu gering.",
+            path_step_claims=path_step_claims,
+        )
 
     direction_sum = sum(
         (1.0 if f.matched_condition == "yes" else -1.0)
@@ -877,6 +924,7 @@ def compute_independent_evidence(
         extraordinary_guard_detail=extraordinary_guard_detail,
         counter_evidence_count=claim_summary.get("counter_evidence_count", 0),
         claim_status_counts=claim_summary.get("claim_status_counts", {}),
+        path_step_claims=path_step_claims,
     )
 
 
