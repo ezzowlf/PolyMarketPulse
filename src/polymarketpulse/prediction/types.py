@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from ..data_gaps import DataGapReport
+    from .conditional_transitions import ConditionalTransition
     from .cross_market import CrossMarketResult
     from .divergence_audit import DivergenceAuditResult
     from .event_clock import EventClock
@@ -567,6 +568,13 @@ class PredictionResult:
     # expected_vs_observed.py.
     expected_vs_observed: ExpectedVsObserved | None = None
 
+    # --- Phase I: Conditional Transition Engine (additive) --------------------
+    # One entry per remaining real resolution step, chained to its real
+    # prerequisite. conditional_probability is honestly None for every
+    # entry today -- no real per-step transition-rate dataset exists yet;
+    # see conditional_transitions.py.
+    conditional_transitions: tuple[ConditionalTransition, ...] = field(default_factory=tuple)
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -644,4 +652,5 @@ class PredictionResult:
             "expected_vs_observed": (
                 self.expected_vs_observed.as_dict() if self.expected_vs_observed else None
             ),
+            "conditional_transitions": [t.as_dict() for t in self.conditional_transitions],
         }

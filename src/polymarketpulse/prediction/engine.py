@@ -28,6 +28,7 @@ from ..providers.coingecko import PriceData, fetch_price_and_volatility, resolve
 from ..providers.fred import MacroSnapshot, fetch_macro_snapshot
 from .bayesian import bayesian_update
 from .change_triggers import compute_change_triggers
+from .conditional_transitions import derive_conditional_transitions
 from .confidence import (
     compute_confidence,
     compute_confidence_composite,
@@ -1140,6 +1141,18 @@ def compute_prediction(
         event_clock=event_clock,
     )
 
+    # Phase I: Conditional Transition Engine -- the remaining resolution
+    # path as a chain of prerequisite->transition entries. Honestly
+    # QUALITATIVE_ONLY for every entry (no real transition-rate dataset
+    # exists), never a fabricated conditional probability.
+    conditional_transitions = derive_conditional_transitions(
+        resolution_path=(
+            world_state.path_to_resolution.resolution_path
+            if world_state is not None and world_state.path_to_resolution is not None
+            else None
+        ),
+    )
+
     # Block F Part 1: compute change_triggers HERE (moved up from its
     # original post-result location — world_state/data_gaps/divergence_audit
     # are all already real values by this point) so build_scenarios can
@@ -1232,6 +1245,7 @@ def compute_prediction(
         next_event=next_event,
         event_clock=event_clock,
         expected_vs_observed=expected_vs_observed,
+        conditional_transitions=conditional_transitions,
     )
     # Phase F: evidence-gated forecast hierarchy
     # evidence_backed_probability: only when sufficient evidence exists
