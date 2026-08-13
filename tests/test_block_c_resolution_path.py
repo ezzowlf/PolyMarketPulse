@@ -189,19 +189,44 @@ def test_classify_legislation_step_recognizes_completion_and_in_progress_terms()
     assert _classify_legislation_step("A totally unrelated headline about weather") is None
 
 
-def test_non_legislation_market_gets_applies_false_no_forced_breakdown() -> None:
-    """A market whose event_type has no known multi-step structure (the
-    overwhelming majority) must get an honest `applies=False`, empty
+def test_no_template_market_gets_applies_false_no_forced_breakdown() -> None:
+    """A market whose event_type has no known template structure at all
+    must get an honest `applies=False`, `template_name="GENERIC"`, empty
     `steps` — never a fabricated multi-step breakdown."""
+    proposition = parse_market_proposition(
+        "Will the celebrity couple get married this year?",
+        "Resolves YES if the couple marries. Resolves NO otherwise.",
+    )
+    assert proposition.event_type not in ("legislation", "rate_cut", "rate_hike", "rate_hold",
+                                            "strategic_waterway", "ceasefire", "war_escalation",
+                                            "price_above", "price_below", "sport_match",
+                                            "sport_tournament", "sport_winner", "sport_qualification")
+    path = _derive_resolution_path(proposition, time_remaining_hours=100.0, independent_evidence=None)
+    assert path.applies is False
+    assert path.template_name == "GENERIC"
+    assert path.steps == ()
+    assert path.steps_remaining is None
+    assert path.path_completion is None
+
+
+def test_geopolitics_ceasefire_market_gets_real_geopolitics_template() -> None:
+    """Phase B (Market Template Library): a ceasefire market now gets the
+    real GEOPOLITICS template structure -- honestly all-unknown without
+    real evidence (no fake keyword classifier exists for this template
+    yet, unlike LEGISLATION), but the real step names/template_name are
+    now inspectable rather than collapsing to applies=False."""
     proposition = parse_market_proposition(
         "Will there be a ceasefire in the conflict by year end?",
         "Resolves YES if a ceasefire is announced. Resolves NO otherwise.",
     )
+    assert proposition.event_type == "ceasefire"
     path = _derive_resolution_path(proposition, time_remaining_hours=100.0, independent_evidence=None)
-    assert path.applies is False
-    assert path.steps == ()
-    assert path.steps_remaining is None
-    assert path.path_completion is None
+    assert path.applies is True
+    assert path.template_name == "GEOPOLITICS"
+    assert [s.name for s in path.steps] == [
+        "current_state", "escalation", "operational_change", "resolution_threshold", "confirmation",
+    ]
+    assert all(s.status == "unknown" for s in path.steps)  # honest: no evidence, no classifier fired
 
 
 def test_legislation_market_with_no_evidence_gets_all_unknown_steps() -> None:

@@ -48,7 +48,7 @@ def test_no_resolution_path_gap_for_non_multistep_market() -> None:
     """The overwhelming-majority case: a simple binary market has no known
     multi-step structure at all (`applies=False`), so no RESOLUTION_PATH gap
     is fabricated — honest absence, not a forced generic entry."""
-    proposition = parse_market_proposition("Will Bitcoin be above $100,000 on December 31?", None)
+    proposition = parse_market_proposition("Will the celebrity couple get married this year?", None)
     path = _derive_resolution_path(proposition, time_remaining_hours=100, independent_evidence=None)
     assert path.applies is False
 

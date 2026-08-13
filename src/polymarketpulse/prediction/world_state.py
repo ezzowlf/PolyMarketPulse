@@ -396,6 +396,16 @@ POLITICS_GEOPOLITICS_CATEGORIES = frozenset(
     {"POLITICS", "ELECTIONS", "GEOPOLITICS", "WAR_PEACE", "LEGISLATION"}
 )
 
+# Phase B (Market Template Library): CENTRAL_BANKS added so the real FED
+# template (_TEMPLATE_STEPS_BY_EVENT_TYPE's rate_cut/rate_hike/rate_hold
+# entries) is actually reachable -- without this, those template entries
+# would be real but permanently dead code, since PathToResolution/
+# resolution_path were never computed for CENTRAL_BANKS markets at all.
+# PRICE_THRESHOLD/SPORTS templates are NOT wired into this gate yet (same
+# honest reason a keyword classifier wasn't built for them this round —
+# scoped to what this round's real reference cases actually needed).
+_PATH_TO_RESOLUTION_CATEGORIES = POLITICS_GEOPOLITICS_CATEGORIES | {"CENTRAL_BANKS"}
+
 
 # ROUND-1 (85-section brief, sections 9-10): richer per-transition-step
 # structure. `probability_status` is ALWAYS "UNKNOWN" today — there is no
@@ -485,6 +495,13 @@ class ResolutionPath:
     process to break down — this is a legitimate outcome, not a gap."""
 
     applies: bool
+    # Phase B (Market Template Library): which real, named step structure
+    # was used, e.g. "LEGISLATION"/"FED"/"GEOPOLITICS"/"PRICE_THRESHOLD"/
+    # "SPORTS" -- "GENERIC" when applies=False (no matching template).
+    # Never invented: derived purely from the real proposition.event_type,
+    # the same field the rest of the codebase already classifies markets
+    # by (semantics.py/classification.py).
+    template_name: str = "GENERIC"
     steps: tuple[ResolutionStep, ...] = field(default_factory=tuple)
     # None whenever the step structure/statuses are too unknown to count
     # (e.g. `applies=False`, or every known step's status is "unknown") —
@@ -500,6 +517,7 @@ class ResolutionPath:
     def as_dict(self) -> dict:
         return {
             "applies": self.applies,
+            "template_name": self.template_name,
             "steps": [s.as_dict() for s in self.steps],
             "steps_remaining": self.steps_remaining,
             "path_completion": self.path_completion,
@@ -509,12 +527,68 @@ class ResolutionPath:
         }
 
 
-# event_type -> ordered step names for the one multi-step structure this
-# round wires real evidence into (US federal legislation, the project
-# owner's own example). Kept deliberately narrow/explicit — no guessed
-# structure for event_types not listed here (see `_derive_resolution_path`).
+# Phase B (Market Template Library): event_type -> (template_name, ordered
+# step names). Kept deliberately narrow/explicit — no guessed structure for
+# event_types not listed here (see `_derive_resolution_path`, which returns
+# `applies=False`/template_name="GENERIC" for everything else). Real step
+# completion for LEGISLATION additionally comes from text classification
+# (`_classify_legislation_step`, keyword-based, already existed); FED/
+# GEOPOLITICS/PRICE_THRESHOLD/SPORTS have no equivalent keyword classifier
+# built yet, so their real step completion only comes through
+# `independent_evidence.path_step_claims` (real structured claims whose
+# `resolution_step` names one of these steps) — honest: no fake keyword
+# guessing invented just to make these templates look more "complete" than
+# the real data supports.
+_TEMPLATE_STEPS_BY_EVENT_TYPE: dict[str, tuple[str, tuple[str, ...]]] = {
+    "legislation": (
+        "LEGISLATION",
+        ("introduced", "committee", "house_vote", "senate_vote", "presidential_action"),
+    ),
+    "rate_cut": ("FED", ("current_state", "macro_inputs", "meeting", "policy_decision", "resolution")),
+    "rate_hike": ("FED", ("current_state", "macro_inputs", "meeting", "policy_decision", "resolution")),
+    "rate_hold": ("FED", ("current_state", "macro_inputs", "meeting", "policy_decision", "resolution")),
+    "strategic_waterway": (
+        "GEOPOLITICS",
+        ("current_state", "escalation", "operational_change", "resolution_threshold", "confirmation"),
+    ),
+    "ceasefire": (
+        "GEOPOLITICS",
+        ("current_state", "escalation", "operational_change", "resolution_threshold", "confirmation"),
+    ),
+    "war_escalation": (
+        "GEOPOLITICS",
+        ("current_state", "escalation", "operational_change", "resolution_threshold", "confirmation"),
+    ),
+    "price_above": (
+        "PRICE_THRESHOLD",
+        ("current_price", "distance", "volatility", "time_remaining", "threshold_event"),
+    ),
+    "price_below": (
+        "PRICE_THRESHOLD",
+        ("current_price", "distance", "volatility", "time_remaining", "threshold_event"),
+    ),
+    "sport_match": (
+        "SPORTS",
+        ("current_competition_state", "round_match", "qualification", "final_outcome"),
+    ),
+    "sport_tournament": (
+        "SPORTS",
+        ("current_competition_state", "round_match", "qualification", "final_outcome"),
+    ),
+    "sport_winner": (
+        "SPORTS",
+        ("current_competition_state", "round_match", "qualification", "final_outcome"),
+    ),
+    "sport_qualification": (
+        "SPORTS",
+        ("current_competition_state", "round_match", "qualification", "final_outcome"),
+    ),
+}
+
+# Backward-compat alias: still used by the "legislation" text-based
+# keyword classifier below, which is intentionally kept legislation-only.
 _MULTISTEP_STRUCTURE_BY_EVENT_TYPE: dict[str, tuple[str, ...]] = {
-    "legislation": ("introduced", "committee", "house_vote", "senate_vote", "presidential_action"),
+    event_type: steps for event_type, (_template, steps) in _TEMPLATE_STEPS_BY_EVENT_TYPE.items()
 }
 
 # Per-step keyword lists (same literal-keyword style as claims.py's
@@ -595,14 +669,14 @@ def _derive_resolution_path(
     independent_evidence: IndependentEvidenceResult | None,
 ) -> ResolutionPath:
     """Builds the real ResolutionPath for one market. `applies=False` (empty
-    steps) is the correct, honest outcome for every event_type not in
-    `_MULTISTEP_STRUCTURE_BY_EVENT_TYPE` — i.e. the overwhelming majority of
-    markets (price-threshold, single binary events, etc.), which have no
-    real multi-step process to break down."""
-    step_names = _MULTISTEP_STRUCTURE_BY_EVENT_TYPE.get(proposition.event_type or "")
-    if not step_names:
+    steps, template_name="GENERIC") is the correct, honest outcome for
+    every event_type not in `_TEMPLATE_STEPS_BY_EVENT_TYPE` — markets with
+    no real multi-step process to break down."""
+    template = _TEMPLATE_STEPS_BY_EVENT_TYPE.get(proposition.event_type or "")
+    if template is None:
         return ResolutionPath(
             applies=False,
+            template_name="GENERIC",
             steps=(),
             steps_remaining=None,
             path_completion=None,
@@ -610,11 +684,15 @@ def _derive_resolution_path(
             path_feasibility="UNKNOWN",
             blockers=(),
         )
+    template_name, step_names = template
 
     # Only DIRECT_*/SUPPORTS_*-tier, dated evidence counts as a real basis
     # for a step's status — same tier gate as `_derive_waterway_state`.
+    # The text-based classifier below is legislation-specific (the only
+    # template with a real keyword vocabulary built so far) — never applied
+    # to other templates, which rely solely on real path_step_claims below.
     candidates: list = []
-    if independent_evidence is not None and independent_evidence.available:
+    if template_name == "LEGISLATION" and independent_evidence is not None and independent_evidence.available:
         candidates = [
             f
             for f in (*independent_evidence.evidence_for_yes, *independent_evidence.evidence_for_no)
@@ -707,6 +785,7 @@ def _derive_resolution_path(
 
     return ResolutionPath(
         applies=True,
+        template_name=template_name,
         steps=tuple(steps),
         steps_remaining=steps_remaining,
         path_completion=path_completion,
@@ -767,7 +846,7 @@ def _derive_path_to_resolution(
     waterway_state: WaterwayHealthState | None,
     classified_category: str | None,
 ) -> PathToResolution | None:
-    if classified_category not in POLITICS_GEOPOLITICS_CATEGORIES:
+    if classified_category not in _PATH_TO_RESOLUTION_CATEGORIES:
         return None
 
     current_state = waterway_state.current_state if waterway_state is not None else "UNKNOWN"
