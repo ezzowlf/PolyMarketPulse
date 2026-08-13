@@ -133,6 +133,52 @@ def test_contradictory_evidence_is_flagged(storage: Storage) -> None:
     assert result.contradiction_detected is True
 
 
+def _seed_structured_claim(
+    storage: Storage, claim_id: str, provider_market_id: str, direction: str, claim_type: str,
+) -> None:
+    from polymarketpulse.claims import Claim
+
+    claim = Claim(
+        claim_id=claim_id, subject="test subject", predicate="test predicate", object=None,
+        speaker=None, source_id="imf_portwatch", source_url="https://portwatch.imf.org",
+        timestamp=datetime.now(UTC), verification_status="PRIMARY_CONFIRMED", confidence=0.95,
+        direction=direction,
+    )
+    storage.save_claim(claim)
+    storage.save_claim_market_link(claim_id, "polymarket", provider_market_id, claim_type)
+
+
+def test_direct_resolution_structured_claim_alone_satisfies_evidence_gate(storage: Storage) -> None:
+    """Real claims-to-forecast integration: a single DIRECT_RESOLUTION
+    structured claim (e.g. IMF PortWatch data directly compared against
+    the market's own resolution threshold) is categorically stronger than
+    one ambiguous news article, so it alone must be able to clear the
+    evidence-sufficiency gate that a single article cannot."""
+    _seed_structured_claim(storage, "struct-1", "evidence-1", "negative", "DIRECT_RESOLUTION")
+    result = compute_independent_evidence(
+        storage.connection, provider="polymarket", provider_market_id="evidence-1",
+        question="Will the strait reopen?", resolution_text=None, market_yes_price=0.5,
+    )
+    assert result.available is True
+    assert len(result.evidence_for_no) == 1
+    assert result.evidence_for_no[0].relation_label == "DIRECT_NO"
+
+
+def test_path_step_structured_claim_never_counts_as_evidence(storage: Storage) -> None:
+    """The explicit double-counting guard: a PATH_STEP claim (confirms one
+    resolution-path step, e.g. GovTrack "House passed") must never also be
+    folded into the yes/no evidence math -- that would double-count the
+    same real fact through two channels."""
+    _seed_structured_claim(storage, "struct-2", "evidence-1", "positive", "PATH_STEP")
+    result = compute_independent_evidence(
+        storage.connection, provider="polymarket", provider_market_id="evidence-1",
+        question="Will the bill be signed?", resolution_text=None, market_yes_price=0.5,
+    )
+    assert result.available is False  # PATH_STEP alone must not satisfy the gate
+    assert len(result.evidence_for_yes) == 0
+    assert len(result.evidence_for_no) == 0
+
+
 def test_unavailable_when_no_evidence_infrastructure(tmp_path: Path) -> None:
     import sqlite3
 

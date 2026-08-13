@@ -1213,13 +1213,13 @@ def cmd_research_run(args: argparse.Namespace) -> int:
         if args.market_id:
             row = storage.connection.execute(
                 "SELECT market_id, provider, provider_market_id, question, category, "
-                "resolution_source, end_date, last_seen_at, classified_category "
+                "resolution_source, end_date, last_seen_at, classified_category, description "
                 "FROM markets WHERE market_id = ?",
                 (args.market_id,),
             ).fetchone()
             if row is not None:
                 cols = ("market_id", "provider", "provider_market_id", "question", "category",
-                        "resolution_source", "end_date", "last_seen_at", "classified_category")
+                        "resolution_source", "end_date", "last_seen_at", "classified_category", "description")
                 row = dict(zip(cols, row, strict=True))
             if row is None:
                 print(f"Markt '{args.market_id}' nicht gefunden.", file=sys.stderr)

@@ -277,8 +277,11 @@ def test_evaluate_model_hypothesis_history_excludes_lookahead_forecasts(conn: sq
 # --- BLOCK G Part 3: source performance -----------------------------------
 
 
-def test_evaluate_source_performance_reports_missing_linkage(conn: sqlite3.Connection) -> None:
+def test_evaluate_source_performance_uses_real_claim_market_links_when_present(conn: sqlite3.Connection) -> None:
+    """Real gap closed this round: migration 25 adds claim_market_links
+    (research_runner.py now populates it for real GovTrack/PortWatch
+    claims), so evaluate_source_performance's already-built real
+    computation path is now genuinely reachable, not just theoretical."""
     report = evaluate_source_performance(conn)
-    assert report.linkage_available is False
-    assert "claim_market_links" in report.reason
-    assert report.by_source == []
+    assert report.linkage_available is True
+    assert report.by_source == []  # no claims/resolutions seeded in this fixture yet, honestly empty

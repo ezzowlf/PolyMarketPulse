@@ -1158,6 +1158,35 @@ def _migration_024_research_runs(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migration_025_claim_market_links(conn: sqlite3.Connection) -> None:
+    """Closes a real, previously-documented gap (evaluation.py's
+    evaluate_source_performance found no table links a claim to the market
+    it was fetched FOR): claims fetched by research_runner.py for
+    structured, official, market-specific sources (GovTrack, IMF
+    PortWatch) are now recorded against the exact market they were
+    researched for, with an explicit claim_type classification --
+    DIRECT_RESOLUTION / PATH_STEP / QUANTITATIVE_SIGNAL / CONTEXT --
+    so evidence.py's probability math can fold them in through the
+    correct channel (a PATH_STEP claim updates the resolution path, a
+    QUANTITATIVE_SIGNAL/DIRECT_RESOLUTION claim can act as real evidence)
+    without inventing a parallel scoring system."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS claim_market_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            claim_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            provider_market_id TEXT NOT NULL,
+            claim_type TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (claim_id) REFERENCES claims(claim_id),
+            UNIQUE(claim_id, provider, provider_market_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_claim_market_links_market
+            ON claim_market_links(provider, provider_market_id);
+    """)
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1183,6 +1212,7 @@ MIGRATIONS: list[Migration] = [
     (22, "prediction_snapshot_forecast_semantics", _migration_022_prediction_snapshot_forecast_semantics),
     (23, "prediction_snapshot_no_forecast_reason", _migration_023_prediction_snapshot_no_forecast_reason),
     (24, "research_runs", _migration_024_research_runs),
+    (25, "claim_market_links", _migration_025_claim_market_links),
 ]
 
 

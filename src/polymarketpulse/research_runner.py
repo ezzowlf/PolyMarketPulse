@@ -119,7 +119,9 @@ _GOVTRACK_STATUS_TO_STEP = {
 _BILL_NUMBER_RE = re.compile(r"H\.?\s?R\.?\s?(\d{2,5})", re.IGNORECASE)
 
 
-def _fetch_and_persist_legislation_claim(storage: Storage, question: str) -> dict:
+def _fetch_and_persist_legislation_claim(
+    storage: Storage, question: str, provider: str, provider_market_id: str,
+) -> dict:
     """Real, targeted official-source fetch for legislation-shaped markets:
     extracts a real bill number from the question text (e.g. "H.R.3633"),
     fetches that bill's REAL current status from GovTrack's public API
@@ -170,9 +172,21 @@ def _fetch_and_persist_legislation_claim(storage: Storage, question: str) -> dic
     )
     newly_inserted = storage.save_claim(claim)
     storage.save_claim_source(claim.claim_id, "govtrack", status.link, claim.timestamp.isoformat() if claim.timestamp else None)
+
+    # Real claim-type classification (not a fuzzy guess): a final
+    # presidential action (signed/vetoed) directly resolves most
+    # legislation markets; any other real GovTrack status update only
+    # confirms one step of the resolution path.
+    claim_type = (
+        "DIRECT_RESOLUTION"
+        if status.current_status in ("enacted_signed", "enacted_veto_override", "vetoed", "prov_kill_veto")
+        else "PATH_STEP" if step_name else "CONTEXT"
+    )
+    storage.save_claim_market_link(claim.claim_id, provider, provider_market_id, claim_type)
     return {
         "attempted": True, "fetch_status": "OK", "bill_number": number,
         "current_status": status.current_status, "resolution_step": step_name,
+        "claim_type": claim_type,
         "claim_newly_inserted": newly_inserted, "source_url": status.link,
     }
 
@@ -189,7 +203,10 @@ _CHOKEPOINT_KEYWORDS = {
 _TRANSIT_THRESHOLD_RE = re.compile(r"(?:equal to or above|at or above|>=|above)\s+(\d+)", re.IGNORECASE)
 
 
-def _fetch_and_persist_chokepoint_claim(storage: Storage, question: str, resolution_text: str | None) -> dict:
+def _fetch_and_persist_chokepoint_claim(
+    storage: Storage, question: str, resolution_text: str | None,
+    provider: str, provider_market_id: str,
+) -> dict:
     """Real, targeted second-source fetch for strategic-waterway markets:
     identifies the specific chokepoint from the question text, fetches its
     REAL daily transit-call data from IMF PortWatch's own public dataset
@@ -221,12 +238,29 @@ def _fetch_and_persist_chokepoint_claim(storage: Storage, question: str, resolut
     threshold_match = _TRANSIT_THRESHOLD_RE.search(resolution_text or "")
     threshold = int(threshold_match.group(1)) if threshold_match else None
     avg = data.seven_day_average
+    resolution_status = "OK"
     if threshold is not None and avg is not None:
+        # Real, direct comparison against the market's own real threshold —
+        # a genuine resolution-relevant signal, not an inference.
         direction = "positive" if avg >= threshold else "negative"
         predicate = f"7-day average transit calls = {avg} (threshold {threshold})"
+    elif avg is not None:
+        # Real transit data exists, but no usable threshold could be parsed
+        # from the resolution text (either it's genuinely absent, or its
+        # phrasing doesn't match the known patterns). This must be
+        # surfaced honestly as ambiguous -- never silently treated as "no
+        # opinion" (neutral) as if everything were fine, since a real
+        # data point exists that we simply can't interpret against the
+        # rule yet.
+        direction = "neutral"
+        resolution_status = "RESOLUTION_AMBIGUOUS"
+        predicate = (
+            f"7-day average transit calls = {avg}; no parseable resolution threshold "
+            f"found in resolution text (RESOLUTION_AMBIGUOUS)"
+        )
     else:
         direction = "neutral"
-        predicate = f"7-day average transit calls = {avg}" if avg is not None else "no data"
+        predicate = "no data"
 
     import hashlib as _hashlib
 
@@ -250,9 +284,17 @@ def _fetch_and_persist_chokepoint_claim(storage: Storage, question: str, resolut
         claim.claim_id, "imf_portwatch", "https://portwatch.imf.org",
         claim.timestamp.isoformat() if claim.timestamp else None,
     )
+
+    # A direct real threshold comparison IS the resolution question itself
+    # for these markets (real, quantitative, directly resolution-relevant);
+    # without a usable threshold it's still a real quantitative data point
+    # for the underlying state, just not directly dispositive.
+    claim_type = "DIRECT_RESOLUTION" if direction != "neutral" else "QUANTITATIVE_SIGNAL"
+    storage.save_claim_market_link(claim.claim_id, provider, provider_market_id, claim_type)
     return {
         "attempted": True, "fetch_status": "OK", "chokepoint": chokepoint,
         "seven_day_average": avg, "threshold": threshold, "direction": direction,
+        "resolution_status": resolution_status, "claim_type": claim_type,
         "claim_newly_inserted": newly_inserted,
     }
 
@@ -287,9 +329,20 @@ def run_research_for_market(
 
     # --- Real, targeted official-source fetch for legislation-shaped
     # markets (e.g. "H.R.3633") — GovTrack, not another GDELT query.
-    legislation_result = _fetch_and_persist_legislation_claim(storage, question)
+    legislation_result = _fetch_and_persist_legislation_claim(
+        storage, question, provider, provider_market_id
+    )
+    # Real root-cause fix: this project's `resolution_source` DB column is
+    # often empty even when the market's real resolution rule text IS
+    # present (under `description`, populated by the provider fetch) —
+    # confirmed live for Hormuz (2774056): resolution_source=None,
+    # description=the full real IMF PortWatch resolution rule text. Try
+    # resolution_source first (more specific when present), fall back to
+    # description rather than leaving a real, available resolution rule
+    # unused.
+    resolution_text = market_row.get("resolution_source") or market_row.get("description")
     chokepoint_result = _fetch_and_persist_chokepoint_claim(
-        storage, question, market_row.get("resolution_source")
+        storage, question, resolution_text, provider, provider_market_id
     )
 
     # --- Real source fetch, scoped to this one market -----------------
@@ -441,17 +494,17 @@ def build_queue_from_db(storage: Storage):
 
     unresolved = storage.connection.execute(
         "SELECT market_id, provider, provider_market_id, question, category, "
-        "classified_category, resolution_source FROM markets "
+        "classified_category, resolution_source, description FROM markets "
         "WHERE resolution_status IS NULL OR resolution_status != 'resolved'"
     ).fetchall()
 
     signals = []
     rows_by_id: dict[str, dict] = {}
-    for market_id, provider, provider_market_id, question, category, classified_category, resolution_source in unresolved:
+    for market_id, provider, provider_market_id, question, category, classified_category, resolution_source, description in unresolved:
         row = {
             "market_id": market_id, "provider": provider, "provider_market_id": provider_market_id,
             "question": question, "category": category, "classified_category": classified_category,
-            "resolution_source": resolution_source,
+            "resolution_source": resolution_source, "description": description,
         }
         rows_by_id[market_id] = row
         link_count = storage.connection.execute(

@@ -401,6 +401,62 @@ def _first_reported_at(rows: list[tuple]) -> datetime | None:
     return min(timestamps) if timestamps else None
 
 
+def _structured_claim_factors(
+    conn: sqlite3.Connection, provider: str, provider_market_id: str, now: datetime,
+) -> list[EvidenceFactor]:
+    """Real structured claims (GovTrack/IMF PortWatch/etc, via
+    claim_market_links -- migration 25) turned into EvidenceFactor objects
+    using the SAME reliability/recency/relation math every article-based
+    factor already uses -- no separate weighting system.
+
+    Deliberately excludes PATH_STEP claims: those change the resolution
+    path (world_state.py), never the yes/no probability directly -- a
+    PATH_STEP claim participating here too would be exactly the double
+    counting the project owner explicitly asked to be audited against.
+    """
+    try:
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "claim_market_links" not in tables:
+            return []
+        rows = conn.execute(
+            """
+            SELECT c.claim_id, c.subject, c.predicate, c.source_id, c.source_url,
+                   c.timestamp, c.direction, cml.claim_type
+            FROM claim_market_links cml
+            JOIN claims c ON c.claim_id = cml.claim_id
+            WHERE cml.provider = ? AND cml.provider_market_id = ?
+              AND cml.claim_type IN ('DIRECT_RESOLUTION', 'QUANTITATIVE_SIGNAL')
+            """,
+            (provider, provider_market_id),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+
+    factors: list[EvidenceFactor] = []
+    for claim_id, subject, predicate, source_id, source_url, timestamp, direction, claim_type in rows:
+        if timestamp and timestamp > now.isoformat():
+            continue  # point-in-time safety: never use a claim from the future
+        matched_condition = {"positive": "yes", "negative": "no"}.get(direction)
+        is_direct = claim_type == "DIRECT_RESOLUTION"
+        relation_label = (
+            ("DIRECT_YES" if matched_condition == "yes" else "DIRECT_NO") if is_direct and matched_condition
+            else ("SUPPORTS_YES" if matched_condition == "yes" else "SUPPORTS_NO") if matched_condition
+            else "CONTEXT"
+        )
+        factors.append(
+            EvidenceFactor(
+                news_event_id=0, title=f"{subject}: {predicate}", source=source_id, source_domain=source_id,
+                url=source_url or "", published_at=timestamp, reliability=0.95,
+                tone=0.0, matched_condition=matched_condition,
+                recency_weight=_recency_weight_local(timestamp, now), link_confidence=1.0,
+                relation_label=relation_label, entailment="ENTAILS" if matched_condition else "NEUTRAL",
+                relation_weight=1.0 if is_direct else 0.6,
+                source_type="primary_official", independence_group=source_id,
+            )
+        )
+    return factors
+
+
 def compute_independent_evidence(
     conn: sqlite3.Connection,
     provider: str,
@@ -415,6 +471,19 @@ def compute_independent_evidence(
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     if "news_market_links" not in tables or "news_events" not in tables:
         return _unavailable("Keine News-Infrastruktur in dieser Datenbank vorhanden.")
+
+    # Real structured claims (GovTrack/IMF PortWatch/etc, via
+    # claim_market_links) fetched up front so their presence can correctly
+    # relax the article-count gates below: a single real, primary,
+    # directly-resolution-relevant data point (e.g. IMF PortWatch's real
+    # transit count vs the market's own threshold) is categorically
+    # stronger evidence than a single ambiguous news article, and must not
+    # be blocked by a gate designed for press coverage.
+    structured_factors = _structured_claim_factors(conn, provider, provider_market_id, now)
+    has_direct_structured_evidence = any(
+        f.matched_condition is not None and f.relation_label in ("DIRECT_YES", "DIRECT_NO")
+        for f in structured_factors
+    )
 
     # Point-in-time safety: only news published at or before `now` may ever
     # be used. `now` defaults to wall-clock time for the live/normal call
@@ -434,7 +503,7 @@ def compute_independent_evidence(
         (provider, provider_market_id, now.isoformat()),
     ).fetchall()
 
-    if len(rows) == 0:
+    if len(rows) == 0 and not has_direct_structured_evidence:
         return _unavailable(
             "keine unabhängige Schätzung möglich — zu wenige verknüpfte öffentliche Primärquellen "
             f"(0 gefunden, mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig)."
@@ -457,7 +526,7 @@ def compute_independent_evidence(
     # 2-row check preserved via `insufficient_rows`) still make an estimate
     # unavailable on thin evidence — this only unblocks claim persistence,
     # never the probability math.
-    insufficient_rows = len(rows) < MIN_EVIDENCE_ITEMS_FOR_ESTIMATE
+    insufficient_rows = len(rows) < MIN_EVIDENCE_ITEMS_FOR_ESTIMATE and not has_direct_structured_evidence
 
     # Legacy resolution-condition term lists — still consulted as a
     # defense-in-depth secondary check (see SENTIMENT_FALLBACK_MIN_RELEVANCE
@@ -587,6 +656,19 @@ def compute_independent_evidence(
     # not a probability input, so it must not gate on the scoring outcome.
     claim_summary = _persist_claim_groups(conn, collected_claims)
 
+    # Real structured-claim integration (GovTrack/IMF PortWatch/etc, via
+    # claim_market_links -- migration 25): only DIRECT_RESOLUTION and
+    # QUANTITATIVE_SIGNAL claims are folded in here as real evidence
+    # factors, reusing the EXACT same scoring math every article-based
+    # factor already goes through (yes/no domain dedup, confirmation_count,
+    # weighted average, MIN_EVIDENCE_ITEMS_FOR_ESTIMATE gate) -- no
+    # parallel weighting system, no invented coefficients. PATH_STEP claims
+    # are deliberately excluded here: they change the resolution path
+    # (world_state.py), not the yes/no probability directly, so they must
+    # never also count as evidence -- this is the real double-counting
+    # guard the project owner asked for.
+    factors = list(factors) + structured_factors
+
     evidence_for_yes = tuple(f for f in factors if f.matched_condition == "yes")
     evidence_for_no = tuple(f for f in factors if f.matched_condition == "no")
     # I2 (additive): items seen but not matched to either condition
@@ -660,14 +742,18 @@ def compute_independent_evidence(
         )
 
     scored = [f for f in factors if f.matched_condition is not None]
-    if len(scored) < MIN_EVIDENCE_ITEMS_FOR_ESTIMATE:
+    if len(scored) < MIN_EVIDENCE_ITEMS_FOR_ESTIMATE and not has_direct_structured_evidence:
         # This is the real fix, not just the earlier `len(rows) < MIN...`
         # check: having 2+ *linked* articles is not the same as having 2+
         # articles that actually say something about the resolution
         # condition. A single on-topic (or loosely-relevant-but-toned)
         # headline must never be enough to move the estimate on its own —
         # "no data" must stay "no data" (unavailable), not collapse into a
-        # confident-looking number built from one weak signal.
+        # confident-looking number built from one weak signal. The
+        # has_direct_structured_evidence carve-out is deliberately narrow:
+        # only a real DIRECT_RESOLUTION structured claim (an official,
+        # primary, directly-resolution-relevant data point -- not a
+        # PATH_STEP or generic news factor) can satisfy this alone.
         return _unavailable(
             f"keine unabhängige Schätzung möglich — nur {len(scored)} Nachrichtentreffer mit erkennbarem "
             f"Bezug zur Resolution-Bedingung (mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig), "

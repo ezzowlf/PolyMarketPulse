@@ -1884,6 +1884,50 @@ class Storage:
         except sqlite3.Error:
             return []
 
+    def save_claim_market_link(
+        self, claim_id: str, provider: str, provider_market_id: str, claim_type: str,
+    ) -> None:
+        """Real claim -> market link with an explicit claim_type
+        classification (DIRECT_RESOLUTION / PATH_STEP / QUANTITATIVE_SIGNAL
+        / CONTEXT) -- closes the documented gap (evaluation.py's
+        evaluate_source_performance) that no table linked a claim to the
+        market it was actually fetched for."""
+        try:
+            self.connection.execute(
+                """
+                INSERT INTO claim_market_links (claim_id, provider, provider_market_id, claim_type, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(claim_id, provider, provider_market_id) DO UPDATE SET claim_type = excluded.claim_type
+                """,
+                (claim_id, provider, provider_market_id, claim_type, datetime.now(UTC).isoformat()),
+            )
+            self.connection.commit()
+        except sqlite3.Error:
+            pass
+
+    def get_claim_market_links(self, provider: str, provider_market_id: str) -> list[dict]:
+        """Real claims linked to one specific market, joined with their
+        full claim data -- the real input evidence.py/world_state.py use
+        to fold structured claims into the same probability math the
+        article-based evidence already uses."""
+        try:
+            rows = self.connection.execute(
+                """
+                SELECT c.claim_id, c.subject, c.predicate, c.source_id, c.source_url,
+                       c.timestamp, c.verification_status, c.confidence, c.direction,
+                       c.resolution_step, cml.claim_type
+                FROM claim_market_links cml
+                JOIN claims c ON c.claim_id = cml.claim_id
+                WHERE cml.provider = ? AND cml.provider_market_id = ?
+                """,
+                (provider, provider_market_id),
+            ).fetchall()
+            cols = ("claim_id", "subject", "predicate", "source_id", "source_url", "timestamp",
+                    "verification_status", "confidence", "direction", "resolution_step", "claim_type")
+            return [dict(zip(cols, row, strict=True)) for row in rows]
+        except sqlite3.Error:
+            return []
+
     def save_counter_evidence(
         self, claim_id: str, contradicts_claim_id: str,
         source_id: str | None = None, source_url: str | None = None,
