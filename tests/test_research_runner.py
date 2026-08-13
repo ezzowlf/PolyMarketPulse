@@ -56,7 +56,7 @@ def test_real_run_fetches_sources_extracts_claims_and_persists_observability(sto
             published_at=datetime.now(UTC), fetched_at=datetime.now(UTC),
         ),
     ]
-    with patch("polymarketpulse.news.gdelt.fetch_gdelt", return_value=fake_events):
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=(fake_events, "OK")):
         record = run_research_for_market(storage, settings, market_row, trigger="test")
 
     assert record.sources_requested == 1
@@ -72,13 +72,60 @@ def test_real_run_fetches_sources_extracts_claims_and_persists_observability(sto
     assert rows[0]["claims_extracted"] == record.claims_extracted
 
 
+def test_second_identical_run_does_not_duplicate_sources_or_claims(storage: Storage) -> None:
+    """Real dedup: running the same market's research twice with the same
+    real articles must not create a second copy of the same source/claim —
+    Storage.save_news_event dedups by content_hash/source_url,
+    save_news_market_link by (news_event_id, provider, provider_market_id),
+    and save_claim by stable claim_id, all via ON CONFLICT DO NOTHING."""
+    market_row = _seed_market(storage)
+    settings = Settings.load()
+    fake_events = [
+        NewsEvent(
+            source="reuters", source_url="https://reuters.com/a", title="Ceasefire confirmed by officials",
+            published_at=datetime.now(UTC), fetched_at=datetime.now(UTC),
+        ),
+    ]
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=(fake_events, "OK")):
+        run_research_for_market(storage, settings, market_row, trigger="test")
+        second = run_research_for_market(storage, settings, market_row, trigger="test")
+
+    assert second.claims_extracted == 0  # already persisted by the first run
+    news_event_count = storage.connection.execute(
+        "SELECT COUNT(*) FROM news_events WHERE source_url = 'https://reuters.com/a'"
+    ).fetchone()[0]
+    assert news_event_count == 1  # not duplicated on the second run
+    link_count = storage.connection.execute(
+        "SELECT COUNT(*) FROM news_market_links WHERE provider_market_id = 'rr-1'"
+    ).fetchone()[0]
+    assert link_count == 1
+
+
 def test_no_sources_found_still_completes_and_reports_zero_honestly(storage: Storage) -> None:
     market_row = _seed_market(storage)
     settings = Settings.load()
 
-    with patch("polymarketpulse.news.gdelt.fetch_gdelt", return_value=[]):
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "OK")):
         record = run_research_for_market(storage, settings, market_row, trigger="test")
 
     assert record.sources_fetched == 0
     assert record.sources_accepted == 0
     assert record.claims_extracted == 0  # honestly zero, not fabricated
+    assert record.detail["source_fetch_status"] == "OK"  # reached, genuinely 0 hits
+
+
+def test_source_fetch_failure_is_visibly_distinct_from_empty_result(storage: Storage) -> None:
+    """The exact requirement: a source that could not be reached must never
+    be reported the same way as a source that was reached but had nothing
+    relevant — both currently look like sources_fetched=0 to a naive
+    caller, so the real distinction must live in detail.source_fetch_status."""
+    market_row = _seed_market(storage)
+    settings = Settings.load()
+
+    with patch(
+        "polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "SOURCE_FETCH_FAILED")
+    ):
+        record = run_research_for_market(storage, settings, market_row, trigger="test")
+
+    assert record.sources_fetched == 0
+    assert record.detail["source_fetch_status"] == "SOURCE_FETCH_FAILED"

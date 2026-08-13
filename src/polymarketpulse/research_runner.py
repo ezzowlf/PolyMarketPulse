@@ -107,7 +107,7 @@ def run_research_for_market(
     market_row must contain: market_id, provider, provider_market_id,
     question (same shape as ai.service._load_market_row's output).
     """
-    from .news.gdelt import build_query_for_question, fetch_gdelt
+    from .news.gdelt import build_query_for_question, fetch_gdelt_with_status
     from .news.linker import link_news_to_markets
 
     started = time.monotonic()
@@ -125,8 +125,12 @@ def run_research_for_market(
     # --- Real source fetch, scoped to this one market -----------------
     sources_requested = 1  # one real GDELT query for this market's own question
     query = build_query_for_question(question)
-    gdelt_events = fetch_gdelt(query, timeout=fetch_timeout)
+    gdelt_events, source_fetch_status = fetch_gdelt_with_status(query, timeout=fetch_timeout)
     sources_fetched = len(gdelt_events)
+    # Real, visible distinction (not folded into a generic "0 fetched"):
+    # SOURCE_FETCH_FAILED (a genuine transport/parse failure) vs OK-with-
+    # zero-hits (the source was reached, it just has no matching coverage
+    # right now) vs EMPTY_QUERY (nothing to search — e.g. no question text).
 
     saved_ids: dict[str, int] = {}
     for event in gdelt_events:
@@ -194,6 +198,7 @@ def run_research_for_market(
         cost_usd=0.0,  # GDELT/news pipeline is free/keyless; no paid calls made
         detail={
             "gdelt_query": query,
+            "source_fetch_status": source_fetch_status,
             "groups_before": groups_before, "primary_before": primary_before,
         },
     )

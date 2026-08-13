@@ -34,9 +34,28 @@ def fetch_gdelt(
 ) -> list[NewsEvent]:
     """Query the free GDELT DOC 2.1 API for recent articles matching `query`.
     Never raises on network/parse failure — returns [] so a missing/rate-
-    limited GDELT response never breaks a scan."""
+    limited GDELT response never breaks a scan. Preserved for existing
+    callers that only need the events; see fetch_gdelt_with_status() for
+    callers that need to distinguish a real transport failure from a
+    genuinely empty result (Observability/data-gaps callers)."""
+    events, _status = fetch_gdelt_with_status(
+        query, timespan=timespan, max_records=max_records, timeout=timeout
+    )
+    return events
+
+
+def fetch_gdelt_with_status(
+    query: str, timespan: str = "3d", max_records: int = 25, timeout: float = 10.0
+) -> tuple[list[NewsEvent], str]:
+    """Same real fetch as fetch_gdelt(), but also returns a real status:
+    "OK" (request succeeded, 0+ real articles), "SOURCE_FETCH_FAILED" (a
+    genuine transport/parse failure — network error, timeout, malformed
+    response), or "EMPTY_QUERY" (nothing to search). This is the real
+    distinction the project requires: a source that could not be reached is
+    a materially different situation than a source that was reached and
+    genuinely has no relevant coverage — never fold one into the other."""
     if not query.strip():
-        return []
+        return [], "EMPTY_QUERY"
     params = {
         "query": query,
         "mode": "artlist",
@@ -48,7 +67,7 @@ def fetch_gdelt(
     try:
         assert_safe_url(GDELT_DOC_URL)
     except SSRFError:
-        return []
+        return [], "SOURCE_FETCH_FAILED"
 
     try:
         response = httpx.get(
@@ -58,10 +77,10 @@ def fetch_gdelt(
         )
         response.raise_for_status()
         if len(response.content) > MAX_RESPONSE_BYTES:
-            return []
+            return [], "SOURCE_FETCH_FAILED"
         payload = response.json()
     except (httpx.HTTPError, ValueError):
-        return []
+        return [], "SOURCE_FETCH_FAILED"
 
     now = datetime.now(UTC)
     events: list[NewsEvent] = []
@@ -89,7 +108,7 @@ def fetch_gdelt(
                 source_domain=domain,
             )
         )
-    return events
+    return events, "OK"
 
 
 # Real function-word list (not just a length filter). These are words that
