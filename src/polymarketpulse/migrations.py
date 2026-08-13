@@ -1280,6 +1280,14 @@ def _migration_030_coherence_lineage_indexes(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migration_031_macro_observation_lineage(conn: sqlite3.Connection) -> None:
+    """Record the provider that supplied each persisted macro observation."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(macro_observations)")}
+    if "source_id" not in columns:
+        conn.execute("ALTER TABLE macro_observations ADD COLUMN source_id TEXT")
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1311,6 +1319,7 @@ MIGRATIONS: list[Migration] = [
     (28, "information_observability", _migration_028_information_observability),
     (29, "coherence_lineage", _migration_029_coherence_lineage),
     (30, "coherence_lineage_indexes", _migration_030_coherence_lineage_indexes),
+    (31, "macro_observation_lineage", _migration_031_macro_observation_lineage),
 ]
 
 

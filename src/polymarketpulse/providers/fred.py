@@ -86,6 +86,16 @@ class MacroSnapshot:
     unemployment_rate_prior: float | None  # UNRATE 3 months earlier (trend reference)
     as_of_date: date
     next_fomc_meeting_date: date | None
+    # Exact observation dates and source identifiers make every retained
+    # factor reproducible.  They are optional/additive for compatibility
+    # with stored snapshots and existing callers.
+    cpi_yoy_as_of: date | None = None
+    cpi_yoy_prior_as_of: date | None = None
+    unemployment_rate_as_of: date | None = None
+    unemployment_rate_prior_as_of: date | None = None
+    policy_rate_source: str = "fred"
+    cpi_source: str = "fred"
+    unemployment_source: str = "fred"
 
     def as_dict(self) -> dict:
         return {
@@ -99,6 +109,13 @@ class MacroSnapshot:
             "next_fomc_meeting_date": (
                 self.next_fomc_meeting_date.isoformat() if self.next_fomc_meeting_date else None
             ),
+            "cpi_yoy_as_of": self.cpi_yoy_as_of.isoformat() if self.cpi_yoy_as_of else None,
+            "cpi_yoy_prior_as_of": self.cpi_yoy_prior_as_of.isoformat() if self.cpi_yoy_prior_as_of else None,
+            "unemployment_rate_as_of": self.unemployment_rate_as_of.isoformat() if self.unemployment_rate_as_of else None,
+            "unemployment_rate_prior_as_of": self.unemployment_rate_prior_as_of.isoformat() if self.unemployment_rate_prior_as_of else None,
+            "policy_rate_source": self.policy_rate_source,
+            "cpi_source": self.cpi_source,
+            "unemployment_source": self.unemployment_source,
         }
 
 
@@ -216,23 +233,38 @@ def fetch_macro_snapshot(timeout: float = 10.0) -> MacroSnapshot | None:
     cpi = _fetch_series_csv(SERIES_CPI, timeout=timeout)
     unrate = _fetch_series_csv(SERIES_UNRATE, timeout=timeout)
 
+    fedfunds_source = "fred"
+    cpi_source = "fred"
+    unrate_source = "fred"
     if fedfunds is None:
         from . import nyfed
         fedfunds = nyfed.fetch_effr(timeout=timeout)
+        fedfunds_source = "nyfed" if fedfunds is not None else "fred"
     if cpi is None:
         from . import bls
         cpi = bls.fetch_cpi_index_series(timeout=timeout)
+        cpi_source = "bls" if cpi is not None else "fred"
     if unrate is None:
         from . import bls
         unrate = bls.fetch_unemployment_rate_series(timeout=timeout)
+        unrate_source = "bls" if unrate is not None else "fred"
 
-    return build_macro_snapshot(fedfunds, cpi, unrate)
+    return build_macro_snapshot(
+        fedfunds, cpi, unrate,
+        policy_rate_source=fedfunds_source,
+        cpi_source=cpi_source,
+        unemployment_source=unrate_source,
+    )
 
 
 def build_macro_snapshot(
     fedfunds: list[tuple[date, float]] | None,
     cpi: list[tuple[date, float]] | None,
     unrate: list[tuple[date, float]] | None,
+    *,
+    policy_rate_source: str = "fred",
+    cpi_source: str = "fred",
+    unemployment_source: str = "fred",
 ) -> MacroSnapshot | None:
     """Pure function that turns three already-fetched (or mocked) FRED
     series into a MacroSnapshot. Split out from fetch_macro_snapshot so
@@ -249,10 +281,10 @@ def build_macro_snapshot(
 
     policy_rate_as_of, policy_rate = fedfunds[-1]
     latest_cpi_yoy_date, latest_cpi_yoy = cpi_yoy[-1]
-    cpi_yoy_prior = cpi_yoy[-4][1] if len(cpi_yoy) >= 4 else None  # ~3 months earlier
+    cpi_yoy_prior_date, cpi_yoy_prior = cpi_yoy[-4]  # ~3 months earlier
 
     unemployment_as_of, unemployment_rate = unrate[-1]
-    unemployment_rate_prior = unrate[-4][1] if len(unrate) >= 4 else None
+    unemployment_rate_prior_date, unemployment_rate_prior = unrate[-4]
 
     as_of_date = max(policy_rate_as_of, latest_cpi_yoy_date, unemployment_as_of)
 
@@ -265,4 +297,11 @@ def build_macro_snapshot(
         unemployment_rate_prior=unemployment_rate_prior,
         as_of_date=as_of_date,
         next_fomc_meeting_date=next_fomc_meeting(as_of_date),
+        cpi_yoy_as_of=latest_cpi_yoy_date,
+        cpi_yoy_prior_as_of=cpi_yoy_prior_date,
+        unemployment_rate_as_of=unemployment_as_of,
+        unemployment_rate_prior_as_of=unemployment_rate_prior_date,
+        policy_rate_source=policy_rate_source,
+        cpi_source=cpi_source,
+        unemployment_source=unemployment_source,
     )

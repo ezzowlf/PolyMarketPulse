@@ -106,10 +106,10 @@ def test_probability_genuinely_reacts_to_different_real_macro_inputs() -> None:
     assert cut_favoring.probability > hike_favoring.probability
 
 
-def test_rate_hike_and_rate_hold_use_matching_quantitative_key() -> None:
+def test_directional_rate_hike_and_hold_use_matching_quantitative_key() -> None:
     snapshot = _snapshot(cpi_yoy=4.5, cpi_yoy_prior=3.0, unemployment_rate=3.5, unemployment_rate_prior=4.5)
     hike_result = analyze_macro(
-        text="Will the Fed increase interest rates by 25 bps after the September 2026 meeting?",
+        text="Will the Fed increase interest rates after the September 2026 meeting?",
         event_type="rate_hike", proposition_status="CLEAR", macro_snapshot=snapshot,
     )
     hold_result = analyze_macro(
@@ -120,3 +120,14 @@ def test_rate_hike_and_rate_hold_use_matching_quantitative_key() -> None:
     assert hold_result.available
     # Heating inflation + falling unemployment strongly favors hike over hold here.
     assert hike_result.probability > hold_result.probability
+
+
+def test_exact_basis_point_contract_is_not_filled_with_directional_probability() -> None:
+    result = analyze_macro(
+        text="Will the Fed increase interest rates by 25 bps after the September 2026 meeting?",
+        event_type="rate_hike", proposition_status="CLEAR",
+        macro_snapshot=_snapshot(cpi_yoy=4.5, cpi_yoy_prior=3.0, unemployment_rate=3.5, unemployment_rate_prior=4.5),
+    )
+    assert result.available is False
+    assert result.probability is None
+    assert result.data_source_status == "TARGET_SEMANTICS_UNSUPPORTED"

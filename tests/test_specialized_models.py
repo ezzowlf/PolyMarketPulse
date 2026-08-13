@@ -28,6 +28,7 @@ def test_geopolitics_ceasefire_agreed():
     assert result.available is True
     assert result.probability is not None
     assert result.probability >= 0.7
+    assert result.probability >= 0.7
     assert "ceasefire" in result.reason.lower()
 
 
@@ -145,7 +146,28 @@ def test_politics_legislation_passed():
     )
     assert result.available is True
     assert result.probability is not None
-    assert result.probability > 0.7
+
+
+def test_politics_house_passage_is_not_enactment_forecast() -> None:
+    result = analyze_politics(
+        text="H.R. 3633 passed House; Senate next",
+        event_type="legislation",
+        proposition_status="CLEAR",
+    )
+    assert result.available is False
+    assert result.probability is None
+    assert "intermediate" in result.reason
+
+
+def test_politics_market_question_is_not_a_completed_legislative_event() -> None:
+    result = analyze_politics(
+        text="Clarity Act signed into law in 2026?",
+        event_type="legislation",
+        proposition_status="CLEAR",
+    )
+    assert result.available is False
+    assert result.probability is None
+    assert "not evidence" in result.reason
 
 
 def test_politics_unsupported_event_type():

@@ -257,6 +257,19 @@ def _analyze_legislation(
 
     inputs_used: list[str] = []
 
+    # A chamber vote is a path step, not proof that a bill was enacted.  In
+    # particular, treating "House passed; Senate next" as a completed
+    # legislation contract leaks an intermediate state into a "signed into
+    # law" forecast.  Keep the model unavailable until both chambers / an
+    # enactment signal is actually present.
+    house_only = ("house passed" in lowered or "passed house" in lowered) and not any(
+        term in lowered
+        for term in ("senate passed", "passed senate", "congress passed", "became law", "signed into law", "president signed")
+    )
+    if house_only:
+        inputs_used.append("house_passage_path_step")
+        return None, "House passage is an intermediate legislative path step; Senate and presidential action remain unresolved", tuple(inputs_used)
+
     # Check for passage
     if any(term in lowered for term in passed_signals):
         if any(source in lowered for source in _OFFICIAL_SOURCES):
@@ -480,6 +493,26 @@ def analyze_politics(
             ),
             reason=f"event_type '{event_type}' not handled by politics model",
             inputs_used=(),
+            contributions=(),
+            uncertainty=1.0,
+        )
+
+    # The contract question is not evidence that its predicate occurred.
+    # This matters especially for "signed into law?": keyword matching the
+    # question itself must not be transformed into a completed-enactment
+    # signal.  Confirmed claims are evaluated when supplied as evidence text;
+    # a bare prospective market question remains unavailable here.
+    is_market_question = "?" in text or text.strip().lower().startswith(
+        ("will ", "is ", "are ", "does ", "do ", "can ", "could ")
+    )
+    if is_market_question:
+        return PoliticsResult(
+            available=False,
+            probability=None,
+            confidence=0.0,
+            data_quality=DataQualityBreakdown(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            reason="market question is not evidence of a completed political or legislative event",
+            inputs_used=("market_question_only",),
             contributions=(),
             uncertainty=1.0,
         )

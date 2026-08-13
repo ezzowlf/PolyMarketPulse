@@ -224,7 +224,7 @@ def _load_resolution_date(conn: sqlite3.Connection, market_id: str) -> datetime 
 
 
 def _persist_macro_snapshot(conn: sqlite3.Connection, snapshot) -> None:
-    """Best-effort persistence of a fetched FRED macro snapshot into
+    """Best-effort persistence of a fetched macro snapshot into
     macro_observations (migration 019), for freshness scoring. Tolerates a
     minimal test schema without the table (same pattern as
     _load_resolution_date above)."""
@@ -232,20 +232,31 @@ def _persist_macro_snapshot(conn: sqlite3.Connection, snapshot) -> None:
         return
     now = datetime.now(UTC).isoformat()
     rows = [
-        ("FEDFUNDS", snapshot.policy_rate_as_of.isoformat(), snapshot.policy_rate),
-        ("CPIAUCSL_YOY", snapshot.as_of_date.isoformat(), snapshot.cpi_yoy),
-        ("UNRATE", snapshot.as_of_date.isoformat(), snapshot.unemployment_rate),
+        ("FEDFUNDS", snapshot.policy_rate_as_of, snapshot.policy_rate, getattr(snapshot, "policy_rate_source", "fred")),
+        ("CPIAUCSL_YOY", getattr(snapshot, "cpi_yoy_as_of", None) or snapshot.as_of_date, snapshot.cpi_yoy, getattr(snapshot, "cpi_source", "fred")),
+        ("CPIAUCSL_YOY_PRIOR", getattr(snapshot, "cpi_yoy_prior_as_of", None), snapshot.cpi_yoy_prior, getattr(snapshot, "cpi_source", "fred")),
+        ("UNRATE", getattr(snapshot, "unemployment_rate_as_of", None) or snapshot.as_of_date, snapshot.unemployment_rate, getattr(snapshot, "unemployment_source", "fred")),
+        ("UNRATE_PRIOR", getattr(snapshot, "unemployment_rate_prior_as_of", None), snapshot.unemployment_rate_prior, getattr(snapshot, "unemployment_source", "fred")),
     ]
-    for series_id, observation_date, value in rows:
-        conn.execute(
-            """
-            INSERT INTO macro_observations (series_id, observation_date, value, fetched_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(series_id, observation_date) DO UPDATE SET
-                value = excluded.value, fetched_at = excluded.fetched_at
-            """,
-            (series_id, observation_date, value, now),
-        )
+    has_source_id = any(row[1] == "source_id" for row in conn.execute("PRAGMA table_info(macro_observations)"))
+    for series_id, observation_date, value, source_id in rows:
+        if observation_date is None or value is None:
+            continue
+        if has_source_id:
+            conn.execute(
+                """INSERT INTO macro_observations (series_id, observation_date, value, fetched_at, source_id)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(series_id, observation_date) DO UPDATE SET
+                     value=excluded.value, fetched_at=excluded.fetched_at, source_id=excluded.source_id""",
+                (series_id, observation_date.isoformat(), value, now, source_id),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO macro_observations (series_id, observation_date, value, fetched_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(series_id, observation_date) DO UPDATE SET value=excluded.value, fetched_at=excluded.fetched_at""",
+                (series_id, observation_date.isoformat(), value, now),
+            )
     conn.commit()
 
 

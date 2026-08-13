@@ -96,6 +96,10 @@ def build_maturity_breakdown(result: PredictionResult) -> tuple[dict, ...]:
         "PASS" if path_known else "FAIL"
     )
     sources = {v.source for v in result.world_state.state_variables} if result.world_state else set()
+    has_numeric_domain_model = any(
+        s.available and s.name in {"macro", "quant", "politics", "geopolitics", "sports"}
+        for s in result.submodel_estimates
+    )
     return (
         row("SEMANTICS", "PASS" if proposition and proposition.proposition_status == "CLEAR" else "FAIL",
             f"proposition_status={proposition.proposition_status if proposition else 'missing'}"),
@@ -103,8 +107,10 @@ def build_maturity_breakdown(result: PredictionResult) -> tuple[dict, ...]:
             f"resolution confidence={resolution.confidence if resolution else None}"),
         row("WORLD_STATE", "PASS" if structured or path_known else "FAIL",
             f"structured sources={sorted(sources)}; path state known={path_known}"),
-        row("DOMAIN_MODEL", "PASS" if any(s.available and s.name in {"macro", "quant", "politics", "geopolitics", "sports"} for s in result.submodel_estimates) else "FAIL",
-            "At least one eligible specialized model produced a numeric estimate."),
+        row("DOMAIN_MODEL", "PASS" if has_numeric_domain_model else "FAIL",
+            "At least one eligible specialized model produced a numeric estimate."
+            if has_numeric_domain_model else
+            "No eligible specialized model produced a numeric estimate."),
         row("LIVE_PROVIDER", "PASS" if structured else ("N/A" if domain not in ("MACRO", "CRYPTO") else "FAIL"),
             f"live structured provider sources={sorted(sources)}"),
         row("EVIDENCE", evidence_status,

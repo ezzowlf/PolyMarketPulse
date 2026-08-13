@@ -25,6 +25,7 @@ Design principle:
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 
 from ..providers.fred import MacroSnapshot
@@ -35,6 +36,7 @@ from .types import DataQualityBreakdown
 # "policy_change" are generic-stance questions the quantitative model isn't
 # shaped to answer (no single "cut/hike/hold" outcome to score).
 _QUANTITATIVE_EVENT_TYPES = frozenset({"rate_cut", "rate_hike", "rate_hold"})
+_EXACT_MOVE_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:bp|bps|basis\s+point(?:s)?)\b", re.IGNORECASE)
 
 
 def _quantitative_rate_probabilities(snapshot: MacroSnapshot) -> dict[str, float] | None:
@@ -385,6 +387,20 @@ def analyze_macro(
         probability, reason, inputs_used = analysis_func(text, proposition_status, event_type)
 
     if probability is None:
+        # The available quantitative model estimates only the directional
+        # three-way distribution cut/hike/hold.  A contract for a *specific*
+        # move (for example +25 bps) is a distinct outcome and must not be
+        # represented by the broad "hike" probability.  Keep it unavailable
+        # until a magnitude-aware, evidenced distribution exists.
+        if event_type in _QUANTITATIVE_EVENT_TYPES and _EXACT_MOVE_RE.search(text):
+            return MacroResult(
+                available=False, probability=None, confidence=0.0,
+                data_quality=DataQualityBreakdown(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                reason="exact basis-point contract requires a magnitude-aware rate-decision distribution; directional macro inputs are not semantically interchangeable",
+                inputs_used=inputs_used + ("exact_rate_move_contract",),
+                contributions=(), uncertainty=1.0,
+                data_source_status="TARGET_SEMANTICS_UNSUPPORTED",
+            )
         # Text-keyword analysis found no confirmed/reported decision (most
         # commonly: an upcoming, not-yet-decided meeting). For the three
         # directional rate event types, fall back to the real FRED-derived
