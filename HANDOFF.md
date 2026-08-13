@@ -1,5 +1,35 @@
 # HANDOFF
 
+## THIS ROUND (newest) — Phase K sensitivity plus real Active-Research queue repair
+
+`prediction/sensitivity.py::derive_sensitivity_audit()` now provides an exact counterfactual for every
+weighted member of the pre-news linear ensemble: remove one actual model input and recompute the same
+weighted average. It explicitly does not fabricate a final-posterior delta for news (a separate Bayesian
+path) and does not pretend market price is an input to the independent forecast. The API serializes this
+as `sensitivity_audit`, and the compact Market Detail UI now shows the Future Map and a German
+robustness summary with the exact removable-input deltas only.
+
+The Active Research audit found and fixed a real integration defect: `build_queue_from_db()` advertised
+divergence/deadline/data-gap prioritization but passed None/zero for every one of those inputs. It now reads
+the latest persisted prediction snapshot, end date, and data-gap summary in one read-only query. The queue
+therefore actually selects current cases by the documented criteria without persisting forecasts from the
+read-only API endpoint.
+
+Current Golden Case selected automatically from the real local market set: `polymarket:2910437`, “US
+announces end of Iranian blockade by August 15, 2026?”. It ranked first at 49.8 because of a 74.5pp
+model-vs-market divergence, a 51-hour deadline and existing source coverage. A before/after live research
+run was performed after an explicit DB backup. Both the sandbox run and an unrestricted-network retry
+recorded `SOURCE_FETCH_FAILED` from GDELT; no source/claim/state/forecast was invented. Before and after:
+model hypothesis 85%, evidence-backed/published forecast null, `FORECAST_SUPPRESSED`, decision `WATCH`.
+The live result still produced a GEOPOLITICS scenario tree and showed sensitivity dominated by removing
+momentum (+40.41pp in the pre-news linear ensemble), transparently marked as measured fragility.
+
+Validation: full suite `1009 passed`, Ruff clean, Node syntax check clean. Browser acceptance was attempted
+but is blocked in this Windows sandbox because every local background-server launch fails before binding a
+port with duplicate `Path` environment keys; no browser success is claimed. Next remaining work: broader
+completion audit (coherence, social reputation, information shock/lead, and full UI/API lineage) remains
+open; do not label the whole master request complete yet.
+
 ## THIS ROUND (newest) — Future Intelligence Phase J closed (Scenario Tree)
 
 Continued from Phase I at `e2ad0f1` on the canonical `master` checkout. Phase J adds

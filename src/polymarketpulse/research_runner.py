@@ -17,6 +17,7 @@ happened — real before/after counts, never fabricated, never estimated.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from dataclasses import dataclass, field
@@ -552,30 +553,64 @@ def build_queue_from_db(storage: Storage):
     -- one real implementation, not three."""
     from .research_queue import MarketSignal, build_research_queue
 
+    # Use the latest persisted forecast state rather than silently filling
+    # the real ranking inputs with None/zero. This keeps the queue read-only
+    # (the /research-queue endpoint must not compute/persist forecasts) while
+    # allowing actual divergence, deadline and data-gap signals to select a
+    # current golden case or recurring-research candidate.
     unresolved = storage.connection.execute(
-        "SELECT market_id, provider, provider_market_id, question, category, "
-        "classified_category, resolution_source, description FROM markets "
-        "WHERE resolution_status IS NULL OR resolution_status != 'resolved'"
+        """
+        SELECT m.market_id, m.provider, m.provider_market_id, m.question, m.category,
+               m.classified_category, m.resolution_source, m.description, m.end_date,
+               p.market_yes_probability, p.model_hypothesis_probability,
+               p.data_gap_summary_json,
+               EXISTS(SELECT 1 FROM news_market_links n
+                      WHERE n.provider = m.provider AND n.provider_market_id = m.provider_market_id)
+        FROM markets m
+        LEFT JOIN prediction_snapshots p ON p.id = (
+            SELECT ps.id FROM prediction_snapshots ps
+            WHERE ps.market_id = m.market_id ORDER BY ps.created_at DESC, ps.id DESC LIMIT 1
+        )
+        WHERE m.resolution_status IS NULL OR m.resolution_status != 'resolved'
+        """
     ).fetchall()
 
     signals = []
     rows_by_id: dict[str, dict] = {}
-    for market_id, provider, provider_market_id, question, category, classified_category, resolution_source, description in unresolved:
+    now = datetime.now(UTC)
+    for (
+        market_id, provider, provider_market_id, question, category, classified_category,
+        resolution_source, description, end_date, market_probability, model_probability,
+        gap_summary_json, has_news_links,
+    ) in unresolved:
         row = {
             "market_id": market_id, "provider": provider, "provider_market_id": provider_market_id,
             "question": question, "category": category, "classified_category": classified_category,
             "resolution_source": resolution_source, "description": description,
         }
         rows_by_id[market_id] = row
-        link_count = storage.connection.execute(
-            "SELECT COUNT(*) FROM news_market_links WHERE provider = ? AND provider_market_id = ?",
-            (provider, provider_market_id),
-        ).fetchone()[0]
+        time_remaining_hours = None
+        if end_date:
+            try:
+                parsed = datetime.fromisoformat(end_date)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=UTC)
+                time_remaining_hours = (parsed - now).total_seconds() / 3600.0
+            except (TypeError, ValueError):
+                pass
+        gap_summary = {}
+        if gap_summary_json:
+            try:
+                gap_summary = json.loads(gap_summary_json)
+            except (TypeError, ValueError):
+                pass
         signals.append(MarketSignal(
             market_id=market_id, question=question or "", category=classified_category or category,
-            event_type=None, market_probability=None, model_hypothesis_probability=None,
-            time_remaining_hours=None, critical_gap_count=0, high_gap_count=0,
-            has_source_coverage=link_count > 0,
+            event_type=None, market_probability=market_probability, model_hypothesis_probability=model_probability,
+            time_remaining_hours=time_remaining_hours,
+            critical_gap_count=int(gap_summary.get("critical", 0) or 0),
+            high_gap_count=int(gap_summary.get("high", 0) or 0),
+            has_source_coverage=bool(has_news_links),
         ))
     return rows_by_id, build_research_queue(signals)
 

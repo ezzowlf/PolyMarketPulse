@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from .resolution_semantics import ResolutionSemantics
     from .scenario_tree import ScenarioTree
     from .semantics import MarketProposition
+    from .sensitivity import SensitivityAudit
     from .structured_state import StructuredWorldState
     from .world_state import WorldState
 
@@ -579,6 +580,9 @@ class PredictionResult:
     # Phase J: explicit branch tree derived from the same resolution path.
     scenario_tree: ScenarioTree | None = None
 
+    # Phase K: exact removals from the pre-news linear ensemble only.
+    sensitivity_audit: SensitivityAudit | None = None
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -658,4 +662,5 @@ class PredictionResult:
             ),
             "conditional_transitions": [t.as_dict() for t in self.conditional_transitions],
             "scenario_tree": self.scenario_tree.as_dict() if self.scenario_tree else None,
+            "sensitivity_audit": self.sensitivity_audit.as_dict() if self.sensitivity_audit else None,
         }

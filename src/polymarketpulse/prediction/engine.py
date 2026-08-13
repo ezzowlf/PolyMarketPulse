@@ -59,6 +59,7 @@ from .resolution_semantics import extract_resolution_semantics
 from .scenario_tree import derive_scenario_tree
 from .scenarios import build_scenarios
 from .semantics import MarketProposition, parse_market_proposition
+from .sensitivity import derive_sensitivity_audit
 from .specialized_router import ALL_SPECIALIZED_MODEL_NAMES, route_to_specialized_model
 from .structured_state import assemble_structured_world_state
 from .types import (
@@ -1168,6 +1169,7 @@ def compute_prediction(
             factor.title for factor in (independent_evidence.evidence_for_no if independent_evidence else ())[:5]
         ),
     )
+    sensitivity_audit = derive_sensitivity_audit(tuple(all_submodels))
 
     # Block F Part 1: compute change_triggers HERE (moved up from its
     # original post-result location — world_state/data_gaps/divergence_audit
@@ -1263,6 +1265,7 @@ def compute_prediction(
         expected_vs_observed=expected_vs_observed,
         conditional_transitions=conditional_transitions,
         scenario_tree=scenario_tree,
+        sensitivity_audit=sensitivity_audit,
     )
     # Phase F: evidence-gated forecast hierarchy
     # evidence_backed_probability: only when sufficient evidence exists

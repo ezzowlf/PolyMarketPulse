@@ -13,7 +13,11 @@ import pytest
 
 from polymarketpulse.config import Settings
 from polymarketpulse.news.base import NewsEvent
-from polymarketpulse.research_runner import run_recurring_research, run_research_for_market
+from polymarketpulse.research_runner import (
+    build_queue_from_db,
+    run_recurring_research,
+    run_research_for_market,
+)
 from polymarketpulse.storage import Storage
 
 
@@ -40,6 +44,35 @@ def _seed_market(storage: Storage) -> dict:
     ).fetchone()
     cols = ("market_id", "provider", "provider_market_id", "question", "category", "classified_category", "resolution_source")
     return dict(zip(cols, row, strict=True))
+
+
+def test_queue_uses_latest_persisted_forecast_deadline_and_gap_state(storage: Storage) -> None:
+    now = datetime.now(UTC)
+    storage.connection.execute(
+        "INSERT INTO markets (market_id, provider, provider_market_id, question, slug, url, first_seen_at, last_seen_at, end_date, resolution_status) "
+        "VALUES ('queue-1', 'polymarket', 'queue-1', 'Will a vote occur?', 'queue-1', 'https://x', ?, ?, ?, 'open')",
+        (now.isoformat(), now.isoformat(), (now.replace(year=now.year + 1)).isoformat()),
+    )
+    storage.connection.execute(
+        "INSERT INTO prediction_snapshots (market_id, provider, provider_market_id, category, prediction_version, created_at, market_yes_probability, model_hypothesis_probability, recommendation, comparable_sample_size, data_gap_summary_json) "
+        "VALUES ('queue-1', 'polymarket', 'queue-1', NULL, 'v2', ?, 0.20, 0.70, 'WATCH_YES', 10, '{\"critical\": 1, \"high\": 2}')",
+        (now.isoformat(),),
+    )
+    storage.connection.execute(
+        "INSERT INTO news_events (source, source_url, title, published_at, fetched_at, content_hash) VALUES ('gov', 'https://gov.example/a', 'Vote update', ?, ?, 'queue-news')",
+        (now.isoformat(), now.isoformat()),
+    )
+    news_id = storage.connection.execute("SELECT id FROM news_events WHERE content_hash = 'queue-news'").fetchone()[0]
+    storage.connection.execute(
+        "INSERT INTO news_market_links (news_event_id, provider, provider_market_id, confidence, match_reason, matched_terms, created_at) VALUES (?, 'polymarket', 'queue-1', 1.0, 'test', 'vote', ?)",
+        (news_id, now.isoformat()),
+    )
+    storage.connection.commit()
+    _, queue = build_queue_from_db(storage)
+    entry = next(item for item in queue if item.market_id == "queue-1")
+    assert entry.priority_score == 36.0  # 50pp divergence + 14 data-gap points + long-horizon base score
+    assert any("Divergenz" in reason for reason in entry.reasons)
+    assert any("kritische" in reason for reason in entry.reasons)
 
 
 def test_real_run_fetches_sources_extracts_claims_and_persists_observability(storage: Storage) -> None:

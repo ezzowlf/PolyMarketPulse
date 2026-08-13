@@ -65,6 +65,8 @@ async function renderMarketDetailPage(container, marketId) {
       <div class="panel" id="evidence-panel"></div>
       <div class="panel" id="change-triggers-panel"></div>
       <div class="panel" id="scenarios-panel"></div>
+      <div class="panel" id="future-map-panel"></div>
+      <div class="panel" id="sensitivity-panel"></div>
       <div class="panel" id="forecast-history-panel"><div class="empty-state">Lade Forecast-Verlauf…</div></div>
       <div class="panel" id="historical-reliability-panel"><div class="empty-state">Lade historische Zuverlässigkeit…</div></div>
 
@@ -555,6 +557,38 @@ function _scenarioSectionHtml(scenarios) {
   `;
 }
 
+function _futureMapHtml(tree) {
+  if (!tree || !tree.branches || !tree.branches.length) {
+    return `<h3>Future Map</h3><div class="empty-state">Für diesen Markt ist kein bestätigter mehrstufiger Ereignispfad verfügbar.</div>`;
+  }
+  const branches = tree.branches.filter((branch) => branch.branch_type !== "CURRENT");
+  const row = (branch) => {
+    const outcome = branch.outcome === "UNRESOLVED" ? "offen" : branch.outcome;
+    const prerequisites = branch.prerequisites && branch.prerequisites.length ? ` · nach ${branch.prerequisites.join(" → ")}` : "";
+    return `<li><strong>${branch.event}</strong>${prerequisites} → ${outcome}</li>`;
+  };
+  return `
+    <h3>Future Map</h3>
+    <p class="sub">${tree.template_name}: ${tree.branches[0].event}</p>
+    <ul>${branches.map(row).join("")}</ul>
+    <p class="sub">Die Pfade sind strukturell abgeleitet. Es werden keine Übergangswahrscheinlichkeiten angezeigt, solange keine empirische Kalibrierung vorliegt.</p>
+  `;
+}
+
+function _sensitivityHtml(audit) {
+  if (!audit || audit.baseline_probability === null || audit.baseline_probability === undefined) {
+    return `<h3>Robustheit der Prognose</h3><div class="empty-state">Keine gewichtete, unabhängige Basisprognose verfügbar.</div>`;
+  }
+  const computed = (audit.counterfactuals || []).filter((item) => item.status === "COMPUTED");
+  const strongest = audit.strongest_input ? `${audit.strongest_input} (${fmtEdgePp(audit.strongest_delta)})` : "kein einzelner Faktor";
+  return `
+    <h3>Robustheit der Prognose</h3>
+    <p>Basis vor News-Update: <strong>${fmtPct(audit.baseline_probability)}</strong>. Stärkster messbarer Einfluss: <strong>${strongest}</strong>.</p>
+    ${audit.fragility === "SINGLE_INPUT" ? `<p class="sub">Fragil: Nur ein gewichteter, unabhängiger Input ist verfügbar.</p>` : ""}
+    ${computed.length ? `<details><summary>Einzelne Inputs hypothetisch entfernen</summary><table><thead><tr><th>Ohne</th><th>Neue Basis</th><th>Delta</th></tr></thead><tbody>${computed.map((item) => `<tr><td>${item.removed_input}</td><td>${fmtPct(item.without_probability)}</td><td>${fmtEdgePp(item.delta)}</td></tr>`).join("")}</tbody></table><p class="sub">Diese Deltas sind exakt nur für das lineare Vor-News-Ensemble berechnet. News und Marktpreis werden nicht fälschlich als lineare Inputs dargestellt.</p></details>` : ""}
+  `;
+}
+
 const INFLUENCE_STRENGTH_ORDER = {
   STRONG_POSITIVE: 3, STRONG_NEGATIVE: 3, MEDIUM_POSITIVE: 2, MEDIUM_NEGATIVE: 2, NEUTRAL: 1,
 };
@@ -1012,6 +1046,10 @@ async function renderPredictionPanel(marketId, market) {
     if (changeTriggersPanel) changeTriggersPanel.innerHTML = _changeTriggersHtml(response.prediction);
     panel.innerHTML = _aiCardHtml(response);
     scenariosPanel.innerHTML = _scenarioSectionHtml(response.prediction.scenarios);
+    const futureMapPanel = document.getElementById("future-map-panel");
+    const sensitivityPanel = document.getElementById("sensitivity-panel");
+    if (futureMapPanel) futureMapPanel.innerHTML = _futureMapHtml(response.prediction.scenario_tree);
+    if (sensitivityPanel) sensitivityPanel.innerHTML = _sensitivityHtml(response.prediction.sensitivity_audit);
     submodelsPanel.innerHTML = _submodelSectionHtml(response.prediction);
     dqPanel.innerHTML = _dataQualityPanelHtml(response.prediction);
     document.getElementById("recompute-prediction").onclick = async () => {
