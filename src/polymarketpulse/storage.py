@@ -1820,6 +1820,70 @@ class Storage:
         except sqlite3.Error:
             pass
 
+    def save_research_run(self, record: dict) -> int | None:
+        """Persist one Observability record for a real research run against
+        one market (see research_runner.py). `record` is the plain dict
+        produced by ResearchRunObservability.as_dict(); unknown/missing keys
+        default to None/0 so this never raises on a partial record. Returns
+        the new row id, or None on a storage error (never raises — this is
+        observability infrastructure, must never break a real research run)."""
+        try:
+            cur = self.connection.execute(
+                """
+                INSERT INTO research_runs (
+                    run_at, provider, provider_market_id, question, trigger,
+                    sources_requested, sources_fetched, sources_accepted, sources_rejected,
+                    claims_extracted, claims_deduplicated, claims_linked, claims_rejected,
+                    independent_source_groups, primary_source_count,
+                    data_gaps_before, data_gaps_after,
+                    evidence_before, evidence_after,
+                    model_hypothesis_before, model_hypothesis_after,
+                    evidence_backed_before, evidence_backed_after,
+                    published_forecast_before, published_forecast_after,
+                    final_status, duration_ms, cost_usd, detail_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.get("run_at"), record.get("provider"), record.get("provider_market_id"),
+                    record.get("question"), record.get("trigger"),
+                    record.get("sources_requested", 0), record.get("sources_fetched", 0),
+                    record.get("sources_accepted", 0), record.get("sources_rejected", 0),
+                    record.get("claims_extracted", 0), record.get("claims_deduplicated", 0),
+                    record.get("claims_linked", 0), record.get("claims_rejected", 0),
+                    record.get("independent_source_groups", 0), record.get("primary_source_count", 0),
+                    record.get("data_gaps_before"), record.get("data_gaps_after"),
+                    record.get("evidence_before"), record.get("evidence_after"),
+                    record.get("model_hypothesis_before"), record.get("model_hypothesis_after"),
+                    record.get("evidence_backed_before"), record.get("evidence_backed_after"),
+                    record.get("published_forecast_before"), record.get("published_forecast_after"),
+                    record.get("final_status"), record.get("duration_ms"),
+                    record.get("cost_usd", 0.0),
+                    json.dumps(record.get("detail")) if record.get("detail") is not None else None,
+                ),
+            )
+            self.connection.commit()
+            return cur.lastrowid
+        except sqlite3.Error:
+            return None
+
+    def get_research_runs(self, provider_market_id: str | None = None, limit: int = 50) -> list[dict]:
+        """Real, persisted research-run history — the API/CLI-retrievable
+        Observability surface (not just log lines)."""
+        try:
+            if provider_market_id:
+                rows = self.connection.execute(
+                    "SELECT * FROM research_runs WHERE provider_market_id = ? ORDER BY run_at DESC LIMIT ?",
+                    (provider_market_id, limit),
+                ).fetchall()
+            else:
+                rows = self.connection.execute(
+                    "SELECT * FROM research_runs ORDER BY run_at DESC LIMIT ?", (limit,)
+                ).fetchall()
+            cols = [d[0] for d in self.connection.execute("SELECT * FROM research_runs LIMIT 0").description]
+            return [dict(zip(cols, row, strict=True)) for row in rows]
+        except sqlite3.Error:
+            return []
+
     def save_counter_evidence(
         self, claim_id: str, contradicts_claim_id: str,
         source_id: str | None = None, source_url: str | None = None,

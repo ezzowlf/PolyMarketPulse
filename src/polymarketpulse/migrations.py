@@ -1111,6 +1111,53 @@ def _migration_023_prediction_snapshot_no_forecast_reason(conn: sqlite3.Connecti
     conn.commit()
 
 
+def _migration_024_research_runs(conn: sqlite3.Connection) -> None:
+    """Live Evidence Engine Observability: one persisted, queryable row per
+    real research run against one market (source fetch -> claim extraction
+    -> market linking -> evidence -> resolution path -> forecast recompute),
+    per the project owner's explicit requirement that this be persistent/
+    API-retrievable, not just log lines. Every count here is a real,
+    already-computed before/after delta from the actual pipeline run — no
+    field is fabricated when a stage didn't run (NULL/0, honestly)."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS research_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_at TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            provider_market_id TEXT NOT NULL,
+            question TEXT,
+            trigger TEXT,
+            sources_requested INTEGER DEFAULT 0,
+            sources_fetched INTEGER DEFAULT 0,
+            sources_accepted INTEGER DEFAULT 0,
+            sources_rejected INTEGER DEFAULT 0,
+            claims_extracted INTEGER DEFAULT 0,
+            claims_deduplicated INTEGER DEFAULT 0,
+            claims_linked INTEGER DEFAULT 0,
+            claims_rejected INTEGER DEFAULT 0,
+            independent_source_groups INTEGER DEFAULT 0,
+            primary_source_count INTEGER DEFAULT 0,
+            data_gaps_before INTEGER,
+            data_gaps_after INTEGER,
+            evidence_before INTEGER,
+            evidence_after INTEGER,
+            model_hypothesis_before REAL,
+            model_hypothesis_after REAL,
+            evidence_backed_before REAL,
+            evidence_backed_after REAL,
+            published_forecast_before REAL,
+            published_forecast_after REAL,
+            final_status TEXT,
+            duration_ms INTEGER,
+            cost_usd REAL DEFAULT 0.0,
+            detail_json TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_research_runs_market ON research_runs(provider, provider_market_id);
+        CREATE INDEX IF NOT EXISTS idx_research_runs_run_at ON research_runs(run_at);
+    """)
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1135,6 +1182,7 @@ MIGRATIONS: list[Migration] = [
     (21, "claim_resolution_step", _migration_021_claim_resolution_step),
     (22, "prediction_snapshot_forecast_semantics", _migration_022_prediction_snapshot_forecast_semantics),
     (23, "prediction_snapshot_no_forecast_reason", _migration_023_prediction_snapshot_no_forecast_reason),
+    (24, "research_runs", _migration_024_research_runs),
 ]
 
 
