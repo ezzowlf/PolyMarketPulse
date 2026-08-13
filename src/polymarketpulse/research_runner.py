@@ -483,6 +483,15 @@ def run_research_for_market(
         detail={
             "gdelt_query": query,
             "source_fetch_status": source_fetch_status,
+            # Routing is explicit and audit-visible.  A targeted primary
+            # route is only listed when it was actually applicable/attempted;
+            # GDELT remains discovery, never a fake substitute for it.
+            "source_attempts": [
+                *([{"provider": "govtrack", "role": "primary", "status": legislation_result.get("fetch_status", "NOT_APPLICABLE"), "reason": "legislation resolution status"}] if legislation_result.get("attempted") else []),
+                *([{"provider": "imf_portwatch", "role": "primary", "status": chokepoint_result.get("fetch_status", "NOT_APPLICABLE"), "reason": "resolution-relevant chokepoint transit data"}] if chokepoint_result.get("attempted") else []),
+                {"provider": "gdelt", "role": "discovery", "status": source_fetch_status, "reason": "market-specific discovery query"},
+            ],
+            "alternative_providers": [],
             "legislation": legislation_result,
             "chokepoint": chokepoint_result,
             "groups_before": groups_before, "primary_before": primary_before,

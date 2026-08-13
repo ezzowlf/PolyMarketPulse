@@ -5,6 +5,7 @@ record."""
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -103,6 +104,9 @@ def test_real_run_fetches_sources_extracts_claims_and_persists_observability(sto
     assert len(rows) == 1
     assert rows[0]["sources_fetched"] == 2
     assert rows[0]["claims_extracted"] == record.claims_extracted
+    detail = json.loads(rows[0]["detail_json"])
+    assert detail["source_attempts"][-1]["provider"] == "gdelt"
+    assert detail["source_attempts"][-1]["role"] == "discovery"
 
 
 def test_second_identical_run_does_not_duplicate_sources_or_claims(storage: Storage) -> None:

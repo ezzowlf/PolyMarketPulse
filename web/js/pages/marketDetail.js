@@ -224,6 +224,12 @@ function _headlinePanelHtml(market, opp, pred) {
       <table><thead><tr><th>Prüfung</th><th>Status</th><th>Begründung</th></tr></thead><tbody>${maturityRows}</tbody></table>
     </details>
   ` : "";
+  const availability = p.source_availability;
+  const sourceNotice = availability && availability.status === "SOURCE_UNREACHABLE" ? `
+    <div class="empty-state" style="border-left:4px solid #c9912f; margin-top:12px">
+      <strong>⚠ ${availability.title}</strong><br/><span class="sub">${availability.message}</span>
+      <details><summary>Technische Details</summary><p class="sub">Betroffene Quelle(n): ${(availability.provider_attempts || []).filter((a) => a.status === "SOURCE_FETCH_FAILED").map((a) => a.provider).join(", ") || "unbekannt"}<br/>Letzter erfolgreicher Abruf: ${fmtDate(availability.last_successful_fetch)}<br/>Letzter Fehlversuch: ${fmtDate(availability.last_failed_fetch)}<br/>Status: ${availability.retry_status || "–"}; nächste Prüfung: ${fmtDate(availability.next_check_at)}</p></details>
+    </div>` : "";
   return `
     <h2 style="margin:0 0 12px">${market.question}</h2>
     <div class="widget-grid">
@@ -235,6 +241,7 @@ function _headlinePanelHtml(market, opp, pred) {
       ${widgetCard({ title: "DEADLINE", value: deadlineValue })}
     </div>
     ${decisionReasons}
+    ${sourceNotice}
     ${maturityDetails}
     <p class="sub">Modellhypothese (intern, nicht veröffentlicht): ${modelHypothesis} · Status: ${statusLabel}</p>
     ${!forecastPublished ? `<p class="sub">Keine ausreichende unabhängige Evidenz für eine veröffentlichbare Prognose.</p>` : ""}

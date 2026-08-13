@@ -1107,7 +1107,10 @@ def ai_ask(payload: AskRequest, storage: Storage = Depends(get_storage)) -> AIAn
 def prediction(market_id: str, storage: Storage = Depends(get_storage)) -> dict:
     """The binding statistical prediction only — no AI call, no cost. This
     is what GPT-5 nano is only ever allowed to explain, never invent."""
-    return ai_service.get_prediction(storage, market_id).as_dict()
+    result = ai_service.get_prediction(storage, market_id).as_dict()
+    from .research_status import source_availability
+    result["source_availability"] = source_availability(storage, market_id)
+    return result
 
 
 @app.get("/change-attribution/{market_id}")
@@ -1128,7 +1131,10 @@ def ai_explain_recommendation(market_id: str, storage: Storage = Depends(get_sto
     GPT-5 nano only if there is no valid cached explanation for the current
     prediction/data snapshot."""
     settings = Settings.load()
-    return ai_service.explain_recommendation(storage, settings, market_id)
+    response = ai_service.explain_recommendation(storage, settings, market_id)
+    from .research_status import source_availability
+    response.prediction["source_availability"] = source_availability(storage, market_id)
+    return response
 
 
 @app.post("/ai/explain-recommendation/{market_id}/recompute")
