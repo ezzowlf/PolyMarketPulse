@@ -48,6 +48,7 @@ from .market_flow import load_flow_metrics_from_db
 from .maturity import build_maturity_breakdown, classify_forecast_maturity
 from .momentum import compute_momentum_estimate
 from .news import collect_news_evidence, compute_news_estimate
+from .next_event import derive_next_event
 from .reaction_lag import STATUS_REACTED, compute_market_reaction_lag
 from .reliability import compute_market_reliability
 from .resolution_edge import compute_resolution_edge
@@ -1093,6 +1094,20 @@ def compute_prediction(
         data_gap_report=data_gaps,
     )
 
+    # Phase F: Next Event Engine -- the most likely next resolution-relevant
+    # event, derived purely from the same real ResolutionPath used above
+    # plus the real PATH_STEP claims (for supporting_claim_ids/source_ids).
+    # Never an LLM guess; UNKNOWN/None is the honest default for the
+    # majority of markets with no known multi-step template.
+    next_event = derive_next_event(
+        resolution_path=(
+            world_state.path_to_resolution.resolution_path
+            if world_state is not None and world_state.path_to_resolution is not None
+            else None
+        ),
+        path_step_claims=independent_evidence.path_step_claims if independent_evidence is not None else (),
+    )
+
     # Block F Part 1: compute change_triggers HERE (moved up from its
     # original post-result location — world_state/data_gaps/divergence_audit
     # are all already real values by this point) so build_scenarios can
@@ -1182,6 +1197,7 @@ def compute_prediction(
         proposition=proposition,
         resolution_semantics=resolution_semantics,
         structured_world_state=structured_world_state,
+        next_event=next_event,
     )
     # Phase F: evidence-gated forecast hierarchy
     # evidence_backed_probability: only when sufficient evidence exists

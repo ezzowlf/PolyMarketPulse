@@ -523,7 +523,9 @@ def _structured_path_step_claims(
         temporal_status = get_claim_temporal_status(conn, claim_id, "PATH_STEP", ts, now)
         if temporal_status in (STATUS_SUPERSEDED, STATUS_DISPUTED):
             continue
-        claims.append({"resolution_step": step, "source": source, "timestamp": ts, "detail": predicate})
+        claims.append(
+            {"claim_id": claim_id, "resolution_step": step, "source": source, "timestamp": ts, "detail": predicate}
+        )
     return tuple(claims)
 
 

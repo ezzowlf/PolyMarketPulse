@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from .evidence import IndependentEvidenceResult
     from .manipulation import ManipulationRiskResult
     from .market_flow import OrderBookMetrics, TradeFlowMetrics, WalletConcentrationMetrics
+    from .next_event import NextEvent
     from .reaction_lag import ReactionLagResult
     from .reliability import MarketReliabilityResult
     from .resolution_edge import ResolutionEdgeResult
@@ -540,6 +541,14 @@ class PredictionResult:
     # when world_state could not be assembled at all.
     structured_world_state: StructuredWorldState | None = None
 
+    # --- Phase F: Next Event Engine (additive) -------------------------------
+    # The most likely next resolution-relevant event, derived purely from the
+    # real ResolutionPath (next_event.py) -- never an LLM guess. None only
+    # when structured_world_state itself could not be assembled; status
+    # "UNKNOWN"/next_event_type None is the honest default for the majority
+    # of markets with no known multi-step resolution template.
+    next_event: NextEvent | None = None
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -612,4 +621,5 @@ class PredictionResult:
             "structured_world_state": (
                 self.structured_world_state.as_dict() if self.structured_world_state else None
             ),
+            "next_event": self.next_event.as_dict() if self.next_event else None,
         }
