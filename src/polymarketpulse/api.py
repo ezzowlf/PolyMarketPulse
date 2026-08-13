@@ -1146,6 +1146,9 @@ def ai_explain_recommendation(market_id: str, storage: Storage = Depends(get_sto
     from .research_status import source_availability
     response.prediction["source_availability"] = source_availability(storage, market_id)
     response.prediction["early_signals"] = storage.get_social_signals(market_id)
+    audited = prediction(market_id, storage)
+    response.prediction["lineage"] = audited["lineage"]
+    response.prediction["coherence"] = audited["coherence"]
     return response
 
 
@@ -1157,7 +1160,10 @@ def ai_explain_recommendation_recompute(
     """Forces a fresh analysis, bypassing the cache — still subject to the
     same cost budget and validation as any other call."""
     settings = Settings.load()
-    return ai_service.explain_recommendation(storage, settings, market_id, force_recompute=True)
+    response = ai_service.explain_recommendation(storage, settings, market_id, force_recompute=True)
+    audited = prediction(market_id, storage)
+    response.prediction.update({key: audited[key] for key in ("source_availability", "early_signals", "lineage", "coherence")})
+    return response
 
 
 @app.get("/ai/cost-report")
