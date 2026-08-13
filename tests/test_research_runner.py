@@ -161,3 +161,43 @@ def test_recurring_research_respects_limit_and_cost_budget(storage: Storage) -> 
     with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "OK")):
         records = run_recurring_research(storage, settings, limit=2)
     assert len(records) == 2  # real limit respected, not all 3 candidates run
+
+
+def test_legislation_market_fetches_and_persists_a_real_govtrack_claim(storage: Storage) -> None:
+    """Real, targeted second-source integration for legislation-shaped
+    markets: a question containing a real bill number ("H.R.3633") must
+    trigger a real GovTrack fetch and persist a PRIMARY_CONFIRMED claim
+    with a real resolution_step, distinct from the generic GDELT path."""
+    from polymarketpulse.providers.govtrack import BillStatus
+
+    market_row = _seed_market(storage)
+    storage.connection.execute(
+        "UPDATE markets SET question = ? WHERE market_id = 'rr-1'",
+        ("Clarity Act (H.R.3633) signed into law in 2026?",),
+    )
+    storage.connection.commit()
+    market_row["question"] = "Clarity Act (H.R.3633) signed into law in 2026?"
+    settings = Settings.load()
+
+    fake_status = BillStatus(
+        congress=119, bill_type="house_bill", number=3633, display_number="H.R. 3633",
+        title="H.R. 3633: Digital Asset Market Clarity Act",
+        current_status="pass_over_house", current_status_label="Passed House (Senate next)",
+        current_status_description="", current_status_date=None, introduced_date=None,
+        is_alive=True, link="https://www.govtrack.us/congress/bills/119/hr3633",
+        major_actions=(), fetched_at=datetime.now(UTC),
+    )
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "OK")), \
+         patch("polymarketpulse.providers.govtrack.fetch_bill_status", return_value=fake_status):
+        record = run_research_for_market(storage, settings, market_row, trigger="test")
+
+    assert record.detail["legislation"]["attempted"] is True
+    assert record.detail["legislation"]["fetch_status"] == "OK"
+    assert record.detail["legislation"]["resolution_step"] == "house_vote"
+
+    row = storage.connection.execute(
+        "SELECT source_id, verification_status, resolution_step FROM claims WHERE source_id = 'govtrack'"
+    ).fetchone()
+    assert row is not None
+    assert row[1] == "PRIMARY_CONFIRMED"
+    assert row[2] == "house_vote"

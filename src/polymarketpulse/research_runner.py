@@ -17,6 +17,7 @@ happened — real before/after counts, never fabricated, never estimated.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -94,6 +95,88 @@ class ResearchRunObservability:
         return d
 
 
+# Real GovTrack current_status slug -> our own resolution_step vocabulary
+# (world_state.py's ResolutionStep names). GovTrack's status field is
+# already a well-defined, government-sourced slug (not free text), so this
+# is an exact real mapping, not a fuzzy keyword guess.
+_GOVTRACK_STATUS_TO_STEP = {
+    "introduced": "introduced",
+    "referred": "introduced",
+    "reported": "committee",
+    "prov_kill_committee": "committee",
+    "pass_over_house": "house_vote",
+    "pass_over_senate": "senate_vote",
+    "pass_back_house": "house_vote",
+    "pass_back_senate": "senate_vote",
+    "conference_passed_house": "house_vote",
+    "conference_passed_senate": "senate_vote",
+    "enacted_signed": "presidential_action",
+    "enacted_veto_override": "presidential_action",
+    "vetoed": "presidential_action",
+    "prov_kill_veto": "presidential_action",
+}
+
+_BILL_NUMBER_RE = re.compile(r"H\.?\s?R\.?\s?(\d{2,5})", re.IGNORECASE)
+
+
+def _fetch_and_persist_legislation_claim(storage: Storage, question: str) -> dict:
+    """Real, targeted official-source fetch for legislation-shaped markets:
+    extracts a real bill number from the question text (e.g. "H.R.3633"),
+    fetches that bill's REAL current status from GovTrack's public API
+    (providers/govtrack.py -- the same free, keyless, government-sourced
+    integration built and verified in an earlier round but never actually
+    wired into a real research run before this), and persists it as a real,
+    stable, PRIMARY_CONFIRMED claim.
+
+    This is intentionally scoped: it persists a real official claim (real
+    resolution_step, real government source citation) but does NOT feed it
+    through compute_independent_evidence's news-article pipeline, which is
+    structurally article/news_market_links-shaped and has no path for a
+    structured official data point today -- documented as a real, honest
+    architectural gap for a future round rather than force-fit here.
+
+    Returns a real summary dict for Observability; never raises -- a
+    fetch/parse failure just means no claim this run, not a broken run."""
+    match = _BILL_NUMBER_RE.search(question or "")
+    if match is None:
+        return {"attempted": False}
+
+    from .providers.govtrack import BILL_TYPE_HOUSE_BILL, fetch_bill_status
+
+    number = int(match.group(1))
+    status = fetch_bill_status(119, BILL_TYPE_HOUSE_BILL, number)
+    if status is None:
+        return {"attempted": True, "fetch_status": "SOURCE_FETCH_FAILED", "bill_number": number}
+
+    import hashlib as _hashlib
+
+    from .claims import Claim
+
+    step_name = _GOVTRACK_STATUS_TO_STEP.get(status.current_status)
+    predicate = f"{status.current_status_label} (as of {status.current_status_date})"
+    claim_id = _hashlib.sha256(
+        f"govtrack:{status.congress}:{status.bill_type}:{status.number}:{status.current_status}".encode()
+    ).hexdigest()[:32]
+    claim = Claim(
+        claim_id=claim_id, subject=status.title or f"H.R.{number}", predicate=predicate, object=None,
+        speaker=None, source_id="govtrack", source_url=status.link,
+        timestamp=datetime.combine(status.current_status_date, datetime.min.time(), tzinfo=UTC)
+        if status.current_status_date else None,
+        verification_status="PRIMARY_CONFIRMED", confidence=0.95,
+        entities=(status.title or "",), location=None,
+        raw_reference=f"{status.current_status}; major_actions={len(status.major_actions)}",
+        event_type="legislative_progress", direction="positive" if status.is_alive else "negative",
+        resolution_step=step_name,
+    )
+    newly_inserted = storage.save_claim(claim)
+    storage.save_claim_source(claim.claim_id, "govtrack", status.link, claim.timestamp.isoformat() if claim.timestamp else None)
+    return {
+        "attempted": True, "fetch_status": "OK", "bill_number": number,
+        "current_status": status.current_status, "resolution_step": step_name,
+        "claim_newly_inserted": newly_inserted, "source_url": status.link,
+    }
+
+
 def run_research_for_market(
     storage: Storage,
     settings,
@@ -121,6 +204,10 @@ def run_research_for_market(
 
     pred_before = get_prediction(storage, market_id)
     groups_before, primary_before = _independent_groups_and_primary(pred_before)
+
+    # --- Real, targeted official-source fetch for legislation-shaped
+    # markets (e.g. "H.R.3633") — GovTrack, not another GDELT query.
+    legislation_result = _fetch_and_persist_legislation_claim(storage, question)
 
     # --- Real source fetch, scoped to this one market -----------------
     sources_requested = 1  # one real GDELT query for this market's own question
@@ -199,6 +286,7 @@ def run_research_for_market(
         detail={
             "gdelt_query": query,
             "source_fetch_status": source_fetch_status,
+            "legislation": legislation_result,
             "groups_before": groups_before, "primary_before": primary_before,
         },
     )

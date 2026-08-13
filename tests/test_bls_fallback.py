@@ -91,12 +91,41 @@ def test_fred_falls_back_to_bls_when_fred_cpi_fetch_fails() -> None:
     assert snapshot.unemployment_rate == 4.0  # came from the real BLS fallback
 
 
-def test_fred_snapshot_stays_none_when_policy_rate_unavailable_even_with_bls_fallback() -> None:
-    """Policy rate has no keyless fallback source — a FRED failure there
-    must still leave the whole snapshot honestly unavailable, never a
-    snapshot with a fabricated/stale policy rate."""
+def test_fred_falls_back_to_nyfed_for_policy_rate() -> None:
+    """Policy rate now has a real fallback too (providers/nyfed.py, the NY
+    Fed's own public EFFR API) — a FRED failure there must trigger a real
+    NY Fed fetch attempt rather than leaving the snapshot unavailable
+    outright, exactly mirroring the existing BLS fallback pattern for
+    CPI/unemployment."""
+    real_cpi = [(date(2025, m, 1), 320.0 + m) for m in range(1, 13)] + [
+        (date(2026, m, 1), 330.0 + m) for m in range(1, 8)
+    ]
+    real_unrate = [(date(2026, m, 1), 4.0) for m in range(1, 8)]
+    nyfed_effr = [(date(2026, 8, 12), 3.63)]
+
+    with patch("polymarketpulse.providers.fred._fetch_series_csv") as mock_fred_fetch, \
+         patch("polymarketpulse.providers.nyfed.fetch_effr", return_value=nyfed_effr) as mock_nyfed, \
+         patch("polymarketpulse.providers.bls.fetch_cpi_index_series", return_value=real_cpi), \
+         patch("polymarketpulse.providers.bls.fetch_unemployment_rate_series", return_value=real_unrate):
+
+        def fred_side_effect(series_id: str, timeout: float = 10.0):
+            return None  # FRED fully unreachable this run
+
+        mock_fred_fetch.side_effect = fred_side_effect
+        snapshot = fred.fetch_macro_snapshot()
+
+    assert mock_nyfed.called
+    assert snapshot is not None
+    assert snapshot.policy_rate == 3.63  # came from the real NY Fed fallback
+
+
+def test_fred_snapshot_stays_none_when_all_real_sources_fail() -> None:
+    """Even with three independent real sources (FRED, BLS, NY Fed), a
+    genuine total outage must still leave the snapshot honestly
+    unavailable — never a fabricated/stale value for any series."""
     with patch("polymarketpulse.providers.fred._fetch_series_csv", return_value=None), \
-         patch("polymarketpulse.providers.bls.fetch_cpi_index_series", return_value=[(date(2026, 1, 1), 320.0)]), \
-         patch("polymarketpulse.providers.bls.fetch_unemployment_rate_series", return_value=[(date(2026, 1, 1), 4.0)]):
+         patch("polymarketpulse.providers.nyfed.fetch_effr", return_value=None), \
+         patch("polymarketpulse.providers.bls.fetch_cpi_index_series", return_value=None), \
+         patch("polymarketpulse.providers.bls.fetch_unemployment_rate_series", return_value=None):
         snapshot = fred.fetch_macro_snapshot()
     assert snapshot is None

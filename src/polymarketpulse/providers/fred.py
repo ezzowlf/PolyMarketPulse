@@ -205,14 +205,20 @@ def fetch_macro_snapshot(timeout: float = 10.0) -> MacroSnapshot | None:
     CPI/unemployment have a real fallback: if FRED's own copy fails to
     fetch, this falls back to BLS's public API (`providers/bls.py`),
     which publishes the same underlying government statistics via a
-    different, independently-reachable host. There is no equivalent
-    keyless fallback for the Fed Funds policy rate itself, so a FRED
-    failure there still leaves the whole snapshot unavailable (rather
-    than publishing a snapshot with a fabricated or stale policy rate)."""
+    different, independently-reachable host. The Fed Funds policy rate
+    now has a real fallback too (`providers/nyfed.py`): the Federal
+    Reserve Bank of New York's own public reference-rates API, which
+    publishes the real, official daily Effective Federal Funds Rate
+    (EFFR) — an authoritative primary source, not a proxy. If FRED is
+    down AND the NY Fed API is also unreachable, the snapshot still
+    correctly stays unavailable rather than fabricating/staling a rate."""
     fedfunds = _fetch_series_csv(SERIES_FEDFUNDS, timeout=timeout)
     cpi = _fetch_series_csv(SERIES_CPI, timeout=timeout)
     unrate = _fetch_series_csv(SERIES_UNRATE, timeout=timeout)
 
+    if fedfunds is None:
+        from . import nyfed
+        fedfunds = nyfed.fetch_effr(timeout=timeout)
     if cpi is None:
         from . import bls
         cpi = bls.fetch_cpi_index_series(timeout=timeout)
