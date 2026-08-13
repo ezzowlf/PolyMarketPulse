@@ -1,6 +1,22 @@
 # HANDOFF
 
-## THIS ROUND (newest) — Future Intelligence Layer Phase F closed (Next Event Engine); pushed to origin/master
+## THIS ROUND (newest) — Future Intelligence Layer Phases G, H, I closed (Event Clock, Expected vs Observed, Conditional Transition Engine); pushed to origin/master
+
+Continuing directly from Phase F (previous round, pushed as `e9c4eec`). Per standing instruction: no interim question, push after each validated checkpoint.
+
+**Phase G — Event Clock (commit `6e2f386`)**: new `prediction/event_clock.py::derive_event_clock()`. No fabricated durations -- `estimated_minimum/typical_path_time_hours` stay honestly `None` (no real per-step duration dataset exists in this codebase). The one deterministic thing derivable without any duration model: `path_feasibility="IMPOSSIBLE"` from a plain `time_remaining_hours <= 0` comparison while real required work remains. `deadline_pressure`/`path_feasibility` (non-impossible case) reuse the same real values `world_state.py` already computes. Live-verified: Clarity Act → `path_feasibility=HIGH`, `required_steps_remaining=2`; Hormuz → honestly `UNKNOWN` (GEOPOLITICS template has no confirmed step data yet).
+
+**Phase H — Expected vs Observed (commit `561cb05`)**: new `prediction/expected_vs_observed.py::derive_expected_vs_observed()`. `lateness_hours` only ever a real `(deadline - now)` delta when the clock has genuinely expired with real work remaining; otherwise honestly `None`/`lateness_state="UNKNOWN"` rather than a fabricated `ON_TRACK`. `observed_at` for a completed step comes from the real `ResolutionStep.timestamp`. Live-verified: both Clarity Act and Hormuz honestly report `UNKNOWN` (real deadline pressure is LOW/MEDIUM, not HIGH/CRITICAL).
+
+**Phase I — Conditional Transition Engine (commit `b522735`)**: new `prediction/conditional_transitions.py::derive_conditional_transitions()`. This codebase has no real historical per-step transition-rate dataset, so every transition is honestly `calibration_state="QUALITATIVE_ONLY"` with `conditional_probability=None` -- real, shaped infrastructure for a future round (once Phase Z's retrospective learning produces real resolved-market data) to populate with empirical rates, never a fabricated percentage today. Live-verified: Clarity Act produces exactly the reference case from the order -- `HOUSE_VOTE→SENATE_VOTE` and `SENATE_VOTE→PRESIDENTIAL_ACTION`, both `QUALITATIVE_ONLY`.
+
+All three wired into `engine.py` in sequence (next_event → event_clock → expected_vs_observed → conditional_transitions) and exposed on `PredictionResult`.
+
+**Verification**: 985 → 992 → 997 → 1002 tests passing across the three phases, ruff clean at every checkpoint. `HEAD == origin/master == b522735` as of this entry.
+
+**NÄCHSTE PHASE = J (Scenario Tree)** — turn a real ResolutionPath into an explicit future-branch tree (trigger/prerequisites/blockers/supporting+contradicting claims/expected timing/terminal outcome per branch; conditional probability only where seriously derivable — which, per Phase I, is currently nowhere, so branches will honestly carry no probability yet). Must NOT live separately from World State (explicit instruction) — build it as a derived view over the same `ResolutionPath`/`StructuredWorldState`/`ConditionalTransition` objects already computed, not a new parallel model. Phases K through Z remain honestly not started. Continuing directly with Phase J next turn, no interim question, per the standing instruction.
+
+## PRIOR ROUND — Future Intelligence Layer Phase F closed (Next Event Engine); pushed to origin/master
 
 Continuing directly from Phases C/D/E (previous round, pushed as `3273685`). Per standing instruction: no interim question, push after each validated checkpoint.
 
