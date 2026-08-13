@@ -1113,6 +1113,7 @@ def prediction(market_id: str, storage: Storage = Depends(get_storage)) -> dict:
     result["early_signals"] = storage.get_social_signals(market_id)
     from .lineage import audit_market_lineage
     result["lineage"] = audit_market_lineage(storage.connection, market_id)
+    storage.save_lineage_audit(market_id, result["lineage"])
     relations = storage.connection.execute("SELECT id,market_id_a,market_id_b,relation_type,confidence,evidence_detail FROM market_relationships WHERE market_id_a=? OR market_id_b=?", (market_id, market_id)).fetchall()
     warnings = []
     for rel_id, a, b, relation_type, confidence, detail in relations:

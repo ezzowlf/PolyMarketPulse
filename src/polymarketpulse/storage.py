@@ -2121,6 +2121,25 @@ class Storage:
         except sqlite3.Error:
             return None
 
+    def save_lineage_audit(self, market_id: str, report: dict) -> None:
+        """Persist the actual lineage-audit result, deduplicated per latest
+        forecast snapshot/status so ordinary API reads do not create noise."""
+        try:
+            snapshot_id = report.get("snapshot_id")
+            existing = self.connection.execute(
+                "SELECT 1 FROM lineage_audits WHERE market_id=? AND snapshot_id IS ? AND status=? LIMIT 1",
+                (market_id, snapshot_id, report.get("status")),
+            ).fetchone()
+            if existing:
+                return
+            self.connection.execute(
+                "INSERT INTO lineage_audits(market_id,snapshot_id,audited_at,status,severity,detail_json) VALUES(?,?,?,?,?,?)",
+                (market_id, snapshot_id, datetime.now(UTC).isoformat(), report.get("status"), report.get("severity"), json.dumps(report)),
+            )
+            self.connection.commit()
+        except sqlite3.Error:
+            pass
+
     def social_reputation(self, provider: str) -> dict:
         """Discovery reputation, intentionally separate from evidence authority."""
         rows = self.connection.execute("SELECT signal_status,origin_cluster FROM social_signals WHERE provider=?", (provider,)).fetchall()

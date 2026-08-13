@@ -29,4 +29,8 @@ def test_lineage_marks_published_forecast_without_claim_as_broken(tmp_path: Path
     storage.save_prediction_snapshot("m", "polymarket", "m", None, "v", .5, .6, .1, 50, "WATCH", 1, published_forecast_probability=.6)
     storage.connection.commit()
     assert audit_market_lineage(storage.connection, "m")["status"] == "BROKEN"
+    report = audit_market_lineage(storage.connection, "m")
+    storage.save_lineage_audit("m", report)
+    storage.save_lineage_audit("m", report)
+    assert storage.connection.execute("SELECT COUNT(*) FROM lineage_audits").fetchone()[0] == 1
     storage.close()
