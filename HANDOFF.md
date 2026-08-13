@@ -1,6 +1,18 @@
 # HANDOFF
 
-## THIS ROUND (newest) — Future Intelligence Layer Phases C, D, E closed (Event Graph write path, Temporal State, Structured World State); pushed to origin/master
+## THIS ROUND (newest) — Future Intelligence Layer Phase F closed (Next Event Engine); pushed to origin/master
+
+Continuing directly from Phases C/D/E (previous round, pushed as `3273685`). Per standing instruction: no interim question, push after each validated checkpoint.
+
+**Phase F — Next Event Engine (commit `a24aee4`)**: new `prediction/next_event.py::derive_next_event()` names the single most likely next resolution-relevant event, derived purely from the real `ResolutionPath` (Phase B templates) plus real `PATH_STEP` claims for `supporting_claim_ids`/`source_ids` — never an LLM guess, never a fabricated event. `current_state` (the first entry in every template) is never itself selectable as a next event since it describes now, not a future occurrence. Status taxonomy `EXPECTED`/`PLAUSIBLE`/`BLOCKED`/`UNKNOWN`/`ALREADY_OCCURRED` derived from the step's own real status plus whether an earlier step is itself still open. `evidence.py::_structured_path_step_claims` now also carries `claim_id` per claim (additive) so `supporting_claim_ids` can be populated honestly rather than left permanently empty. Wired into `engine.py` right after Phase E's `structured_world_state`, exposed as `PredictionResult.next_event`.
+
+**Live-verified against the real production DB**: Clarity Act (`1163699`) → `next_event_type=SENATE_VOTE`, `status=PLAUSIBLE`, `confidence=0.5`, `resolution_relevance=1.0` — exactly the reference case the order specified. Hormuz (`2774056`) → `next_event_type=ESCALATION` from the real GEOPOLITICS template (all steps honestly unknown, so `current_state` correctly skipped, `escalation` correctly picked as the first real event-eligible step).
+
+**Verification**: 976 → 985 tests passing (9 new), ruff clean, `HEAD == origin/master == a24aee4`.
+
+**NÄCHSTE PHASE = G (Event Clock)** — deadline/time_remaining/remaining_required_steps/minimum_path_time/expected_path_time/schedule_slack/deadline_pressure (already partially exists on `ResolutionPath`)/path_feasibility, qualitative when no real numeric duration is available. Phases H through Z remain honestly not started. Continuing directly with Phase G next turn, no interim question, per the standing instruction.
+
+## PRIOR ROUND — Future Intelligence Layer Phases C, D, E closed (Event Graph write path, Temporal State, Structured World State); pushed to origin/master
 
 Continuing directly from Phases A+B (previous round, commits `3a527f4`/`6935a34`, pushed as `0f8d216`). Per explicit standing instruction: no interim reports between phases, push automatically after each validated integrated state.
 
