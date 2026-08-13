@@ -188,9 +188,12 @@ def markets(
         params.append(f"%{search}%")
     if active_only:
         # Resolved/cancelled markets are useful for evaluation, but should not
-        # dominate the default discovery view.  Unresolved markets past their
-        # expected deadline remain visible: they may be awaiting settlement.
+        # dominate the default discovery view.  A short settlement grace
+        # period keeps genuinely pending resolutions visible without showing
+        # long-stale, unresolved sports/event contracts as live opportunities.
         conditions.append("(m.resolution_status IS NULL OR UPPER(m.resolution_status) NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED'))")
+        conditions.append("(m.end_date IS NULL OR m.end_date >= ?)")
+        params.append((datetime.now(UTC) - timedelta(days=2)).isoformat())
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
     # Latest snapshot per market for liquidity/volume/score filtering & display,
