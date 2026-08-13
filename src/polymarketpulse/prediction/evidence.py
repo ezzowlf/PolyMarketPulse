@@ -211,12 +211,26 @@ class IndependentEvidenceResult:
         }
 
 
-def _unavailable(detail: str) -> IndependentEvidenceResult:
+def _unavailable(
+    detail: str, factors: tuple = (),
+) -> IndependentEvidenceResult:
+    """`factors`, when passed, are real already-extracted EvidenceFactor
+    items (e.g. the one real linked article for a Hormuz-shaped market) —
+    kept visible to the UI as evidence_for_yes/no/discarded even though the
+    probability itself correctly stays unavailable, per the explicit
+    requirement that "1 relevante Quelle vorhanden, unabhängige Bestätigung
+    fehlt" be a real, inspectable statement rather than a generic "zu wenig
+    Daten" with nothing to show for it."""
+    evidence_for_yes = tuple(f for f in factors if f.matched_condition == "yes")
+    evidence_for_no = tuple(f for f in factors if f.matched_condition == "no")
+    discarded = tuple(f for f in factors if f.matched_condition is None)
     return IndependentEvidenceResult(
         available=False, independent_yes_probability=None, confirmation_count=0,
         source_quality_score=None, time_since_first_report_hours=None,
         contradiction_detected=False, breaking=False, information_edge_score=None,
         divergence=None, detail=detail,
+        evidence_for_yes=evidence_for_yes, evidence_for_no=evidence_for_no,
+        discarded_evidence=discarded,
     )
 
 
@@ -640,7 +654,9 @@ def compute_independent_evidence(
         # independent confirmation to move a probability.
         return _unavailable(
             "keine unabhängige Schätzung möglich — zu wenige verknüpfte öffentliche Primärquellen "
-            f"({len(rows)} gefunden, mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig)."
+            f"({len(rows)} gefunden, mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig). "
+            f"{len(rows)} relevante Quelle(n) vorhanden; unabhängige Bestätigung fehlt.",
+            factors=tuple(factors),
         )
 
     scored = [f for f in factors if f.matched_condition is not None]
@@ -655,7 +671,8 @@ def compute_independent_evidence(
         return _unavailable(
             f"keine unabhängige Schätzung möglich — nur {len(scored)} Nachrichtentreffer mit erkennbarem "
             f"Bezug zur Resolution-Bedingung (mindestens {MIN_EVIDENCE_ITEMS_FOR_ESTIMATE} nötig), "
-            f"von {len(rows)} verknüpften Quellen insgesamt."
+            f"von {len(rows)} verknüpften Quellen insgesamt.",
+            factors=tuple(factors),
         )
 
     # relation_weight (0..1, from semantics.classify_evidence_relation) is

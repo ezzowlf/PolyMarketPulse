@@ -78,6 +78,24 @@ def test_single_linked_news_item_still_extracts_and_persists_a_real_claim(storag
     assert claim_rows[0] >= 1  # but a real claim was extracted and persisted
 
 
+def test_single_article_stays_visible_on_the_unavailable_result(storage: Storage) -> None:
+    """Real requirement: 'eine relevante Quelle vorhanden, unabhängige
+    Bestätigung fehlt' must be a real, inspectable statement — the single
+    real article must still appear in evidence_for_yes/no on the returned
+    (unavailable) result, not be silently discarded just because no
+    probability could be computed from it."""
+    market = _market()
+    _link_news(storage, market, "Ceasefire confirmed by officials", "reuters", "https://reuters.com/a", hours_ago=2)
+    result = compute_independent_evidence(
+        storage.connection, provider="polymarket", provider_market_id="evidence-1",
+        question=market.question, resolution_text=None, market_yes_price=0.9,
+    )
+    assert result.available is False
+    total_visible = len(result.evidence_for_yes) + len(result.evidence_for_no) + len(result.discarded_evidence)
+    assert total_visible == 1
+    assert "relevante Quelle" in result.detail
+
+
 def test_confirming_evidence_from_independent_sources_produces_estimate_not_anchored_to_market_price(
     storage: Storage,
 ) -> None:

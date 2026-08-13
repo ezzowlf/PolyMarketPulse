@@ -664,7 +664,17 @@ function _evidenceSectionHtml(p) {
     ? `${ie.evidence_for_yes.length} YES / ${ie.evidence_for_no.length} NO`
     : "keine verknüpften Quellen";
 
-  const evidenceCards = hasEvidence ? _sourceCardsHtml(ie) : `<div class="empty-state">${noEvidenceMessage}</div>`;
+  // Real, already-found sources must stay visible even when the estimate
+  // itself is unavailable (e.g. exactly 1 relevant article for Hormuz) —
+  // "keine belastbare Prognose" must never mean "nothing to show".
+  const foundButInsufficient = ie
+    ? (ie.evidence_for_yes.length + ie.evidence_for_no.length + (ie.discarded_evidence || []).length) > 0
+    : false;
+  const evidenceCards = hasEvidence
+    ? _sourceCardsHtml(ie)
+    : foundButInsufficient
+      ? `<div class="empty-state">${noEvidenceMessage}</div>${_sourceCardsHtml(ie)}`
+      : `<div class="empty-state">${noEvidenceMessage}</div>`;
 
   const advancedDetails = `
     ${_resolutionEdgeHtml(p.resolution_edge)}
@@ -699,6 +709,11 @@ function _sourceCardsHtml(ie) {
   const items = [
     ...(ie.evidence_for_yes || []).slice(0, 3).map((item) => ({ item, direction: "YES" })),
     ...(ie.evidence_for_no || []).slice(0, 3).map((item) => ({ item, direction: "NO" })),
+    // Real articles that were found and considered but didn't match either
+    // side clearly enough — still shown ("gefunden, aber nicht eindeutig")
+    // rather than silently dropped, so "1 relevante Quelle vorhanden" is a
+    // real, inspectable claim, not just text.
+    ...(ie.discarded_evidence || []).slice(0, 3).map((item) => ({ item, direction: "GEPRÜFT" })),
   ];
   if (!items.length) {
     return `<div class="empty-state">Keine zentralen Quellen gefunden.</div>`;

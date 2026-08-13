@@ -110,4 +110,13 @@ const Api = {
   shadowPositions: (status) => Api._get(`/shadow/positions${status ? `?status=${encodeURIComponent(status)}` : ""}`),
   shadowPerformance: () => Api._get("/shadow/performance"),
   shadowScan: () => Api._send("/shadow/scan", "POST"),
+  coverage: () => Api._get("/coverage"),
+  researchQueue: (limit) => Api._get(`/research-queue${limit ? `?limit=${limit}` : ""}`),
+  researchRuns: (marketId, limit) =>
+    Api._get(
+      `/research-runs?${new URLSearchParams({
+        ...(marketId ? { market_id: marketId } : {}),
+        ...(limit ? { limit: String(limit) } : {}),
+      }).toString()}`
+    ),
 };

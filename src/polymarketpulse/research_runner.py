@@ -258,17 +258,13 @@ def _last_run_info(storage: Storage, provider_market_id: str) -> tuple[datetime 
     return last_run_at, consecutive_failures
 
 
-def run_recurring_research(
-    storage: Storage, settings, limit: int = 10, max_cost_usd: float = 1.0,
-) -> list[ResearchRunObservability]:
-    """Real Recurring Ingestion: ranks all unresolved markets with the
-    existing Research Queue, then runs the top-N through the same
-    run_research_for_market() executor — but SKIPS any market whose real
-    last research_runs row is still within its priority-tiered recheck
-    interval (with real exponential backoff on consecutive source-fetch
-    failures), so unchanged sources are never reprocessed every scan.
-    Called from cli.cmd_scan(--research) -- the EXISTING scan loop, no
-    second parallel scheduler."""
+def build_queue_from_db(storage: Storage):
+    """Real, shared queue-building logic: reads all unresolved markets from
+    the DB, builds real MarketSignal objects (real source-coverage flag
+    from news_market_links), ranks them with the existing
+    research_queue.build_research_queue(). Used by run_recurring_research(),
+    cli.cmd_research_run(), and the read-only /research-queue API endpoint
+    -- one real implementation, not three."""
     from .research_queue import MarketSignal, build_research_queue
 
     unresolved = storage.connection.execute(
@@ -296,8 +292,21 @@ def run_recurring_research(
             time_remaining_hours=None, critical_gap_count=0, high_gap_count=0,
             has_source_coverage=link_count > 0,
         ))
+    return rows_by_id, build_research_queue(signals)
 
-    queue = build_research_queue(signals)
+
+def run_recurring_research(
+    storage: Storage, settings, limit: int = 10, max_cost_usd: float = 1.0,
+) -> list[ResearchRunObservability]:
+    """Real Recurring Ingestion: ranks all unresolved markets with the
+    existing Research Queue, then runs the top-N through the same
+    run_research_for_market() executor — but SKIPS any market whose real
+    last research_runs row is still within its priority-tiered recheck
+    interval (with real exponential backoff on consecutive source-fetch
+    failures), so unchanged sources are never reprocessed every scan.
+    Called from cli.cmd_scan(--research) -- the EXISTING scan loop, no
+    second parallel scheduler."""
+    rows_by_id, queue = build_queue_from_db(storage)
     now = datetime.now(UTC)
     spent = 0.0
     records: list[ResearchRunObservability] = []

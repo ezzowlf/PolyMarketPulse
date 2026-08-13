@@ -411,6 +411,29 @@ def coverage(storage: Storage = Depends(get_storage)) -> dict:
     return compute_coverage(storage).as_dict()
 
 
+@app.get("/research-queue")
+def research_queue(limit: int = 8, storage: Storage = Depends(get_storage)) -> list[dict]:
+    """Compact, real Research Queue preview for the dashboard: top-N real
+    unresolved markets ranked by real priority signal (divergence/deadline/
+    data-gaps), with their real reasons -- the same ranking
+    run_recurring_research() actually executes against, not a separate
+    display-only approximation."""
+    from .research_runner import build_queue_from_db
+
+    rows_by_id, queue = build_queue_from_db(storage)
+    result = []
+    for entry in queue[:limit]:
+        row = rows_by_id.get(entry.market_id, {})
+        result.append({
+            "market_id": entry.market_id,
+            "question": entry.question,
+            "priority_score": entry.priority_score,
+            "reasons": list(entry.reasons),
+            "category": row.get("classified_category") or row.get("category"),
+        })
+    return result
+
+
 @app.get("/research-runs")
 def research_runs(
     market_id: str | None = None, limit: int = 50, storage: Storage = Depends(get_storage)

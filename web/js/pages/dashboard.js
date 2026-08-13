@@ -67,13 +67,76 @@ function _architectureOverviewHtml(marketItems, evalData) {
   `;
 }
 
+// Live Evidence Engine: real, DB-derived coverage numbers (/coverage) —
+// how many of the real unresolved markets actually have sources/claims/
+// forecasts, plus the real top blockers holding the rest back.
+const _BLOCKER_LABELS = {
+  no_sources: "Keine Quellen",
+  no_claims: "Keine Claims",
+  source_fetch_failed: "Quellenabruf fehlgeschlagen",
+  no_primary_source: "Keine Primärquelle",
+  one_independent_group: "Nur eine unabhängige Quelle",
+  resolution_path_unknown: "Resolution Path unbekannt",
+  insufficient_evidence: "Zu wenig Evidence",
+  divergence_rejected: "Divergenz-Audit abgelehnt",
+};
+
+function _coverageHtml(cov) {
+  if (!cov) return "";
+  const blockerItems = Object.entries(cov.top_blockers || {})
+    .map(([key, count]) => `<li>${_BLOCKER_LABELS[key] || key}: <strong>${count}</strong></li>`)
+    .join("");
+  return `
+    <div class="panel">
+      <h3>Datenabdeckung (Live Evidence Engine)</h3>
+      <div class="widget-grid">
+        ${widgetCard({ title: "Märkte gesamt", value: cov.markets_total })}
+        ${widgetCard({ title: "Unresolved", value: cov.markets_unresolved })}
+        ${widgetCard({ title: "Mit Quellen", value: cov.markets_with_sources })}
+        ${widgetCard({ title: "Mit Claims", value: cov.markets_with_claims })}
+        ${widgetCard({ title: "Unabh. Bestätigung", value: cov.markets_with_multiple_independent_groups })}
+        ${widgetCard({ title: "Modellhypothesen", value: cov.markets_with_model_hypothesis })}
+        ${widgetCard({ title: "Evidence-backed", value: cov.markets_with_evidence_backed_forecast })}
+        ${widgetCard({ title: "Published Forecasts", value: cov.markets_with_published_forecast })}
+      </div>
+      ${blockerItems ? `<h4 style="margin-top:12px">Top Blocker</h4><ul>${blockerItems}</ul>` : ""}
+      <p class="sub">0 veröffentlichte Prognosen ist ein ehrliches Ergebnis bei dünner Evidenzlage, kein Fehler.</p>
+    </div>
+  `;
+}
+
+function _researchQueueHtml(queue) {
+  if (!queue || !queue.length) {
+    return `<div class="panel"><h3>Research Queue</h3><div class="empty-state">Aktuell keine priorisierten Recherche-Kandidaten.</div></div>`;
+  }
+  const items = queue
+    .map((q) => {
+      const level = q.priority_score >= 40 ? "HOCH" : q.priority_score >= 15 ? "MITTEL" : "NIEDRIG";
+      const reasons = (q.reasons || []).join(" · ");
+      return `<li>
+        <a href="#/market/${encodeURIComponent(q.market_id)}"><strong>${q.question}</strong></a>
+        — ${level} (${q.priority_score.toFixed(1)})<br>
+        <span class="sub">${reasons}</span>
+      </li>`;
+    })
+    .join("");
+  return `
+    <div class="panel">
+      <h3>Research Queue — nächste wichtige Recherchen</h3>
+      <ul>${items}</ul>
+    </div>
+  `;
+}
+
 async function renderDashboardPage(container) {
   container.innerHTML = `<div class="empty-state">Lade Übersicht…</div>`;
   try {
-    const [cc, marketsResult, evalData] = await Promise.all([
+    const [cc, marketsResult, evalData, coverage, researchQueue] = await Promise.all([
       Api.commandCenter(),
       Api.markets({ limit: 500 }).catch(() => ({ items: [] })),
       Api.evaluationForecastHistory().catch(() => null),
+      Api.coverage().catch(() => null),
+      Api.researchQueue(8).catch(() => []),
     ]);
     const u = cc.uebersicht;
     const architectureHtml = _architectureOverviewHtml(marketsResult.items || [], evalData);
@@ -95,6 +158,10 @@ async function renderDashboardPage(container) {
       </div>
 
       ${architectureHtml}
+
+      ${_coverageHtml(coverage)}
+
+      ${_researchQueueHtml(researchQueue)}
 
       <div class="panel">
         <h3>Interessanteste Märkte jetzt</h3>

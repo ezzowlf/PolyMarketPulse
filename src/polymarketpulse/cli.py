@@ -1205,8 +1205,7 @@ def cmd_research_run(args: argparse.Namespace) -> int:
     extraction -> evidence -> forecast recompute) for one specific market,
     or for the top N markets from the real Research Queue when --queue is
     given, and prints the persisted Observability record(s)."""
-    from .research_queue import MarketSignal, build_research_queue
-    from .research_runner import run_research_for_market
+    from .research_runner import build_queue_from_db, run_research_for_market
 
     settings = Settings.load()
     storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
@@ -1227,31 +1226,8 @@ def cmd_research_run(args: argparse.Namespace) -> int:
                 return 1
             records = [run_research_for_market(storage, settings, row, trigger="cli_manual")]
         else:
-            unresolved = storage.connection.execute(
-                "SELECT market_id, provider, provider_market_id, question, category, "
-                "classified_category, resolution_source FROM markets "
-                "WHERE resolution_status IS NULL OR resolution_status != 'resolved'"
-            ).fetchall()
-            signals = []
-            rows_by_id: dict[str, dict] = {}
-            for market_id, provider, provider_market_id, question, category, classified_category, resolution_source in unresolved:
-                row = {
-                    "market_id": market_id, "provider": provider, "provider_market_id": provider_market_id,
-                    "question": question, "category": category, "classified_category": classified_category,
-                    "resolution_source": resolution_source,
-                }
-                rows_by_id[market_id] = row
-                link_count = storage.connection.execute(
-                    "SELECT COUNT(*) FROM news_market_links WHERE provider = ? AND provider_market_id = ?",
-                    (provider, provider_market_id),
-                ).fetchone()[0]
-                signals.append(MarketSignal(
-                    market_id=market_id, question=question or "", category=classified_category or category,
-                    event_type=None, market_probability=None, model_hypothesis_probability=None,
-                    time_remaining_hours=None, critical_gap_count=0, high_gap_count=0,
-                    has_source_coverage=link_count > 0,
-                ))
-            queue = build_research_queue(signals, limit=args.limit)
+            rows_by_id, queue = build_queue_from_db(storage)
+            queue = queue[: args.limit]
             records = [
                 run_research_for_market(storage, settings, rows_by_id[entry.market_id], trigger="research_queue")
                 for entry in queue
