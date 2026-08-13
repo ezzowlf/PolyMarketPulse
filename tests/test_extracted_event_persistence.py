@@ -44,7 +44,7 @@ def _market() -> Market:
 
 
 def test_schema_version_is_18(storage: Storage) -> None:
-    assert storage.schema_version() == 29
+    assert storage.schema_version() == 30
 
 
 def test_events_table_has_phase_h_columns(storage: Storage) -> None:

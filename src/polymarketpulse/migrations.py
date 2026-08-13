@@ -1269,6 +1269,17 @@ def _migration_029_coherence_lineage(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migration_030_coherence_lineage_indexes(conn: sqlite3.Connection) -> None:
+    """Add audit-query indexes to existing and fresh coherence schemas."""
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_market_relationships_market_a ON market_relationships(market_id_a);
+        CREATE INDEX IF NOT EXISTS idx_market_relationships_market_b ON market_relationships(market_id_b);
+        CREATE INDEX IF NOT EXISTS idx_coherence_audits_relationship_time ON coherence_audits(relationship_id, audited_at);
+        CREATE INDEX IF NOT EXISTS idx_lineage_audits_market_time ON lineage_audits(market_id, audited_at);
+    """)
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1299,6 +1310,7 @@ MIGRATIONS: list[Migration] = [
     (27, "social_discovery", _migration_027_social_discovery),
     (28, "information_observability", _migration_028_information_observability),
     (29, "coherence_lineage", _migration_029_coherence_lineage),
+    (30, "coherence_lineage_indexes", _migration_030_coherence_lineage_indexes),
 ]
 
 

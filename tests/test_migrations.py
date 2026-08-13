@@ -6,8 +6,8 @@ from polymarketpulse.migrations import current_schema_version, run_migrations
 def test_run_migrations_on_fresh_db_applies_all() -> None:
     conn = sqlite3.connect(":memory:")
     applied = run_migrations(conn)
-    assert applied == list(range(1, 30))
-    assert current_schema_version(conn) == 29
+    assert applied == list(range(1, 31))
+    assert current_schema_version(conn) == 30
 
 
 def test_run_migrations_is_idempotent() -> None:
@@ -15,7 +15,7 @@ def test_run_migrations_is_idempotent() -> None:
     run_migrations(conn)
     second_run = run_migrations(conn)
     assert second_run == []
-    assert current_schema_version(conn) == 29
+    assert current_schema_version(conn) == 30
 
 
 def test_migration_preserves_existing_phase1_data() -> None:
