@@ -40,6 +40,7 @@ from .decision import compute_decision_state
 from .divergence import DIVERGENCE_THRESHOLD_PP
 from .divergence_audit import DivergenceAuditContext, audit_divergence, classify_divergence_support
 from .ensemble import combine_submodels, quality_scaled_weight
+from .event_clock import derive_event_clock
 from .event_relations import collect_event_relation_signals, compute_event_relation_estimate
 from .evidence import compute_independent_evidence
 from .history import compute_history_estimate
@@ -1108,6 +1109,21 @@ def compute_prediction(
         path_step_claims=independent_evidence.path_step_claims if independent_evidence is not None else (),
     )
 
+    # Phase G: Event Clock -- can a possible future path still happen in
+    # time. Reuses world_state's own deadline/time_remaining_hours and
+    # resolution_path's own deadline_pressure/path_feasibility; no new
+    # duration data invented.
+    event_clock = derive_event_clock(
+        deadline=world_state.deadline if world_state is not None else None,
+        time_remaining_hours=world_state.time_remaining_hours if world_state is not None else None,
+        resolution_path=(
+            world_state.path_to_resolution.resolution_path
+            if world_state is not None and world_state.path_to_resolution is not None
+            else None
+        ),
+        next_event=next_event,
+    )
+
     # Block F Part 1: compute change_triggers HERE (moved up from its
     # original post-result location — world_state/data_gaps/divergence_audit
     # are all already real values by this point) so build_scenarios can
@@ -1198,6 +1214,7 @@ def compute_prediction(
         resolution_semantics=resolution_semantics,
         structured_world_state=structured_world_state,
         next_event=next_event,
+        event_clock=event_clock,
     )
     # Phase F: evidence-gated forecast hierarchy
     # evidence_backed_probability: only when sufficient evidence exists

@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from ..data_gaps import DataGapReport
     from .cross_market import CrossMarketResult
     from .divergence_audit import DivergenceAuditResult
+    from .event_clock import EventClock
     from .event_relations import RelationSignal
     from .evidence import IndependentEvidenceResult
     from .manipulation import ManipulationRiskResult
@@ -549,6 +550,14 @@ class PredictionResult:
     # of markets with no known multi-step resolution template.
     next_event: NextEvent | None = None
 
+    # --- Phase G: Event Clock (additive) --------------------------------------
+    # Whether a possible future path can still happen in time. No fabricated
+    # durations -- estimated_minimum/typical_path_time stay None when no real
+    # per-step duration dataset exists (currently: always). path_feasibility
+    # is only ever "IMPOSSIBLE" from a plain deadline-vs-now comparison, never
+    # from a guessed duration. See event_clock.py.
+    event_clock: EventClock | None = None
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -622,4 +631,5 @@ class PredictionResult:
                 self.structured_world_state.as_dict() if self.structured_world_state else None
             ),
             "next_event": self.next_event.as_dict() if self.next_event else None,
+            "event_clock": self.event_clock.as_dict() if self.event_clock else None,
         }
