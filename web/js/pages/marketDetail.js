@@ -701,8 +701,42 @@ function _evidenceSectionHtml(p) {
       <summary>Erweiterte Forschung & Audit</summary>
       ${hasEvidence ? _detailedEvidenceHtml(p, ie) : ""}
       ${advancedDetails}
+      <div id="research-run-panel"><div class="empty-state">Lade Research-Verlauf…</div></div>
     </details>
   `;
+}
+
+// Priority 10: compact, real Research-Run history in the Advanced/Audit
+// area only -- never prominent, never a raw developer-data dump. Shows
+// the single most recent real research_runs row for this market.
+async function _loadResearchRunPanel(marketId) {
+  const el = document.getElementById("research-run-panel");
+  if (!el) return;
+  try {
+    const runs = await Api.researchRuns(marketId, 1);
+    if (!runs.length) {
+      el.innerHTML = `<h4>Letzte Recherche</h4><div class="empty-state">Noch kein Research-Lauf für diesen Markt.</div>`;
+      return;
+    }
+    const r = runs[0];
+    let detail = {};
+    try { detail = JSON.parse(r.detail_json || "{}"); } catch { /* ignore */ }
+    const sourceFetchStatus = detail.source_fetch_status || "–";
+    el.innerHTML = `
+      <h4>Letzte Recherche (${fmtDate(r.run_at)})</h4>
+      <div class="widget-grid">
+        ${widgetCard({ title: "Quellen angefragt", value: r.sources_requested })}
+        ${widgetCard({ title: "Quellen akzeptiert", value: r.sources_accepted })}
+        ${widgetCard({ title: "Claims gefunden", value: r.claims_extracted })}
+        ${widgetCard({ title: "Data Gaps vorher/nachher", value: `${r.data_gaps_before ?? "–"} → ${r.data_gaps_after ?? "–"}` })}
+        ${widgetCard({ title: "Forecast vorher/nachher", value: `${r.published_forecast_before !== null ? fmtPct(r.published_forecast_before) : "–"} → ${r.published_forecast_after !== null ? fmtPct(r.published_forecast_after) : "–"}` })}
+        ${widgetCard({ title: "Source Fetch Status", value: sourceFetchStatus })}
+        ${widgetCard({ title: "Ergebnis", value: r.final_status || "–" })}
+      </div>
+    `;
+  } catch {
+    el.innerHTML = `<h4>Letzte Recherche</h4><div class="empty-state">Nicht verfügbar.</div>`;
+  }
 }
 
 function _sourceCardsHtml(ie) {
@@ -971,7 +1005,10 @@ async function renderPredictionPanel(marketId, market) {
     summaryPanel.innerHTML = _summaryPanelHtml(response.prediction);
     if (whyPanel) whyPanel.innerHTML = _whySectionHtml(response.prediction);
     if (breakdownPanel) breakdownPanel.innerHTML = _independentBreakdownHtml(response.prediction);
-    if (evidencePanel) evidencePanel.innerHTML = _evidenceSectionHtml(response.prediction);
+    if (evidencePanel) {
+      evidencePanel.innerHTML = _evidenceSectionHtml(response.prediction);
+      _loadResearchRunPanel(marketId);
+    }
     if (changeTriggersPanel) changeTriggersPanel.innerHTML = _changeTriggersHtml(response.prediction);
     panel.innerHTML = _aiCardHtml(response);
     scenariosPanel.innerHTML = _scenarioSectionHtml(response.prediction.scenarios);
