@@ -281,6 +281,25 @@ def cmd_scan(args: argparse.Namespace) -> int:
         if args.send_alerts:
             exit_code = max(exit_code, _send_alerts(settings, storage, top))
 
+        if getattr(args, "research", False):
+            from .research_runner import run_recurring_research
+
+            research_records = run_recurring_research(
+                storage, settings, limit=args.research_limit, max_cost_usd=args.research_cost_budget,
+            )
+            if not args.json:
+                print(
+                    f"[research] {len(research_records)} echte Research-Läufe ausgeführt "
+                    f"(priority-basiertes Recheck-Intervall + Backoff).",
+                    file=sys.stderr,
+                )
+                for r in research_records:
+                    print(
+                        f"  {r.provider_market_id}: fetched={r.sources_fetched} "
+                        f"claims={r.claims_extracted} status={r.final_status}",
+                        file=sys.stderr,
+                    )
+
         return exit_code
     finally:
         storage.close()
@@ -1542,6 +1561,12 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--limit", type=int, default=None)
     scan_parser.add_argument("--json", action="store_true")
     scan_parser.add_argument("--send-alerts", action="store_true")
+    scan_parser.add_argument(
+        "--research", action="store_true",
+        help="Nach dem Scan echte Recurring-Ingestion-Research-Läufe ausführen (Research Queue, priority-basiertes Recheck-Intervall, Backoff)"
+    )
+    scan_parser.add_argument("--research-limit", type=int, default=10)
+    scan_parser.add_argument("--research-cost-budget", type=float, default=1.0)
     scan_parser.set_defaults(func=cmd_scan)
 
     markets_parser = subparsers.add_parser("markets", help="Nur aktive Märkte auflisten, ohne zu speichern")

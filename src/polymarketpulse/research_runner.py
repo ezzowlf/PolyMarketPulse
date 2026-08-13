@@ -204,3 +204,117 @@ def run_research_for_market(
     )
     storage.save_research_run(record.as_dict())
     return record
+
+
+# Priority-tiered recheck intervals — high-priority (large real divergence,
+# urgent deadline, critical gaps) markets get re-researched much more often
+# than low-signal ones. Deliberately reuses research_queue.py's own
+# priority_score bands rather than inventing a second concept.
+_HIGH_PRIORITY_RECHECK_HOURS = 6.0
+_MEDIUM_PRIORITY_RECHECK_HOURS = 24.0
+_LOW_PRIORITY_RECHECK_HOURS = 72.0
+
+# Backoff: consecutive SOURCE_FETCH_FAILED runs push the next allowed check
+# further out (min(interval * 2^consecutive_failures, cap)) so a genuinely
+# unreachable source isn't hammered every scan.
+_BACKOFF_CAP_HOURS = 24.0 * 14
+
+
+def _recheck_interval_hours(priority_score: float) -> float:
+    if priority_score >= 40.0:
+        return _HIGH_PRIORITY_RECHECK_HOURS
+    if priority_score >= 15.0:
+        return _MEDIUM_PRIORITY_RECHECK_HOURS
+    return _LOW_PRIORITY_RECHECK_HOURS
+
+
+def _last_run_info(storage: Storage, provider_market_id: str) -> tuple[datetime | None, int]:
+    """Real last-run timestamp + consecutive-failure streak for one market,
+    derived from the persisted research_runs history — no separate
+    scheduler-state table needed."""
+    rows = storage.get_research_runs(provider_market_id=provider_market_id, limit=10)
+    if not rows:
+        return None, 0
+    last_run_at = None
+    try:
+        last_run_at = datetime.fromisoformat(rows[0]["run_at"])
+    except (KeyError, ValueError, TypeError):
+        pass
+    consecutive_failures = 0
+    for row in rows:
+        detail = row.get("detail_json")
+        status = None
+        if detail:
+            import json as _json
+
+            try:
+                status = _json.loads(detail).get("source_fetch_status")
+            except (ValueError, TypeError):
+                status = None
+        if status == "SOURCE_FETCH_FAILED":
+            consecutive_failures += 1
+        else:
+            break
+    return last_run_at, consecutive_failures
+
+
+def run_recurring_research(
+    storage: Storage, settings, limit: int = 10, max_cost_usd: float = 1.0,
+) -> list[ResearchRunObservability]:
+    """Real Recurring Ingestion: ranks all unresolved markets with the
+    existing Research Queue, then runs the top-N through the same
+    run_research_for_market() executor — but SKIPS any market whose real
+    last research_runs row is still within its priority-tiered recheck
+    interval (with real exponential backoff on consecutive source-fetch
+    failures), so unchanged sources are never reprocessed every scan.
+    Called from cli.cmd_scan(--research) -- the EXISTING scan loop, no
+    second parallel scheduler."""
+    from .research_queue import MarketSignal, build_research_queue
+
+    unresolved = storage.connection.execute(
+        "SELECT market_id, provider, provider_market_id, question, category, "
+        "classified_category, resolution_source FROM markets "
+        "WHERE resolution_status IS NULL OR resolution_status != 'resolved'"
+    ).fetchall()
+
+    signals = []
+    rows_by_id: dict[str, dict] = {}
+    for market_id, provider, provider_market_id, question, category, classified_category, resolution_source in unresolved:
+        row = {
+            "market_id": market_id, "provider": provider, "provider_market_id": provider_market_id,
+            "question": question, "category": category, "classified_category": classified_category,
+            "resolution_source": resolution_source,
+        }
+        rows_by_id[market_id] = row
+        link_count = storage.connection.execute(
+            "SELECT COUNT(*) FROM news_market_links WHERE provider = ? AND provider_market_id = ?",
+            (provider, provider_market_id),
+        ).fetchone()[0]
+        signals.append(MarketSignal(
+            market_id=market_id, question=question or "", category=classified_category or category,
+            event_type=None, market_probability=None, model_hypothesis_probability=None,
+            time_remaining_hours=None, critical_gap_count=0, high_gap_count=0,
+            has_source_coverage=link_count > 0,
+        ))
+
+    queue = build_research_queue(signals)
+    now = datetime.now(UTC)
+    spent = 0.0
+    records: list[ResearchRunObservability] = []
+    for entry in queue:
+        if len(records) >= limit or spent >= max_cost_usd:
+            break
+        last_run_at, consecutive_failures = _last_run_info(storage, entry.market_id)
+        if last_run_at is not None:
+            interval = _recheck_interval_hours(entry.priority_score)
+            if consecutive_failures > 0:
+                interval = min(interval * (2 ** consecutive_failures), _BACKOFF_CAP_HOURS)
+            elapsed_hours = (now - last_run_at).total_seconds() / 3600.0
+            if elapsed_hours < interval:
+                continue  # too soon per this market's real priority tier / backoff
+        record = run_research_for_market(
+            storage, settings, rows_by_id[entry.market_id], trigger="recurring_scan",
+        )
+        spent += record.cost_usd
+        records.append(record)
+    return records

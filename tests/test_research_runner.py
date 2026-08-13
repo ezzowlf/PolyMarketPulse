@@ -13,7 +13,7 @@ import pytest
 
 from polymarketpulse.config import Settings
 from polymarketpulse.news.base import NewsEvent
-from polymarketpulse.research_runner import run_research_for_market
+from polymarketpulse.research_runner import run_recurring_research, run_research_for_market
 from polymarketpulse.storage import Storage
 
 
@@ -129,3 +129,35 @@ def test_source_fetch_failure_is_visibly_distinct_from_empty_result(storage: Sto
 
     assert record.sources_fetched == 0
     assert record.detail["source_fetch_status"] == "SOURCE_FETCH_FAILED"
+
+
+def test_recurring_research_skips_recently_researched_market(storage: Storage) -> None:
+    """Real Recurring Ingestion interval gating: a market researched moments
+    ago must not be re-researched again on the very next recurring pass —
+    this is what prevents unchanged sources being reprocessed every scan."""
+    _seed_market(storage)
+    settings = Settings.load()
+
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "OK")):
+        first_pass = run_recurring_research(storage, settings, limit=10)
+        assert len(first_pass) == 1  # never researched before -> runs once
+
+        second_pass = run_recurring_research(storage, settings, limit=10)
+        assert len(second_pass) == 0  # too soon since the first pass -> skipped
+
+
+def test_recurring_research_respects_limit_and_cost_budget(storage: Storage) -> None:
+    for i in range(3):
+        now = datetime.now(UTC).isoformat()
+        storage.connection.execute(
+            "INSERT INTO markets (market_id, provider, provider_market_id, question, slug, url, "
+            "first_seen_at, last_seen_at, resolution_status) "
+            "VALUES (?, 'polymarket', ?, 'Q?', ?, 'https://x', ?, ?, 'open')",
+            (f"rr-{i}", f"rr-{i}", f"rr-{i}", now, now),
+        )
+    storage.connection.commit()
+    settings = Settings.load()
+
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "OK")):
+        records = run_recurring_research(storage, settings, limit=2)
+    assert len(records) == 2  # real limit respected, not all 3 candidates run
