@@ -191,6 +191,10 @@ def test_hormuz_with_strong_direct_evidence_shows_itemized_real_support(storage:
         resolution_text=resolution_text,
     )
     assert result.independent_probability is not None
+    # Generic claim/news evidence may support the maturity review, but it is
+    # not a calibrated transition model for the quantified PortWatch rule.
+    # It therefore must not be exposed as a Model Shadow.
+    assert result.model_hypothesis_probability is None
     assert result.divergence_audit is not None
     if result.divergence_audit.triggered:
         assert result.divergence_audit.verdict in ("PASS", "WARN")

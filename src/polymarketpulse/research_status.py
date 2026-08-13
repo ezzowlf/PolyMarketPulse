@@ -89,6 +89,26 @@ def source_availability(storage, market_id: str) -> dict:
         next_check += timedelta(hours=min(6 * (2 ** failures), 24 * 14))
 
     if failed:
+        # Discovery is useful for finding additional evidence, but a failed
+        # discovery query must not eclipse a successful, route-specific
+        # primary input such as GovTrack or IMF PortWatch.  The normal UI
+        # needs to distinguish a degraded discovery layer from an actually
+        # unavailable forecast-critical source.
+        primary_succeeded = any(
+            attempt.get("role") == "primary" and attempt.get("status") == "OK"
+            for attempt in attempts
+        )
+        discovery_only_failure = all(a.get("role") == "discovery" for a in failed)
+        if discovery_only_failure and primary_succeeded:
+            return {
+                "status": "DISCOVERY_DEGRADED", "severity": "info",
+                "title": "ZusÃ¤tzliche Discovery-Quelle derzeit nicht erreichbar",
+                "message": "Die primÃ¤re, marktspezifische Datenquelle wurde erfolgreich verarbeitet. Nur die optionale Discovery-Suche ist derzeit nicht erreichbar.",
+                "provider_attempts": attempts, "last_successful_fetch": latest.get("run_at"),
+                "last_failed_fetch": last_failure and last_failure.get("run_at"), "consecutive_failures": failures,
+                "retry_status": "BACKOFF" if failures else "SCHEDULED", "next_check_at": next_check and next_check.isoformat(),
+                "alternative_providers": detail.get("alternative_providers", []),
+            }
         return {
             "status": "SOURCE_UNREACHABLE", "severity": "info" if all(a.get("role") == "discovery" for a in failed) else "warning",
             "title": "Datenquelle derzeit nicht erreichbar",

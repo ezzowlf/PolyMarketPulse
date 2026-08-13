@@ -194,7 +194,7 @@ function _renderChangesPanel(opp) {
     <h3>Seit letzter Analyse <span class="sub">(${fmtDate(c.previous_analysis_at)})</span></h3>
     <ul>
       ${row("Marktpreis", c.market_yes_probability, fmtPct)}
-      ${row("Eigene Prognose", c.estimated_yes_probability, fmtPct)}
+      ${row("Veröffentlichte Prognose", c.published_forecast_probability, fmtPct)}
       ${row("Edge", c.net_yes_edge, fmtEdgePp)}
       ${row("Confidence", c.confidence_score, (v) => fmtNum(v, 0))}
     </ul>

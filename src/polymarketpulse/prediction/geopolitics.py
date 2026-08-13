@@ -447,6 +447,25 @@ def analyze_geopolitics(
             uncertainty=1.0,
         )
 
+    # A prospective market question cannot verify its own geopolitical
+    # predicate.  This mirrors the macro/politics guards and prevents a
+    # question such as "Will a blockade end?" from being read as a confirmed
+    # de-escalation event solely because it contains those keywords.
+    is_market_question = "?" in text or text.strip().lower().startswith(
+        ("will ", "is ", "are ", "does ", "do ", "can ", "could ")
+    )
+    if is_market_question:
+        return GeopoliticsResult(
+            available=False,
+            probability=None,
+            confidence=0.0,
+            data_quality=DataQualityBreakdown(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            reason="market question is not evidence of a confirmed geopolitical event",
+            inputs_used=("market_question_only",),
+            contributions=(),
+            uncertainty=1.0,
+        )
+
     # Run the appropriate analysis function
     analysis_func = _ANALYSIS_FUNCTIONS[event_type]
     probability, reason, inputs_used = analysis_func(text, proposition_status)

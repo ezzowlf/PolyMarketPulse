@@ -153,7 +153,8 @@ def _opportunity_score(prediction, liquidity: float | None, spread: float | None
 def _change_since_last(conn: sqlite3.Connection, market_id: str) -> dict | None:
     rows = conn.execute(
         "SELECT created_at, market_yes_probability, estimated_yes_probability, net_yes_edge, confidence_score, "
-        "independent_probability FROM prediction_snapshots WHERE market_id = ? ORDER BY created_at DESC LIMIT 2",
+        "independent_probability, published_forecast_probability FROM prediction_snapshots "
+        "WHERE market_id = ? ORDER BY created_at DESC LIMIT 2",
         (market_id,),
     ).fetchall()
     if len(rows) < 2:
@@ -166,6 +167,10 @@ def _change_since_last(conn: sqlite3.Connection, market_id: str) -> dict | None:
         "net_yes_edge": {"from": previous[3], "to": current[3]},
         "confidence_score": {"from": previous[4], "to": current[4]},
         "independent_probability": {"from": previous[5], "to": current[5]},
+        # Never call the blended/estimated internal number a forecast in
+        # consumer-facing change views.  This field is only populated after
+        # the evidence and maturity gates have actually published it.
+        "published_forecast_probability": {"from": previous[6], "to": current[6]},
     }
 
 

@@ -338,8 +338,13 @@ def _forecast_status(
     ) | specialized_names
     price_anchored_names = available_names & {"momentum", "news", "event_relations"}
 
+    # Momentum, news, and event-relations may add valuable context, but all
+    # are price-anchored or explanatory.  They cannot by themselves create
+    # a model shadow.  Returning BLENDED_FORECAST here used to make a
+    # momentum-only estimate look like an independent forecast even though
+    # model_hypothesis_probability was None.
     if independent_probability is None or not independent_names:
-        return "BLENDED_FORECAST" if price_anchored_names else "NO_FORECAST"
+        return "NO_FORECAST"
 
     if independent_names == {"history"} and not price_anchored_names:
         if proposition is not None and (
@@ -1256,11 +1261,18 @@ def compute_prediction(
         blended_probability=blended_probability,
         calibrated_probability=calibrated_probability,
         market_probability=market_yes,
-        # Block A: model_hypothesis_probability is the raw internal model
-        # opinion — identical to independent_probability today (the market-
-        # blind ensemble estimate). Existing does NOT imply it is publishable;
-        # see evidence_backed_probability / published_forecast_probability below.
-        model_hypothesis_probability=independent_probability,
+        # Block A: model_hypothesis_probability is the raw numeric
+        # target-specific domain-model opinion. It is distinct from generic
+        # market-blind history/news/claim context and does NOT imply it is
+        # publishable; see evidence_backed_probability /
+        # published_forecast_probability below.
+        # A model shadow is a numeric domain-model result, not merely a
+        # generic evidence/history ensemble.  The latter is still valuable
+        # context for maturity and suppression decisions, but cannot claim a
+        # target-specific probability for a multi-step proposition.
+        model_hypothesis_probability=(
+            independent_probability if specialized_available else None
+        ),
         evidence_backed_probability=None,
         published_forecast_probability=None,
         forecast_status=forecast_status,

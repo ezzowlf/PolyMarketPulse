@@ -115,6 +115,8 @@ def test_change_since_last_analysis_present_on_second_run(storage: Storage) -> N
     change = opp["change_since_last_analysis"]
     assert "market_yes_probability" in change
     assert set(change["market_yes_probability"].keys()) == {"from", "to"}
+    assert change["published_forecast_probability"]["from"] is None
+    assert change["published_forecast_probability"]["to"] is None
 
 
 def test_deadline_bucket_labels() -> None:

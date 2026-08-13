@@ -48,6 +48,19 @@ def test_unavailable_specialized_model_does_not_create_forecast() -> None:
     assert status == "NO_FORECAST"
 
 
+def test_price_anchored_context_without_independent_model_is_not_forecast() -> None:
+    status = _forecast_status(
+        estimated_yes=0.31,
+        independent_probability=None,
+        submodel_estimates=[
+            SubmodelEstimate("momentum", 0.31, 0.24, True, "price movement"),
+            SubmodelEstimate("news", 0.40, 0.20, True, "news context"),
+        ],
+        confidence=60.0,
+    )
+    assert status == "NO_FORECAST"
+
+
 def test_macro_question_without_fred_stays_unavailable(tmp_path: Path, monkeypatch) -> None:
     storage = Storage(tmp_path / "macro-only.db")
     fetch_calls = []

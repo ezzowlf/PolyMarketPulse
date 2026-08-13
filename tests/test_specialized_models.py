@@ -28,8 +28,18 @@ def test_geopolitics_ceasefire_agreed():
     assert result.available is True
     assert result.probability is not None
     assert result.probability >= 0.7
-    assert result.probability >= 0.7
     assert "ceasefire" in result.reason.lower()
+
+
+def test_geopolitics_market_question_is_not_confirmed_event() -> None:
+    result = analyze_geopolitics(
+        text="Will the Strait of Hormuz return to normal by August 31?",
+        event_type="strategic_waterway",
+        proposition_status="CLEAR",
+    )
+    assert result.available is False
+    assert result.probability is None
+    assert "not evidence" in result.reason
 
 
 def test_geopolitics_ceasefire_denied():

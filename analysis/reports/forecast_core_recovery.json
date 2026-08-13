@@ -1,0 +1,69 @@
+{
+  "report_version": 1,
+  "generated_on": "2026-08-14",
+  "baseline_commit": "324cf5b38afe46c216f493402511e23f8f7a19a4",
+  "decision": "STOP_REDESIGN",
+  "decision_reason": "No audited live candidate has a target-specific calibrated numeric model with reproducible source lineage.",
+  "live_rerun": {
+    "requested_markets": 30,
+    "queried_markets": 30,
+    "errors": 0,
+    "maturity": {"NO_FORECAST": 30},
+    "model_shadows": 0,
+    "evidence_backed_forecasts": 0,
+    "published_forecasts": 0,
+    "suppressed_generic_context": [
+      {"market_id": "2774056", "name": "Hormuz", "independent_context_probability": 0.461},
+      {"market_id": "polymarket:1163699", "name": "Clarity Act", "independent_context_probability": 0.5182}
+    ]
+  },
+  "golden_cases": {
+    "fed_25bp": {
+      "market_id": "polymarket:2252245",
+      "result": "NO_FORECAST",
+      "reason": "Exact discrete outcome needs an official, vintage-safe distribution; source snapshot incomplete."
+    },
+    "clarity_act": {
+      "market_id": "polymarket:1163699",
+      "claim": {"source": "GovTrack", "event": "pass_over_house", "type": "PATH_STEP", "date": "2025-07-17"},
+      "result": "NO_FORECAST",
+      "reason": "House action does not estimate Senate passage and signature before deadline."
+    },
+    "hormuz": {
+      "market_id": "2774056",
+      "observation": {"source": "IMF PortWatch", "seven_day_average_arrivals": 4.43, "threshold": 60},
+      "result": "NO_FORECAST",
+      "reason": "Current state exists but no normalized-baseline transition model exists."
+    }
+  },
+  "source_health": {
+    "ny_fed_effr": "OK",
+    "fred": "READ_TIMEOUT",
+    "bls": "DAILY_ANONYMOUS_QUOTA; download 403",
+    "govtrack": "OK",
+    "imf_portwatch": "OK",
+    "gdelt": "DISCOVERY_DEGRADED_NONBLOCKING_WHEN_PRIMARY_OK"
+  },
+  "integrity": {
+    "market_probability_separate_from_model_fields": true,
+    "generic_evidence_not_model_shadow": true,
+    "price_anchored_only_not_forecast": true,
+    "market_question_not_confirmed_event": true,
+    "new_macro_observation_source_lineage_supported": true,
+    "old_macro_rows_retroactively_unlineaged": true
+  },
+  "next_required_models": [
+    "Fed discrete 25bp distribution with calibration and vintage-safe inputs",
+    "Legislative conditional transition model with calibration",
+    "PortWatch state-transition model with baseline and calibration"
+  ],
+  "final_validation": {
+    "pytest": "1025 passed; one upstream Starlette/httpx deprecation warning",
+    "ruff": "clean",
+    "js_syntax": "clean",
+    "git_diff_check": "clean",
+    "migration_fresh_and_current_copy": "schema version 31; idempotent",
+    "secrets_scan": "clean",
+    "browser": "Fed, Clarity and Hormuz show no published forecast; dashboard/API/DB show zero current model shadows after affected snapshots were refreshed"
+  }
+}
