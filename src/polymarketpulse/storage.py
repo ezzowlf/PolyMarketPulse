@@ -1948,5 +1948,110 @@ class Storage:
         except sqlite3.Error:
             pass
 
+    # --- Phase C: Event/Entity/Relation write path --- #
+    # migration 12 (events.py) defined the real schema but, until now, had
+    # no writer anywhere in the codebase -- real events/relations existed
+    # only as empty, read-wired scaffolding. These methods are the minimal,
+    # idempotent write path that closes that gap.
+
+    def save_entity(self, canonical_name: str, entity_type: str, geographic_scope: str | None = None) -> int | None:
+        """Idempotent by canonical_name (schema UNIQUE constraint). Returns
+        the entity's id, existing or newly created."""
+        try:
+            self.connection.execute(
+                "INSERT INTO entities (canonical_name, entity_type, geographic_scope) VALUES (?, ?, ?) "
+                "ON CONFLICT(canonical_name) DO NOTHING",
+                (canonical_name.strip().lower(), entity_type, geographic_scope),
+            )
+            self.connection.commit()
+            row = self.connection.execute(
+                "SELECT id FROM entities WHERE canonical_name = ?", (canonical_name.strip().lower(),)
+            ).fetchone()
+            return row[0] if row else None
+        except sqlite3.Error:
+            return None
+
+    def save_event(
+        self, title: str, event_type: str, occurred_at: str | None = None,
+        geographic_scope: str | None = None, source: str | None = None, source_url: str | None = None,
+    ) -> int | None:
+        """Not schema-unique (events has no natural key), so dedup manually
+        on (title, source_url, occurred_at) -- repeated research runs for
+        the same real data point must not grow this table unboundedly."""
+        try:
+            row = self.connection.execute(
+                "SELECT id FROM events WHERE title = ? AND source_url IS ? AND occurred_at IS ?",
+                (title, source_url, occurred_at),
+            ).fetchone()
+            if row:
+                return row[0]
+            cur = self.connection.execute(
+                "INSERT INTO events (title, event_type, occurred_at, geographic_scope, source, source_url, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (title, event_type, occurred_at, geographic_scope, source, source_url, datetime.now(UTC).isoformat()),
+            )
+            self.connection.commit()
+            return cur.lastrowid
+        except sqlite3.Error:
+            return None
+
+    def save_event_entity_link(self, event_id: int, entity_id: int, role: str | None = None) -> None:
+        try:
+            self.connection.execute(
+                "INSERT INTO event_entity_links (event_id, entity_id, role) VALUES (?, ?, ?) "
+                "ON CONFLICT(event_id, entity_id, role) DO NOTHING",
+                (event_id, entity_id, role),
+            )
+            self.connection.commit()
+        except sqlite3.Error:
+            pass
+
+    def save_event_relation(
+        self, *, source_event_id: int | None, source_entity_id: int | None, target_entity_id: int | None,
+        target_provider: str, target_provider_market_id: str, relation_type: str, direction: str,
+        evidence_tier: str, detail: str, strength: float | None = None, confidence: float | None = None,
+        time_lag_hours: float | None = None, geographic_scope: str | None = None,
+        evidence_count: int = 1, source_quality: str | None = None,
+        valid_from: str | None = None, valid_until: str | None = None,
+    ) -> int | None:
+        """Dedup on (target market, relation_type, detail) -- `detail`
+        carries the real predicate/timestamp of the underlying data point,
+        so a genuinely new fact naturally produces a new row while a
+        repeated research run for the same fact does not."""
+        from .events import validate_relation_tier
+
+        try:
+            validate_relation_tier(relation_type, evidence_tier)
+        except ValueError:
+            return None
+        try:
+            row = self.connection.execute(
+                "SELECT id FROM event_relations WHERE target_provider = ? AND target_provider_market_id = ? "
+                "AND relation_type = ? AND detail = ?",
+                (target_provider, target_provider_market_id, relation_type, detail),
+            ).fetchone()
+            if row:
+                return row[0]
+            cur = self.connection.execute(
+                """
+                INSERT INTO event_relations (
+                    source_event_id, source_entity_id, target_entity_id, target_provider,
+                    target_provider_market_id, relation_type, direction, strength, evidence_tier,
+                    confidence, time_lag_hours, geographic_scope, evidence_count, source_quality,
+                    valid_from, valid_until, detail, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    source_event_id, source_entity_id, target_entity_id, target_provider,
+                    target_provider_market_id, relation_type, direction, strength, evidence_tier,
+                    confidence, time_lag_hours, geographic_scope, evidence_count, source_quality,
+                    valid_from, valid_until, detail, datetime.now(UTC).isoformat(),
+                ),
+            )
+            self.connection.commit()
+            return cur.lastrowid
+        except sqlite3.Error:
+            return None
+
     def close(self) -> None:
         self.connection.close()

@@ -183,6 +183,31 @@ def _fetch_and_persist_legislation_claim(
         else "PATH_STEP" if step_name else "CONTEXT"
     )
     storage.save_claim_market_link(claim.claim_id, provider, provider_market_id, claim_type)
+
+    # Phase C: real Event/Entity/Relation graph write path -- reuses the
+    # existing migration-12 schema, no parallel structure. A GovTrack
+    # status update IS a real, dated, officially-sourced event; it
+    # SIGNALS (not CAUSES -- this is a status confirmation, not a causal
+    # mechanism) this market's resolution direction at a KNOWN evidence
+    # tier (official government record).
+    bill_title = status.title or f"H.R.{number}"
+    event_id = storage.save_event(
+        title=f"GovTrack status: {bill_title} -> {status.current_status}",
+        event_type="legislative_progress",
+        occurred_at=claim.timestamp.isoformat() if claim.timestamp else None,
+        geographic_scope="country", source="govtrack", source_url=status.link,
+    )
+    entity_id = storage.save_entity(bill_title, entity_type="legislation", geographic_scope="country")
+    if event_id is not None and entity_id is not None:
+        storage.save_event_entity_link(event_id, entity_id, role="subject")
+    storage.save_event_relation(
+        source_event_id=event_id, source_entity_id=entity_id, target_entity_id=entity_id,
+        target_provider=provider, target_provider_market_id=provider_market_id,
+        relation_type="SIGNALS", direction=claim.direction or "neutral",
+        evidence_tier="KNOWN", confidence=claim.confidence, source_quality="primary_official",
+        valid_from=claim.timestamp.isoformat() if claim.timestamp else None,
+        detail=predicate,
+    )
     return {
         "attempted": True, "fetch_status": "OK", "bill_number": number,
         "current_status": status.current_status, "resolution_step": step_name,
@@ -291,6 +316,32 @@ def _fetch_and_persist_chokepoint_claim(
     # for the underlying state, just not directly dispositive.
     claim_type = "DIRECT_RESOLUTION" if direction != "neutral" else "QUANTITATIVE_SIGNAL"
     storage.save_claim_market_link(claim.claim_id, provider, provider_market_id, claim_type)
+
+    # Phase C: real Event/Entity/Relation graph write path (mirrors the
+    # GovTrack wiring above). IMF PortWatch transit data is a real,
+    # quantitative, officially-sourced observation of the chokepoint's
+    # state -- KNOWN tier when it directly resolves against the market's
+    # own threshold, SUPPORTED (still quantitative-eligible) when the
+    # data is real but no threshold could be matched against it.
+    event_id = storage.save_event(
+        title=f"IMF PortWatch transit data: {chokepoint} ({latest_date})",
+        event_type="waterway_status",
+        occurred_at=claim.timestamp.isoformat() if claim.timestamp else None,
+        geographic_scope="region", source="imf_portwatch", source_url="https://portwatch.imf.org",
+    )
+    entity_id = storage.save_entity(chokepoint, entity_type="region", geographic_scope="global")
+    if event_id is not None and entity_id is not None:
+        storage.save_event_entity_link(event_id, entity_id, role="subject")
+    storage.save_event_relation(
+        source_event_id=event_id, source_entity_id=entity_id, target_entity_id=entity_id,
+        target_provider=provider, target_provider_market_id=provider_market_id,
+        relation_type="SIGNALS", direction=direction,
+        evidence_tier="KNOWN" if direction != "neutral" else "SUPPORTED",
+        strength=1.0 if direction != "neutral" else None,
+        confidence=claim.confidence, source_quality="primary_official",
+        valid_from=claim.timestamp.isoformat() if claim.timestamp else None,
+        detail=predicate,
+    )
     return {
         "attempted": True, "fetch_status": "OK", "chokepoint": chokepoint,
         "seven_day_average": avg, "threshold": threshold, "direction": direction,

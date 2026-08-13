@@ -203,6 +203,99 @@ def test_legislation_market_fetches_and_persists_a_real_govtrack_claim(storage: 
     assert row[2] == "house_vote"
 
 
+def test_legislation_run_creates_real_event_entity_relation_graph(storage: Storage) -> None:
+    """Phase C: the GovTrack claim must also populate the real
+    Event/Entity/Relation graph (migration 12), not just claims/
+    claim_market_links -- and the resulting relation must be readable back
+    through event_relations.py's own reader, the actual ensemble input."""
+    from polymarketpulse.prediction.event_relations import collect_event_relation_signals
+    from polymarketpulse.providers.govtrack import BillStatus
+
+    market_row = _seed_market(storage)
+    storage.connection.execute(
+        "UPDATE markets SET question = ? WHERE market_id = 'rr-1'",
+        ("Clarity Act (H.R.3633) signed into law in 2026?",),
+    )
+    storage.connection.commit()
+    market_row["question"] = "Clarity Act (H.R.3633) signed into law in 2026?"
+    settings = Settings.load()
+
+    fake_status = BillStatus(
+        congress=119, bill_type="house_bill", number=3633, display_number="H.R. 3633",
+        title="H.R. 3633: Digital Asset Market Clarity Act",
+        current_status="pass_over_house", current_status_label="Passed House (Senate next)",
+        current_status_description="", current_status_date=None, introduced_date=None,
+        is_alive=True, link="https://www.govtrack.us/congress/bills/119/hr3633",
+        major_actions=(), fetched_at=datetime.now(UTC),
+    )
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "OK")), \
+         patch("polymarketpulse.providers.govtrack.fetch_bill_status", return_value=fake_status):
+        run_research_for_market(storage, settings, market_row, trigger="test")
+
+    entity_row = storage.connection.execute(
+        "SELECT id, entity_type FROM entities WHERE canonical_name = ?",
+        ("h.r. 3633: digital asset market clarity act",),
+    ).fetchone()
+    assert entity_row is not None
+    assert entity_row[1] == "legislation"
+
+    event_row = storage.connection.execute(
+        "SELECT id, event_type, source FROM events WHERE source = 'govtrack'"
+    ).fetchone()
+    assert event_row is not None
+    assert event_row[1] == "legislative_progress"
+
+    relation_row = storage.connection.execute(
+        "SELECT relation_type, evidence_tier, target_provider, target_provider_market_id "
+        "FROM event_relations WHERE target_provider = ? AND target_provider_market_id = ?",
+        (market_row["provider"], market_row["provider_market_id"]),
+    ).fetchone()
+    assert relation_row is not None
+    assert relation_row[0] == "SIGNALS"
+    assert relation_row[1] == "KNOWN"
+
+    signals = collect_event_relation_signals(
+        storage.connection, market_row["provider"], market_row["provider_market_id"]
+    )
+    assert len(signals) == 1
+    assert signals[0].relation_type == "SIGNALS"
+    assert signals[0].evidence_tier == "KNOWN"
+    assert signals[0].quantitative is False  # no strength/confidence-numeric on this claim path
+
+
+def test_legislation_run_twice_does_not_duplicate_event_relation_graph(storage: Storage) -> None:
+    """Repeated research runs for the same real fact must not grow
+    entities/events/event_relations unboundedly -- dedup by content, same
+    discipline as claims/claim_market_links."""
+    from polymarketpulse.providers.govtrack import BillStatus
+
+    market_row = _seed_market(storage)
+    storage.connection.execute(
+        "UPDATE markets SET question = ? WHERE market_id = 'rr-1'",
+        ("Clarity Act (H.R.3633) signed into law in 2026?",),
+    )
+    storage.connection.commit()
+    market_row["question"] = "Clarity Act (H.R.3633) signed into law in 2026?"
+    settings = Settings.load()
+
+    fake_status = BillStatus(
+        congress=119, bill_type="house_bill", number=3633, display_number="H.R. 3633",
+        title="H.R. 3633: Digital Asset Market Clarity Act",
+        current_status="pass_over_house", current_status_label="Passed House (Senate next)",
+        current_status_description="", current_status_date=None, introduced_date=None,
+        is_alive=True, link="https://www.govtrack.us/congress/bills/119/hr3633",
+        major_actions=(), fetched_at=datetime.now(UTC),
+    )
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "OK")), \
+         patch("polymarketpulse.providers.govtrack.fetch_bill_status", return_value=fake_status):
+        run_research_for_market(storage, settings, market_row, trigger="test")
+        run_research_for_market(storage, settings, market_row, trigger="test")
+
+    assert storage.connection.execute("SELECT COUNT(*) FROM entities").fetchone()[0] == 1
+    assert storage.connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
+    assert storage.connection.execute("SELECT COUNT(*) FROM event_relations").fetchone()[0] == 1
+
+
 def test_hormuz_market_fetches_real_chokepoint_data_and_derives_direction(storage: Storage) -> None:
     """Real, targeted second-source integration for strategic-waterway
     markets: a question mentioning "Hormuz" must trigger a real IMF
