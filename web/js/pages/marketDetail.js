@@ -232,6 +232,8 @@ function _headlinePanelHtml(market, opp, pred) {
     </div>` : "";
   const earlySignals = (p.early_signals || []).filter((s) => ["RUMOR", "EARLY_SIGNAL", "PARTIALLY_CONFIRMED"].includes(s.signal_status));
   const earlySignalNotice = earlySignals.length ? `<section><h3>Frühe Signale</h3>${earlySignals.slice(0, 3).map((s) => `<div class="empty-state"><strong>⚡ Frühes Signal erkannt</strong> · ${s.provider}<br/>${s.summary}<br/><span class="sub">Status: noch nicht unabhängig bestätigt. Nächster Schritt: passende Primär- und unabhängige Quellen prüfen.</span></div>`).join("")}</section>` : "";
+  const coherenceWarnings = (p.coherence || []).filter((item) => item.status === "COHERENCE_WARNING");
+  const coherenceNotice = coherenceWarnings.length ? `<div class="empty-state"><strong>Verbundene Märkte wirken inkonsistent.</strong><br/><span class="sub">${coherenceWarnings[0].explanation}</span><details><summary>Beziehungsdetails</summary><p class="sub">${coherenceWarnings[0].relationship} · ${coherenceWarnings[0].other_market_id} · provenance-basiert</p></details></div>` : "";
   return `
     <h2 style="margin:0 0 12px">${market.question}</h2>
     <div class="widget-grid">
@@ -245,6 +247,7 @@ function _headlinePanelHtml(market, opp, pred) {
     ${decisionReasons}
     ${sourceNotice}
     ${earlySignalNotice}
+    ${coherenceNotice}
     ${maturityDetails}
     <p class="sub">Modellhypothese (intern, nicht veröffentlicht): ${modelHypothesis} · Status: ${statusLabel}</p>
     ${!forecastPublished ? `<p class="sub">Keine ausreichende unabhängige Evidenz für eine veröffentlichbare Prognose.</p>` : ""}

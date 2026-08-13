@@ -2098,6 +2098,29 @@ class Storage:
         except sqlite3.Error:
             return []
 
+    def save_market_relationship(self, market_id_a: str, market_id_b: str, relation_type: str, provenance_url: str, derivation_method: str, confidence: float, evidence_detail: str) -> int | None:
+        if relation_type not in {"PARENT_CHILD", "COMPLEMENT", "MUTUALLY_EXCLUSIVE", "CONDITIONAL", "SHARED_RESOLUTION_EVENT"} or not provenance_url or not evidence_detail:
+            return None
+        try:
+            self.connection.execute("INSERT INTO market_relationships(market_id_a,market_id_b,relation_type,provenance_url,derivation_method,confidence,evidence_detail,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(market_id_a,market_id_b,relation_type,provenance_url) DO NOTHING", (market_id_a, market_id_b, relation_type, provenance_url, derivation_method, confidence, evidence_detail, datetime.now(UTC).isoformat()))
+            row = self.connection.execute("SELECT id FROM market_relationships WHERE market_id_a=? AND market_id_b=? AND relation_type=? AND provenance_url=?", (market_id_a, market_id_b, relation_type, provenance_url)).fetchone()
+            self.connection.commit()
+            return row[0] if row else None
+        except sqlite3.Error:
+            return None
+
+    def coherence_audit(self, relationship_id: int, probability_a: float | None, probability_b: float | None) -> dict | None:
+        from .coherence import audit_relationship
+        try:
+            row = self.connection.execute("SELECT relation_type FROM market_relationships WHERE id=?", (relationship_id,)).fetchone()
+            if not row: return None
+            audit = audit_relationship(row[0], probability_a, probability_b, relationship_id)
+            self.connection.execute("INSERT INTO coherence_audits(relationship_id,audited_at,status,severity,probability_a,probability_b,explanation) VALUES(?,?,?,?,?,?,?)", (relationship_id, datetime.now(UTC).isoformat(), audit.status, audit.severity, probability_a, probability_b, audit.explanation))
+            self.connection.commit()
+            return audit.__dict__
+        except sqlite3.Error:
+            return None
+
     def social_reputation(self, provider: str) -> dict:
         """Discovery reputation, intentionally separate from evidence authority."""
         rows = self.connection.execute("SELECT signal_status,origin_cluster FROM social_signals WHERE provider=?", (provider,)).fetchall()

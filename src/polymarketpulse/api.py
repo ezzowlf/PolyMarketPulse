@@ -1111,6 +1111,16 @@ def prediction(market_id: str, storage: Storage = Depends(get_storage)) -> dict:
     from .research_status import source_availability
     result["source_availability"] = source_availability(storage, market_id)
     result["early_signals"] = storage.get_social_signals(market_id)
+    from .lineage import audit_market_lineage
+    result["lineage"] = audit_market_lineage(storage.connection, market_id)
+    relations = storage.connection.execute("SELECT id,market_id_a,market_id_b,relation_type,confidence,evidence_detail FROM market_relationships WHERE market_id_a=? OR market_id_b=?", (market_id, market_id)).fetchall()
+    warnings = []
+    for rel_id, a, b, relation_type, confidence, detail in relations:
+        other = b if a == market_id else a
+        row = storage.connection.execute("SELECT market_yes_probability FROM prediction_snapshots WHERE market_id=? ORDER BY created_at DESC LIMIT 1", (other,)).fetchone()
+        audit = storage.coherence_audit(rel_id, result.get("market_yes_probability") if a == market_id else (row[0] if row else None), (row[0] if row else None) if a == market_id else result.get("market_yes_probability"))
+        if audit: warnings.append({**audit, "relationship": relation_type, "other_market_id": other, "confidence": confidence, "provenance": detail})
+    result["coherence"] = warnings
     return result
 
 

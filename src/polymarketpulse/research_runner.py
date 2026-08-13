@@ -576,7 +576,10 @@ def build_queue_from_db(storage: Storage):
                EXISTS(SELECT 1 FROM news_market_links n
                       WHERE n.provider = m.provider AND n.provider_market_id = m.provider_market_id),
                (SELECT COUNT(*) FROM social_signal_markets sm JOIN social_signals ss ON ss.signal_id=sm.signal_id
-                WHERE sm.market_id=m.market_id AND ss.signal_status IN ('RUMOR','EARLY_SIGNAL','PARTIALLY_CONFIRMED'))
+                WHERE sm.market_id=m.market_id AND ss.signal_status IN ('RUMOR','EARLY_SIGNAL','PARTIALLY_CONFIRMED')),
+               (SELECT COUNT(*) FROM coherence_audits ca JOIN market_relationships mr ON mr.id=ca.relationship_id
+                WHERE ca.id IN (SELECT id FROM coherence_audits x WHERE x.relationship_id=ca.relationship_id ORDER BY audited_at DESC LIMIT 1)
+                AND ca.status='COHERENCE_WARNING' AND (mr.market_id_a=m.market_id OR mr.market_id_b=m.market_id))
         FROM markets m
         LEFT JOIN prediction_snapshots p ON p.id = (
             SELECT ps.id FROM prediction_snapshots ps
@@ -592,7 +595,7 @@ def build_queue_from_db(storage: Storage):
     for (
         market_id, provider, provider_market_id, question, category, classified_category,
         resolution_source, description, end_date, market_probability, model_probability,
-        gap_summary_json, has_news_links, early_signal_count,
+        gap_summary_json, has_news_links, early_signal_count, coherence_warning_count,
     ) in unresolved:
         row = {
             "market_id": market_id, "provider": provider, "provider_market_id": provider_market_id,
@@ -623,6 +626,7 @@ def build_queue_from_db(storage: Storage):
             high_gap_count=int(gap_summary.get("high", 0) or 0),
             has_source_coverage=bool(has_news_links),
             early_signal_count=early_signal_count,
+            coherence_warning_count=coherence_warning_count,
         ))
     return rows_by_id, build_research_queue(signals)
 

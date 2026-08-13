@@ -1251,6 +1251,24 @@ def _migration_028_information_observability(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migration_029_coherence_lineage(conn: sqlite3.Connection) -> None:
+    """Explicit market relationships and immutable audit outcomes."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS market_relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, market_id_a TEXT NOT NULL REFERENCES markets(market_id), market_id_b TEXT NOT NULL REFERENCES markets(market_id), relation_type TEXT NOT NULL,
+            provenance_url TEXT NOT NULL, derivation_method TEXT NOT NULL, confidence REAL NOT NULL, evidence_detail TEXT NOT NULL, created_at TEXT NOT NULL,
+            UNIQUE(market_id_a, market_id_b, relation_type, provenance_url)
+        );
+        CREATE TABLE IF NOT EXISTS coherence_audits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, relationship_id INTEGER NOT NULL REFERENCES market_relationships(id), audited_at TEXT NOT NULL, status TEXT NOT NULL, severity TEXT NOT NULL, probability_a REAL, probability_b REAL, explanation TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS lineage_audits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, market_id TEXT NOT NULL REFERENCES markets(market_id), snapshot_id INTEGER REFERENCES prediction_snapshots(id), audited_at TEXT NOT NULL, status TEXT NOT NULL, severity TEXT NOT NULL, detail_json TEXT NOT NULL
+        );
+    """)
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1280,6 +1298,7 @@ MIGRATIONS: list[Migration] = [
     (26, "claim_temporal_state", _migration_026_claim_temporal_state),
     (27, "social_discovery", _migration_027_social_discovery),
     (28, "information_observability", _migration_028_information_observability),
+    (29, "coherence_lineage", _migration_029_coherence_lineage),
 ]
 
 
