@@ -43,6 +43,7 @@ from .ensemble import combine_submodels, quality_scaled_weight
 from .event_clock import derive_event_clock
 from .event_relations import collect_event_relation_signals, compute_event_relation_estimate
 from .evidence import compute_independent_evidence
+from .expected_vs_observed import derive_expected_vs_observed
 from .history import compute_history_estimate
 from .manipulation import compute_manipulation_risk
 from .market_flow import load_flow_metrics_from_db
@@ -1124,6 +1125,21 @@ def compute_prediction(
         next_event=next_event,
     )
 
+    # Phase H: Expected vs Observed -- whether the previously-expected step
+    # was actually observed, and whether the currently-expected one is
+    # running late against the market's own real deadline. Reuses
+    # event_clock's real feasibility/deadline-pressure signals; no new
+    # duration data invented.
+    expected_vs_observed = derive_expected_vs_observed(
+        resolution_path=(
+            world_state.path_to_resolution.resolution_path
+            if world_state is not None and world_state.path_to_resolution is not None
+            else None
+        ),
+        next_event=next_event,
+        event_clock=event_clock,
+    )
+
     # Block F Part 1: compute change_triggers HERE (moved up from its
     # original post-result location — world_state/data_gaps/divergence_audit
     # are all already real values by this point) so build_scenarios can
@@ -1215,6 +1231,7 @@ def compute_prediction(
         structured_world_state=structured_world_state,
         next_event=next_event,
         event_clock=event_clock,
+        expected_vs_observed=expected_vs_observed,
     )
     # Phase F: evidence-gated forecast hierarchy
     # evidence_backed_probability: only when sufficient evidence exists

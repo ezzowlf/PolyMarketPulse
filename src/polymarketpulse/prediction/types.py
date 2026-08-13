@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from .event_clock import EventClock
     from .event_relations import RelationSignal
     from .evidence import IndependentEvidenceResult
+    from .expected_vs_observed import ExpectedVsObserved
     from .manipulation import ManipulationRiskResult
     from .market_flow import OrderBookMetrics, TradeFlowMetrics, WalletConcentrationMetrics
     from .next_event import NextEvent
@@ -558,6 +559,14 @@ class PredictionResult:
     # from a guessed duration. See event_clock.py.
     event_clock: EventClock | None = None
 
+    # --- Phase H: Expected vs Observed (additive) -----------------------------
+    # Whether the previously-expected step has actually been observed, and
+    # whether the currently-expected one is running late against the
+    # market's own real deadline. lateness_hours is only ever a real
+    # deadline-vs-now delta, never a guessed per-step expected-by date. See
+    # expected_vs_observed.py.
+    expected_vs_observed: ExpectedVsObserved | None = None
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -632,4 +641,7 @@ class PredictionResult:
             ),
             "next_event": self.next_event.as_dict() if self.next_event else None,
             "event_clock": self.event_clock.as_dict() if self.event_clock else None,
+            "expected_vs_observed": (
+                self.expected_vs_observed.as_dict() if self.expected_vs_observed else None
+            ),
         }
