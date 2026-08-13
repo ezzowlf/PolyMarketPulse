@@ -201,3 +201,50 @@ def test_legislation_market_fetches_and_persists_a_real_govtrack_claim(storage: 
     assert row is not None
     assert row[1] == "PRIMARY_CONFIRMED"
     assert row[2] == "house_vote"
+
+
+def test_hormuz_market_fetches_real_chokepoint_data_and_derives_direction(storage: Storage) -> None:
+    """Real, targeted second-source integration for strategic-waterway
+    markets: a question mentioning "Hormuz" must trigger a real IMF
+    PortWatch fetch and persist a claim whose direction is correctly
+    derived from comparing the real 7-day average to the real threshold
+    parsed from the resolution text -- not a generic Iran/Hormuz article."""
+    from datetime import date
+
+    from polymarketpulse.providers.imf_portwatch import ChokepointTransitData
+
+    market_row = _seed_market(storage)
+    storage.connection.execute(
+        "UPDATE markets SET question = ?, resolution_source = ? WHERE market_id = 'rr-1'",
+        (
+            "Strait of Hormuz traffic returns to normal by August 31?",
+            "resolves YES if 7-day moving average of transit calls is equal to or above 60",
+        ),
+    )
+    storage.connection.commit()
+    market_row["question"] = "Strait of Hormuz traffic returns to normal by August 31?"
+    market_row["resolution_source"] = "resolves YES if 7-day moving average of transit calls is equal to or above 60"
+    settings = Settings.load()
+
+    fake_data = ChokepointTransitData(
+        chokepoint="Strait of Hormuz",
+        observations=((date(2026, 8, 9), 1),),
+        seven_day_average=4.43,
+        fetched_at=datetime.now(UTC),
+    )
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "OK")), \
+         patch("polymarketpulse.providers.imf_portwatch.fetch_chokepoint_transit_data", return_value=fake_data):
+        record = run_research_for_market(storage, settings, market_row, trigger="test")
+
+    assert record.detail["chokepoint"]["attempted"] is True
+    assert record.detail["chokepoint"]["fetch_status"] == "OK"
+    assert record.detail["chokepoint"]["seven_day_average"] == 4.43
+    assert record.detail["chokepoint"]["threshold"] == 60
+    assert record.detail["chokepoint"]["direction"] == "negative"  # 4.43 << 60
+
+    row = storage.connection.execute(
+        "SELECT source_id, verification_status, direction FROM claims WHERE source_id = 'imf_portwatch'"
+    ).fetchone()
+    assert row is not None
+    assert row[1] == "PRIMARY_CONFIRMED"
+    assert row[2] == "negative"

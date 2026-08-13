@@ -177,6 +177,86 @@ def _fetch_and_persist_legislation_claim(storage: Storage, question: str) -> dic
     }
 
 
+# Real question-text -> PortWatch chokepoint name mapping. Deliberately
+# narrow/explicit (not fuzzy) so this only ever fires for markets that are
+# genuinely about one of these two specific chokepoints.
+_CHOKEPOINT_KEYWORDS = {
+    "hormuz": "Strait of Hormuz",
+    "bab-el-mandeb": "Bab-el-Mandeb",
+    "bab el-mandeb": "Bab-el-Mandeb",
+}
+
+_TRANSIT_THRESHOLD_RE = re.compile(r"(?:equal to or above|at or above|>=|above)\s+(\d+)", re.IGNORECASE)
+
+
+def _fetch_and_persist_chokepoint_claim(storage: Storage, question: str, resolution_text: str | None) -> dict:
+    """Real, targeted second-source fetch for strategic-waterway markets:
+    identifies the specific chokepoint from the question text, fetches its
+    REAL daily transit-call data from IMF PortWatch's own public dataset
+    (providers/imf_portwatch.py -- the exact resolution-question data
+    source these markets cite, not a generic news article), and persists
+    it as a real, resolution-relevant, PRIMARY_CONFIRMED claim with a real
+    direction (derived from comparing the real 7-day average to the real
+    threshold parsed from the resolution text, when present).
+
+    This is the deliberate answer to "find a real second independent
+    source, not just any Hormuz-adjacent article" -- IMF PortWatch is an
+    official international-organization data provider, genuinely
+    independent of news reporting, and its data directly and quantitatively
+    answers the resolution question these specific markets ask.
+
+    Never raises; a fetch/parse failure or a question that doesn't
+    reference a known chokepoint just means no claim this run."""
+    lowered = (question or "").lower()
+    chokepoint = next((name for kw, name in _CHOKEPOINT_KEYWORDS.items() if kw in lowered), None)
+    if chokepoint is None:
+        return {"attempted": False}
+
+    from .providers.imf_portwatch import fetch_chokepoint_transit_data
+
+    data = fetch_chokepoint_transit_data(chokepoint)
+    if data is None:
+        return {"attempted": True, "fetch_status": "SOURCE_FETCH_FAILED", "chokepoint": chokepoint}
+
+    threshold_match = _TRANSIT_THRESHOLD_RE.search(resolution_text or "")
+    threshold = int(threshold_match.group(1)) if threshold_match else None
+    avg = data.seven_day_average
+    if threshold is not None and avg is not None:
+        direction = "positive" if avg >= threshold else "negative"
+        predicate = f"7-day average transit calls = {avg} (threshold {threshold})"
+    else:
+        direction = "neutral"
+        predicate = f"7-day average transit calls = {avg}" if avg is not None else "no data"
+
+    import hashlib as _hashlib
+
+    from .claims import Claim
+
+    latest_date = data.observations[-1][0] if data.observations else None
+    claim_id = _hashlib.sha256(
+        f"imf_portwatch:{chokepoint}:{latest_date}:{avg}".encode()
+    ).hexdigest()[:32]
+    claim = Claim(
+        claim_id=claim_id, subject=f"{chokepoint} transit calls", predicate=predicate, object=None,
+        speaker=None, source_id="imf_portwatch", source_url="https://portwatch.imf.org",
+        timestamp=datetime.combine(latest_date, datetime.min.time(), tzinfo=UTC) if latest_date else None,
+        verification_status="PRIMARY_CONFIRMED", confidence=0.95,
+        entities=(chokepoint,), location=chokepoint,
+        raw_reference=f"observations={len(data.observations)}",
+        event_type="waterway_status", direction=direction, resolution_step=None,
+    )
+    newly_inserted = storage.save_claim(claim)
+    storage.save_claim_source(
+        claim.claim_id, "imf_portwatch", "https://portwatch.imf.org",
+        claim.timestamp.isoformat() if claim.timestamp else None,
+    )
+    return {
+        "attempted": True, "fetch_status": "OK", "chokepoint": chokepoint,
+        "seven_day_average": avg, "threshold": threshold, "direction": direction,
+        "claim_newly_inserted": newly_inserted,
+    }
+
+
 def run_research_for_market(
     storage: Storage,
     settings,
@@ -208,6 +288,9 @@ def run_research_for_market(
     # --- Real, targeted official-source fetch for legislation-shaped
     # markets (e.g. "H.R.3633") — GovTrack, not another GDELT query.
     legislation_result = _fetch_and_persist_legislation_claim(storage, question)
+    chokepoint_result = _fetch_and_persist_chokepoint_claim(
+        storage, question, market_row.get("resolution_source")
+    )
 
     # --- Real source fetch, scoped to this one market -----------------
     sources_requested = 1  # one real GDELT query for this market's own question
@@ -287,6 +370,7 @@ def run_research_for_market(
             "gdelt_query": query,
             "source_fetch_status": source_fetch_status,
             "legislation": legislation_result,
+            "chokepoint": chokepoint_result,
             "groups_before": groups_before, "primary_before": primary_before,
         },
     )
