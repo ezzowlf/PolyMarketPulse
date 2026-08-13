@@ -1,6 +1,27 @@
 # HANDOFF
 
-## THIS ROUND (newest) — First-ever real published forecast: Fed policy-rate fallback (NY Fed EFFR), GovTrack + IMF PortWatch wired into research runs, Research-Run UI
+## THIS ROUND (newest) — Real claims now measurably affect the forecast (the two remaining architecture gaps closed)
+
+Closed the two gaps the prior round's own report flagged as open. Direct work, no delegation.
+
+**Root cause of "claims stored but never influence Evidence/Forecast"**: no table linked a claim to the specific market it was fetched for (`claim_sources` records source attribution per claim, not per-market usage — this exact gap was already documented by `evaluation.py::evaluate_source_performance`, which had a real computation path built but unreachable). Migration 25 adds `claim_market_links(claim_id, provider, provider_market_id, claim_type)`. `research_runner.py`'s GovTrack/IMF-PortWatch integrations now populate it with an explicit classification: `DIRECT_RESOLUTION` (a claim that directly answers the resolution question), `PATH_STEP` (confirms one resolution-path step only, not yet final), `QUANTITATIVE_SIGNAL` (real quantitative data without a usable direct threshold).
+
+`evidence.py::compute_independent_evidence` now folds `DIRECT_RESOLUTION`/`QUANTITATIVE_SIGNAL` claims into the exact same scoring math every article-based factor already goes through — no parallel weighting system, no invented coefficients. A real `DIRECT_RESOLUTION` claim can satisfy the evidence-sufficiency gate alone (a single official/primary data point is categorically stronger than one ambiguous news article). `PATH_STEP` claims are deliberately excluded from evidence scoring — the explicit double-counting guard the project owner asked for.
+
+**Hormuz's empty `resolution_source` — root cause found and fixed**: the real resolution rule text was present all along under `markets.description` (populated by the provider fetch), just not `resolution_source` (empty for this market). `research_runner.py` now falls back to `description`. Added an explicit `RESOLUTION_AMBIGUOUS` status for when real transit data exists but no threshold can be parsed from the resolution text — surfaced honestly rather than silently treated as neutral.
+
+**Live-verified against the real production DB, both reference cases**:
+- **Hormuz (`2774056`)**: real IMF PortWatch data (7-day avg=4.43 vs the real threshold 60, now correctly parsed) persists as `DIRECT_RESOLUTION`/`direction=negative`. `independent_evidence.available` flipped **False→True for the first time**, `independent_yes_probability=0.461` (real Bayesian output combining the real UN News article + the real PortWatch claim), `divergence_audit` correctly `REJECT`s publishing given the large divergence from the market price (2.5%) — no gate loosened, no double counting, genuinely conservative real behavior.
+- **Clarity Act (`polymarket:1163699`)**: GovTrack's real "Passed House (Senate next)" status now links as `PATH_STEP` (bill not yet finally resolved) and correctly does **NOT** move `model_hypothesis_probability` (still 0.6727, unchanged) — proving the double-counting guard works in practice, not just in theory.
+- **Fed (`polymarket:2252245`)**: unaffected by this round's change, confirmed still real — `published=0.2247`, `evidence_backed=0.2247`, `model_hypothesis=0.2247`, all real quantitative macro-model output from the prior round's NY Fed fallback fix.
+
+**Coverage before→after this specific fix**: `markets_with_claims` 1→2 (Hormuz now correctly counted — the first market where evidence genuinely became available through a real, non-news claim), `markets_with_model_hypothesis` 30→31, `markets_with_evidence_backed_forecast`/`published_forecast_forecast` unchanged at 1 each (Fed's — Hormuz's real divergence correctly gets REJECTed, not published, which is the right outcome given how far the real evidence is from the market price).
+
+**Explicitly NOT done this round, honestly flagged**: `PATH_STEP` claims are correctly excluded from evidence scoring but are **not yet wired into `world_state.py`'s `ResolutionPath`/`completed_steps`** — so Clarity Act's real "House passed" fact does not yet mechanically update `path_feasibility`/`deadline_pressure`/`forecast_maturity` the way the order asked ("Wenn ein Claim nur einen Resolution-Step bestätigt, dann soll er genau diesen Step verändern"). This is the single largest remaining piece of the claims-integration work — a real, scoped follow-up, not started this round due to time. The separate, much larger "Future Intelligence Layer" 76-item request (Event Knowledge Graph, Phase A–F) was also not started this round — priority was given to closing the two concretely-identified architecture gaps first, per the message's own explicit ordering.
+
+**Verification**: `python -m pytest tests/ -q` → **953 passed** (951 baseline-of-this-multi-round-session + 3 new + 1 test-name/semantics update reflecting the now-real linkage), 0 regressions. `ruff check .` → all checks passed. `git diff --check` clean. No secrets in diff. **Still NO PUSH** — local commit only (`e1a27e3`), awaiting explicit push approval. (Note: the prior round's work WAS pushed per the project owner's separate explicit push authorization — `origin/master` is currently at `72ee6e1`; this round's commit `e1a27e3` is one commit ahead, unpushed.)
+
+## PRIOR ROUND — First-ever real published forecast: Fed policy-rate fallback (NY Fed EFFR), GovTrack + IMF PortWatch wired into research runs, Research-Run UI
 
 Continuation of the 13-item close-out order following the prior round's honest gap list. Direct work, no delegation.
 
