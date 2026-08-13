@@ -848,6 +848,14 @@ def compute_prediction(
     forecast_status = _forecast_status(
         estimated_yes, independent_probability, all_submodels, confidence, _proposition_for_status
     )
+    # A status must never imply a blended/usable forecast when the ensemble
+    # did not produce a probability at all.  Some sparse live routes expose
+    # available diagnostic submodels but no numeric estimate; without this
+    # guard they were labelled BLENDED_FORECAST despite all forecast tiers
+    # being null.  This is a semantic correction only: it creates no value,
+    # relaxes no gate, and keeps the honest NO_FORECAST result.
+    if estimated_yes is None:
+        forecast_status = "NO_FORECAST"
     if forecast_status == "NO_FORECAST" and _prior_forecast_status_was_history_only and estimated_yes is not None:
         # History-only-safety-rule fired (Part 4): don't let a quantitative
         # probability survive as estimated_yes/independent_probability once
