@@ -10,6 +10,31 @@ import json
 from datetime import datetime, timedelta
 
 
+def classify_research_status(
+    *,
+    published_forecast_probability: float | None,
+    model_hypothesis_probability: float | None,
+    forecast_status: str | None,
+    has_research_run: bool,
+) -> str:
+    """Classify the user-facing state without treating an unpublished model as a forecast.
+
+    This deliberately uses only persisted facts available to list views.  The
+    detail endpoint refines it with live source availability, where a provider
+    outage is known.  Keeping the classification here prevents each UI screen
+    from inventing a different meaning for an absent published forecast.
+    """
+    if published_forecast_probability is not None:
+        return "PUBLISHED"
+    if forecast_status == "FORECAST_SUPPRESSED":
+        return "FORECAST_BLOCKED"
+    if model_hypothesis_probability is not None:
+        return "MODEL_ONLY"
+    if has_research_run:
+        return "RESEARCHED_NO_EVIDENCE"
+    return "NOT_RESEARCHED"
+
+
 def _parse(value: str | None) -> datetime | None:
     try:
         return datetime.fromisoformat(value) if value else None

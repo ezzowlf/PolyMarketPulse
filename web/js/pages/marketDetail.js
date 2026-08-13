@@ -105,8 +105,8 @@ async function renderMarketDetailPage(container, marketId) {
         </div>
       </details>
 
-      <div class="panel">
-        <h3>Relevante Ereignisse</h3>
+      <details class="panel">
+        <summary><h3 style="display:inline">Verknüpfte Nachrichten (Audit)</h3></summary>
         ${
           market.news.length
             ? `<table><thead><tr><th>Zeitpunkt</th><th>Quelle</th><th>Überschrift</th><th>Relevanz</th></tr></thead><tbody>
@@ -114,20 +114,12 @@ async function renderMarketDetailPage(container, marketId) {
               </tbody></table>`
             : `<div class="empty-state">Keine mit diesem Markt verknüpften Nachrichten.</div>`
         }
-      </div>
+      </details>
 
-      <div class="panel">
-        <h3>Signalhistorie <span class="sub">(Erweitert)</span></h3>
-        ${
-          market.signals.length
-            ? `<table><thead><tr><th>Zeit</th><th>Typ</th><th>Score</th><th>Status</th></tr></thead><tbody>
-          ${market.signals
-            .map((s) => `<tr><td>${fmtDate(s.captured_at)}</td><td>${s.signal_type}</td><td>${fmtNum(s.score, 1)}</td><td>${s.status}</td></tr>`)
-            .join("")}
-          </tbody></table>`
-            : `<div class="empty-state">Keine Signale erfasst.</div>`
-        }
-      </div>
+      <details class="panel">
+        <summary><h3 style="display:inline">Signalhistorie (Audit)</h3></summary>
+        ${_signalHistoryHtml(market.signals)}
+      </details>
     `;
 
     _renderChangesPanel(opp);
@@ -170,6 +162,23 @@ async function renderMarketDetailPage(container, marketId) {
   }
 }
 
+function _signalHistoryHtml(signals) {
+  if (!signals || !signals.length) return `<div class="empty-state">Keine Signale erfasst.</div>`;
+  const grouped = new Map();
+  for (const signal of signals) {
+    // Scanner retries can record the same observation more than once.  Keep
+    // the audit evidence, but group identical type/score/status/timestamp
+    // entries rather than presenting them as independent signals.
+    const key = [signal.captured_at, signal.signal_type, signal.score, signal.status].join("|");
+    const current = grouped.get(key) || { ...signal, count: 0 };
+    current.count += 1;
+    grouped.set(key, current);
+  }
+  return `<table><thead><tr><th>Zeit</th><th>Typ</th><th>Score</th><th>Status</th></tr></thead><tbody>${[...grouped.values()]
+    .map((s) => `<tr><td>${fmtDate(s.captured_at)}</td><td>${s.signal_type}${s.count > 1 ? ` × ${s.count}` : ""}</td><td>${fmtNum(s.score, 1)}</td><td>${s.status}</td></tr>`)
+    .join("")}</tbody></table>`;
+}
+
 function _renderChangesPanel(opp) {
   const panel = document.getElementById("changes-panel");
   const c = opp && opp.change_since_last_analysis;
@@ -199,7 +208,10 @@ function _headlinePanelHtml(market, opp, pred) {
     ? fmtPct(p.model_hypothesis_probability)
     : "keine";
   const pulseValue = forecastPublished ? fmtPct(p.published_forecast_probability) : "Keine belastbare Prognose";
-  const pulseSub = forecastPublished ? "Evidenzgestützt" : "Nicht genügend unabhängige Evidenz";
+  const quantitativeOnly = _hasQuantitativeSupport(p) && !((p.independent_evidence || {}).evidence_for_yes || []).length && !((p.independent_evidence || {}).evidence_for_no || []).length;
+  const pulseSub = forecastPublished
+    ? (quantitativeOnly ? "Primär quantitativ begründet" : "Evidenzgestützt")
+    : "Nicht genügend unabhängige Evidenz";
   const statusLabel = FORECAST_STATUS_LABEL_DE[p.forecast_status] || p.forecast_status || "Datenlage unzureichend";
   const trustLabel = p.confidence_score >= 70 ? "hoch" : p.confidence_score >= 40 ? "mittel" : "gering";
   const dataQualityLabel = p.data_quality_score >= 75 ? "Gut" : p.data_quality_score >= 45 ? "Mittel" : "Schwach";
@@ -216,7 +228,7 @@ function _headlinePanelHtml(market, opp, pred) {
     ? "Warum belastbar?"
     : "Warum noch keine belastbare Prognose?";
   const maturityRows = (p.maturity_breakdown || []).map((item) => `
-    <tr><td>${item.dimension}</td><td><strong>${item.status}</strong></td><td class="sub">${item.reason}</td></tr>
+    <tr><td>${_humanText(item.dimension)}</td><td><strong>${item.status}</strong></td><td class="sub">${_humanText(item.reason)}</td></tr>
   `).join("");
   const maturityDetails = maturityRows ? `
     <details open>
@@ -239,7 +251,8 @@ function _headlinePanelHtml(market, opp, pred) {
     <div class="widget-grid">
       ${widgetCard({ title: "MARKT", value: fmtPct(p.market_yes_probability) })}
       ${widgetCard({ title: "VERÖFFENTLICHTE PROGNOSE", value: pulseValue, sub: pulseSub })}
-      ${widgetCard({ title: "ENTSCHEIDUNGSSTATUS", value: `<span class="badge ${decisionBadge}">${decisionLabel}</span>` })}
+      ${widgetCard({ title: "STATUS", value: _researchStatusLabel(p) })}
+      ${widgetCard({ title: "EINSCHÄTZUNG", value: `<span class="badge ${decisionBadge}">${decisionLabel}</span>` })}
       ${widgetCard({ title: "VERTRAUEN", value: trustLabel })}
       ${widgetCard({ title: "DATENLAGE", value: dataQualityLabel })}
       ${widgetCard({ title: "DEADLINE", value: deadlineValue })}
@@ -249,9 +262,33 @@ function _headlinePanelHtml(market, opp, pred) {
     ${earlySignalNotice}
     ${coherenceNotice}
     ${maturityDetails}
-    <p class="sub">Modellhypothese (intern, nicht veröffentlicht): ${modelHypothesis} · Status: ${statusLabel}</p>
-    ${!forecastPublished ? `<p class="sub">Keine ausreichende unabhängige Evidenz für eine veröffentlichbare Prognose.</p>` : ""}
+    ${quantitativeOnly ? `<p class="sub">Diese Einschätzung basiert primär auf quantitativen Markt- oder Makrodaten; passende bestätigende Nachrichtenquellen liegen derzeit nicht vor.</p>` : ""}
+    ${!forecastPublished ? `<p class="sub">${_noForecastExplanation(p, availability)}</p>` : ""}
+    <details><summary>Modell- und Prüfstatus</summary><p class="sub">Modellhypothese: ${modelHypothesis} · ${statusLabel}</p></details>
   `;
+}
+
+function _hasQuantitativeSupport(p) {
+  return (p.contribution_breakdown || []).some((c) => c.available && ["macro", "quant"].includes(c.source));
+}
+
+function _researchStatusLabel(p) {
+  const availability = p.source_availability || {};
+  if (p.published_forecast_probability !== null && p.published_forecast_probability !== undefined) return "Prognose veröffentlicht";
+  if (availability.status === "SOURCE_UNREACHABLE") return "Datenquelle derzeit nicht erreichbar";
+  if (p.forecast_status === "FORECAST_SUPPRESSED") return "Prognose noch nicht freigegeben";
+  if (p.model_hypothesis_probability !== null && p.model_hypothesis_probability !== undefined) return "Nur Modellschätzung";
+  if (availability.status === "NO_RELEVANT_EVIDENCE") return "Keine belastbare Evidenz gefunden";
+  if (availability.status === "WEAK_DATA") return "Noch nicht untersucht";
+  return "Recherche läuft";
+}
+
+function _noForecastExplanation(p, availability) {
+  if (availability && availability.status === "SOURCE_UNREACHABLE") return availability.message;
+  if (availability && availability.status === "NO_RELEVANT_EVIDENCE") return availability.message;
+  if (p.forecast_status === "FORECAST_SUPPRESSED") return "Die Modellschätzung wurde nicht veröffentlicht, weil die Abweichung vom Markt noch nicht ausreichend unabhängig belegt ist.";
+  if (_hasQuantitativeSupport(p)) return "Es liegen quantitative Anhaltspunkte vor, aber noch keine ausreichende unabhängige Bestätigung für eine veröffentlichbare Prognose.";
+  return "Der Markt wurde untersucht; für eine belastbare Prognose fehlen derzeit ausreichende unabhängige Belege.";
 }
 
 // FORECAST_STATUS_LABEL_DE is defined once in opportunities.js (loaded
@@ -550,12 +587,12 @@ function _scenarioSectionHtml(scenarios) {
   const richScenarios = scenarios.scenarios || [];
   const richHtml = richScenarios.length ? richScenarios.map((s) => `
     <div class="source-card">
-      <div class="source-card-title"><strong>${s.outcome}</strong>${s.probability !== null && s.probability !== undefined ? ` · ${fmtPct(s.probability)}` : ""}</div>
-      <p>${s.description}</p>
-      ${s.necessary_events && s.necessary_events.length ? `<p class="sub"><strong>Notwendige Ereignisse:</strong> ${s.necessary_events.join("; ")}</p>` : ""}
+      <div class="source-card-title"><strong>${_humanText(s.outcome)}</strong>${s.probability !== null && s.probability !== undefined ? ` · ${fmtPct(s.probability)}` : ""}</div>
+      <p>${_humanText(s.description)}</p>
+      ${s.necessary_events && s.necessary_events.length ? `<p class="sub"><strong>Notwendige Ereignisse:</strong> ${s.necessary_events.map(_humanText).join("; ")}</p>` : ""}
       ${s.supporting_claims && s.supporting_claims.length ? `<p class="sub"><strong>Stützende Belege:</strong> ${s.supporting_claims.join("; ")}</p>` : ""}
       ${s.contradicting_claims && s.contradicting_claims.length ? `<p class="sub"><strong>Widersprechende Belege:</strong> ${s.contradicting_claims.join("; ")}</p>` : ""}
-      ${s.triggers && s.triggers.length ? `<p class="sub"><strong>Trigger:</strong> ${s.triggers.join("; ")}</p>` : ""}
+      ${s.triggers && s.triggers.length ? `<p class="sub"><strong>Trigger:</strong> ${s.triggers.map(_humanTrigger).join("; ")}</p>` : ""}
     </div>
   `).join("") : "";
   return `
@@ -563,9 +600,9 @@ function _scenarioSectionHtml(scenarios) {
     ${richHtml ? `<div class="source-card-grid">${richHtml}</div>` : ""}
     <details${richHtml ? "" : " open"}>
       <summary>Basis-/Bull-/Bear-Case (kurz)</summary>
-      <p><strong>Basisszenario:</strong> ${scenarios.base_case}</p>
-      ${scenarios.bull_case && scenarios.bull_case.length ? `<p><strong>Bull Case:</strong></p><ul>${scenarios.bull_case.map((s) => `<li>${s}</li>`).join("")}</ul>` : ""}
-      ${scenarios.bear_case && scenarios.bear_case.length ? `<p><strong>Bear Case:</strong></p><ul>${scenarios.bear_case.map((s) => `<li>${s}</li>`).join("")}</ul>` : ""}
+      <p><strong>Basisszenario:</strong> ${_humanText(scenarios.base_case)}</p>
+      ${scenarios.bull_case && scenarios.bull_case.length ? `<p><strong>Bull Case:</strong></p><ul>${scenarios.bull_case.map((s) => `<li>${_humanText(s)}</li>`).join("")}</ul>` : ""}
+      ${scenarios.bear_case && scenarios.bear_case.length ? `<p><strong>Bear Case:</strong></p><ul>${scenarios.bear_case.map((s) => `<li>${_humanText(s)}</li>`).join("")}</ul>` : ""}
     </details>
   `;
 }
@@ -576,13 +613,13 @@ function _futureMapHtml(tree) {
   }
   const branches = tree.branches.filter((branch) => branch.branch_type !== "CURRENT");
   const row = (branch) => {
-    const outcome = branch.outcome === "UNRESOLVED" ? "offen" : branch.outcome;
-    const prerequisites = branch.prerequisites && branch.prerequisites.length ? ` · nach ${branch.prerequisites.join(" → ")}` : "";
-    return `<li><strong>${branch.event}</strong>${prerequisites} → ${outcome}</li>`;
+    const outcome = branch.outcome === "UNRESOLVED" ? "offen" : _humanText(branch.outcome);
+    const prerequisites = branch.prerequisites && branch.prerequisites.length ? ` · nach ${branch.prerequisites.map(_humanText).join(" → ")}` : "";
+    return `<li><strong>${_humanText(branch.event)}</strong>${prerequisites} → ${outcome}</li>`;
   };
   return `
     <h3>Future Map</h3>
-    <p class="sub">${tree.template_name}: ${tree.branches[0].event}</p>
+    <p class="sub">${tree.template_name}: ${_humanText(tree.branches[0].event)}</p>
     <ul>${branches.map(row).join("")}</ul>
     <p class="sub">Die Pfade sind strukturell abgeleitet. Es werden keine Übergangswahrscheinlichkeiten angezeigt, solange keine empirische Kalibrierung vorliegt.</p>
   `;
@@ -639,8 +676,34 @@ function _changeTriggersHtml(p) {
   }
   return `
     <h3>Was würde unsere Einschätzung ändern?</h3>
-    <ul>${triggers.map((t) => `<li>${t}</li>`).join("")}</ul>
+    <ul>${triggers.map((t) => `<li>${_humanTrigger(t)}</li>`).join("")}</ul>
   `;
+}
+
+function _humanTrigger(trigger) {
+  const raw = String(trigger || "");
+  const labels = {
+    current_state: "eine bestätigte Änderung des aktuellen Ereigniszustands",
+    path_step: "ein bestätigter nächster Schritt im Ereignispfad",
+    source_fetch_status: "wieder verfügbare oder neue belastbare Quelldaten",
+    DIRECT_RESOLUTION: "eine direkte Bestätigung der Auflösungsbedingung",
+    PATH_STEP: "ein bestätigter Schritt auf dem Weg zur Auflösung",
+    QUANTITATIVE_SIGNAL: "ein deutliches neues quantitatives Signal",
+  };
+  return _humanText(labels[raw] || raw);
+}
+
+function _humanText(value) {
+  const replacements = {
+    current_state: "aktueller Ereigniszustand", macro_inputs: "aktuelle Makrodaten",
+    meeting: "nächste Sitzung", policy_decision: "geldpolitische Entscheidung",
+    resolution: "Auflösung des Markts", path_step: "nächster Schritt im Ereignispfad",
+    DIRECT_RESOLUTION: "direkte Bestätigung der Auflösungsbedingung", PATH_STEP: "Schritt im Ereignispfad",
+    QUANTITATIVE_SIGNAL: "quantitatives Signal", CURRENT_STATE: "Aktueller Ereigniszustand",
+    MACRO_INPUTS: "Aktuelle Makrodaten", MEETING: "Nächste Sitzung",
+    POLICY_DECISION: "Geldpolitische Entscheidung", RESOLUTION: "Auflösung des Markts",
+  };
+  return String(value || "").replace(/\b(?:current_state|macro_inputs|meeting|policy_decision|resolution|path_step|DIRECT_RESOLUTION|PATH_STEP|QUANTITATIVE_SIGNAL|CURRENT_STATE|MACRO_INPUTS|MEETING|POLICY_DECISION|RESOLUTION)\b/g, (token) => replacements[token] || token);
 }
 
 function _dataQualityPanelHtml(p) {
@@ -718,9 +781,9 @@ function _evidenceSectionHtml(p) {
     ? (ie.evidence_for_yes.length + ie.evidence_for_no.length + (ie.discarded_evidence || []).length) > 0
     : false;
   const evidenceCards = hasEvidence
-    ? _sourceCardsHtml(ie)
+    ? _sourceCardsHtml(ie, p)
     : foundButInsufficient
-      ? `<div class="empty-state">${noEvidenceMessage}</div>${_sourceCardsHtml(ie)}`
+      ? `<div class="empty-state">${noEvidenceMessage}</div>${_sourceCardsHtml(ie, p)}`
       : `<div class="empty-state">${noEvidenceMessage}</div>`;
 
   const advancedDetails = `
@@ -786,18 +849,13 @@ async function _loadResearchRunPanel(marketId) {
   }
 }
 
-function _sourceCardsHtml(ie) {
+function _sourceCardsHtml(ie, p) {
   const items = [
     ...(ie.evidence_for_yes || []).slice(0, 3).map((item) => ({ item, direction: "YES" })),
     ...(ie.evidence_for_no || []).slice(0, 3).map((item) => ({ item, direction: "NO" })),
-    // Real articles that were found and considered but didn't match either
-    // side clearly enough — still shown ("gefunden, aber nicht eindeutig")
-    // rather than silently dropped, so "1 relevante Quelle vorhanden" is a
-    // real, inspectable claim, not just text.
-    ...(ie.discarded_evidence || []).slice(0, 3).map((item) => ({ item, direction: "GEPRÜFT" })),
   ];
   if (!items.length) {
-    return `<div class="empty-state">Keine zentralen Quellen gefunden.</div>`;
+    return `<div class="empty-state">${_hasQuantitativeSupport(p) ? "Keine passenden Nachrichtenquellen gefunden. Die vorhandene Einschätzung beruht auf quantitativen Daten, nicht auf Nachrichtenbelegen." : "Keine zentralen, marktrelevanten Quellen gefunden."}</div>`;
   }
   return `
     <div class="source-card-grid">
@@ -968,10 +1026,13 @@ function _forecastHistoryHtml(rows) {
   return `
     <h3>Forecast-Verlauf <span class="sub">(${rows.length} Snapshot(s))</span></h3>
     ${_forecastHistorySparkline(recent)}
+    <details>
+      <summary>Alle gespeicherten Snapshots anzeigen</summary>
     <table>
       <thead><tr><th>Zeitpunkt</th><th>Markt</th><th>Modellhypothese</th><th>Evidenzgestützt</th><th>Veröffentlicht</th></tr></thead>
       <tbody>${rowsHtml}</tbody>
     </table>
+    </details>
   `;
 }
 

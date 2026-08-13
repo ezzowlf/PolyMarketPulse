@@ -31,6 +31,7 @@ from .ai.schemas import (
 )
 from .config import Settings
 from .providers.registry import create_provider, list_provider_names
+from .research_status import classify_research_status
 from .stats import compute_signal_stats
 from .storage import Storage
 
@@ -168,6 +169,7 @@ def markets(
     search: str | None = None,
     min_liquidity: float | None = None,
     min_volume: float | None = None,
+    active_only: bool = True,
     limit: int = 50,
     offset: int = 0,
     storage: Storage = Depends(get_storage),
@@ -184,6 +186,11 @@ def markets(
     if search:
         conditions.append("m.question LIKE ?")
         params.append(f"%{search}%")
+    if active_only:
+        # Resolved/cancelled markets are useful for evaluation, but should not
+        # dominate the default discovery view.  Unresolved markets past their
+        # expected deadline remain visible: they may be awaiting settlement.
+        conditions.append("(m.resolution_status IS NULL OR UPPER(m.resolution_status) NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED'))")
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
     # Latest snapshot per market for liquidity/volume/score filtering & display,
@@ -192,10 +199,13 @@ def markets(
     # prediction engine per row here. Read-only reuse of what other flows
     # already computed and stored — never a fresh compute_prediction() call.
     query = f"""
-        SELECT m.market_id, m.provider, m.provider_market_id, m.question, m.slug, m.category,
+        SELECT m.market_id, m.provider, m.provider_market_id, m.question, m.slug,
+               COALESCE(m.classified_category, m.category) AS category,
                m.url, m.end_date, m.resolution_status,
                ls.yes_price, ls.liquidity, ls.volume_24h, ls.spread, ls.opportunity_score,
-               ps.published_forecast_probability, ps.forecast_status, ps.data_quality_composite_score
+               ps.published_forecast_probability, ps.model_hypothesis_probability,
+               ps.forecast_status, ps.data_quality_composite_score,
+               EXISTS(SELECT 1 FROM research_runs rr WHERE rr.provider_market_id = m.provider_market_id) AS has_research_run
         FROM markets m
         LEFT JOIN (
             SELECT ms1.* FROM market_snapshots ms1
@@ -236,10 +246,19 @@ def markets(
         "spread",
         "opportunity_score",
         "published_forecast_probability",
+        "model_hypothesis_probability",
         "forecast_status",
         "data_quality_composite_score",
+        "has_research_run",
     )
     items = [dict(zip(columns, row, strict=True)) for row in rows]
+    for item in items:
+        item["research_status"] = classify_research_status(
+            published_forecast_probability=item["published_forecast_probability"],
+            model_hypothesis_probability=item["model_hypothesis_probability"],
+            forecast_status=item["forecast_status"],
+            has_research_run=bool(item["has_research_run"]),
+        )
     # Markets-list contract (Block G Part 5): when no forecast was ever
     # published for this market's latest snapshot (or no snapshot exists at
     # all), the PMP% field is real-None, never the unpublished
