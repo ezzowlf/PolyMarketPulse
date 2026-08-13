@@ -1,5 +1,30 @@
 # HANDOFF
 
+## THIS ROUND (newest) — Future Intelligence Phase J closed (Scenario Tree)
+
+Continued from Phase I at `e2ad0f1` on the canonical `master` checkout. Phase J adds
+`prediction/scenario_tree.py::derive_scenario_tree()`: an explicit, serializable branch tree derived only
+from the already-computed `ResolutionPath`, `StructuredWorldState`, `EventClock`, and
+`ConditionalTransition` objects. It does not create a parallel world model and does not affect forecast
+probabilities or publish gates.
+
+Each remaining transition produces a success branch and a failure-to-NO branch. Success branches form the
+ordered prerequisite chain and the final success resolves to YES. A no-action-before-deadline branch is
+only emitted when the real Event Clock actually contains a deadline. Branches expose prerequisites,
+blockers, supporting/contradicting claims, expected-by, terminal outcome, probability, and calibration
+state. Probabilities remain honestly `None`/`QUALITATIVE_ONLY` because Phase I found no real calibrated
+transition dataset; expected timing remains `None` when the Event Clock has none.
+
+Real-data Golden Case (run against a byte-for-byte copy of `data/polymarketpulse.db`, so QA did not mutate
+the production DB): Clarity Act `polymarket:1163699` reads `house_vote` as the last confirmed state, with
+`senate_vote` and `presidential_action` open. The tree is CURRENT -> SENATE_VOTE ->
+PRESIDENTIAL_ACTION -> YES, with failure branches to NO at both transitions. The real row currently has no
+deadline value, so no deadline branch was fabricated.
+
+Verification: `1005 passed` (3 new Phase-J tests; full suite), Ruff clean, and targeted Phase I/J tests
+`8 passed`. Next phase = K (Sensitivity / Counterfactuals), reusing this same tree and forecast hierarchy;
+do not invent numeric deltas where removal/recomputation cannot be performed from real inputs.
+
 ## THIS ROUND (newest) — Future Intelligence Layer Phases G, H, I closed (Event Clock, Expected vs Observed, Conditional Transition Engine); pushed to origin/master
 
 Continuing directly from Phase F (previous round, pushed as `e9c4eec`). Per standing instruction: no interim question, push after each validated checkpoint.

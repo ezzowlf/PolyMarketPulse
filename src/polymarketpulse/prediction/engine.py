@@ -56,6 +56,7 @@ from .reaction_lag import STATUS_REACTED, compute_market_reaction_lag
 from .reliability import compute_market_reliability
 from .resolution_edge import compute_resolution_edge
 from .resolution_semantics import extract_resolution_semantics
+from .scenario_tree import derive_scenario_tree
 from .scenarios import build_scenarios
 from .semantics import MarketProposition, parse_market_proposition
 from .specialized_router import ALL_SPECIALIZED_MODEL_NAMES, route_to_specialized_model
@@ -1153,6 +1154,21 @@ def compute_prediction(
         ),
     )
 
+    # Phase J: branch view over the exact same state/path/transition objects.
+    scenario_tree = derive_scenario_tree(
+        resolution_path=(
+            world_state.path_to_resolution.resolution_path
+            if world_state is not None and world_state.path_to_resolution is not None
+            else None
+        ),
+        structured_world_state=structured_world_state,
+        conditional_transitions=conditional_transitions,
+        event_clock=event_clock,
+        contradicting_claims=tuple(
+            factor.title for factor in (independent_evidence.evidence_for_no if independent_evidence else ())[:5]
+        ),
+    )
+
     # Block F Part 1: compute change_triggers HERE (moved up from its
     # original post-result location — world_state/data_gaps/divergence_audit
     # are all already real values by this point) so build_scenarios can
@@ -1246,6 +1262,7 @@ def compute_prediction(
         event_clock=event_clock,
         expected_vs_observed=expected_vs_observed,
         conditional_transitions=conditional_transitions,
+        scenario_tree=scenario_tree,
     )
     # Phase F: evidence-gated forecast hierarchy
     # evidence_backed_probability: only when sufficient evidence exists

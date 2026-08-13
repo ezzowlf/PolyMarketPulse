@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from .reliability import MarketReliabilityResult
     from .resolution_edge import ResolutionEdgeResult
     from .resolution_semantics import ResolutionSemantics
+    from .scenario_tree import ScenarioTree
     from .semantics import MarketProposition
     from .structured_state import StructuredWorldState
     from .world_state import WorldState
@@ -575,6 +576,9 @@ class PredictionResult:
     # see conditional_transitions.py.
     conditional_transitions: tuple[ConditionalTransition, ...] = field(default_factory=tuple)
 
+    # Phase J: explicit branch tree derived from the same resolution path.
+    scenario_tree: ScenarioTree | None = None
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -653,4 +657,5 @@ class PredictionResult:
                 self.expected_vs_observed.as_dict() if self.expected_vs_observed else None
             ),
             "conditional_transitions": [t.as_dict() for t in self.conditional_transitions],
+            "scenario_tree": self.scenario_tree.as_dict() if self.scenario_tree else None,
         }
