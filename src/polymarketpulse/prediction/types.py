@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from .resolution_edge import ResolutionEdgeResult
     from .resolution_semantics import ResolutionSemantics
     from .semantics import MarketProposition
+    from .structured_state import StructuredWorldState
     from .world_state import WorldState
 
 Recommendation = Literal[
@@ -530,6 +531,15 @@ class PredictionResult:
     decision_state: DecisionState = "NO_POSITION"
     decision_reasons: tuple[str, ...] = field(default_factory=tuple)
 
+    # --- Phase E: Structured World State (additive) -------------------------
+    # The single compact per-market summary (structured_state.py) composed
+    # from world_state/data_gaps already computed above -- CONFIRMED/
+    # DISPUTED facts, current state, completed/open resolution steps,
+    # blockers, open questions, data gaps. Diagnostic/explanatory only,
+    # like world_state itself; never a new probability input. None only
+    # when world_state could not be assembled at all.
+    structured_world_state: StructuredWorldState | None = None
+
     def as_dict(self) -> dict:
         return {
             "market_id": self.market_id,
@@ -599,4 +609,7 @@ class PredictionResult:
             "change_triggers": list(self.change_triggers),
             "decision_state": self.decision_state,
             "decision_reasons": list(self.decision_reasons),
+            "structured_world_state": (
+                self.structured_world_state.as_dict() if self.structured_world_state else None
+            ),
         }

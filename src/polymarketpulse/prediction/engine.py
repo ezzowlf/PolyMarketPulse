@@ -55,6 +55,7 @@ from .resolution_semantics import extract_resolution_semantics
 from .scenarios import build_scenarios
 from .semantics import MarketProposition, parse_market_proposition
 from .specialized_router import ALL_SPECIALIZED_MODEL_NAMES, route_to_specialized_model
+from .structured_state import assemble_structured_world_state
 from .types import (
     ContributionEntry,
     DataQualityBreakdown,
@@ -1078,6 +1079,20 @@ def compute_prediction(
         ),
     )
 
+    # Phase E: Structured World State -- the single compact summary every
+    # consumer (explanation, scenarios, research queue, UI) should read
+    # instead of re-deriving its own view. Pure composition of world_state/
+    # data_gaps already computed above, no new computation.
+    structured_world_state = assemble_structured_world_state(
+        world_state=world_state,
+        resolution_path=(
+            world_state.path_to_resolution.resolution_path
+            if world_state is not None and world_state.path_to_resolution is not None
+            else None
+        ),
+        data_gap_report=data_gaps,
+    )
+
     # Block F Part 1: compute change_triggers HERE (moved up from its
     # original post-result location — world_state/data_gaps/divergence_audit
     # are all already real values by this point) so build_scenarios can
@@ -1166,6 +1181,7 @@ def compute_prediction(
         world_state=world_state,
         proposition=proposition,
         resolution_semantics=resolution_semantics,
+        structured_world_state=structured_world_state,
     )
     # Phase F: evidence-gated forecast hierarchy
     # evidence_backed_probability: only when sufficient evidence exists
