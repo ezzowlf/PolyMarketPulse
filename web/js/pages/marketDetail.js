@@ -264,7 +264,7 @@ function _headlinePanelHtml(market, opp, pred) {
     ${maturityDetails}
     ${quantitativeOnly ? `<p class="sub">Diese Einschätzung basiert primär auf quantitativen Markt- oder Makrodaten; passende bestätigende Nachrichtenquellen liegen derzeit nicht vor.</p>` : ""}
     ${!forecastPublished ? `<p class="sub">${_noForecastExplanation(p, availability)}</p>` : ""}
-    <details><summary>Modell- und Prüfstatus</summary><p class="sub">Modellhypothese: ${modelHypothesis} · ${statusLabel}</p></details>
+    <details><summary>Modell- und Prüfstatus</summary><p class="sub">Archetyp: ${p.forecast_archetype || "GENERIC_RESEARCH_ONLY"} · Fähigkeit: ${p.archetype_capability_state || "UNSUPPORTED"} · Modellhypothese: ${modelHypothesis} · ${statusLabel}${p.numeric_model_reason_code ? ` · Grund: ${p.numeric_model_reason_code}` : ""}</p></details>
   `;
 }
 
@@ -299,7 +299,7 @@ function _noForecastExplanation(p, availability) {
 const SOURCE_LABEL_DE = {
   history: "Historische Basisrate", momentum: "Marktbewegung", news: "News",
   independent_evidence: "Unabhängige Evidenz", event_relations: "Event-Beziehungen",
-  politics: "Politik", geopolitics: "Geopolitik", macro: "Makro", quant: "Quant", sports: "Sport",
+  politics: "Politik", geopolitics: "Geopolitik", macro: "Makro", macro_policy: "Fed-Policy", quant: "Quant", sports: "Sport",
 };
 
 // I1: sources whose independent forecast doesn't take the market price as

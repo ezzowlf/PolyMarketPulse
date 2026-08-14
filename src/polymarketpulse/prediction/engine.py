@@ -26,6 +26,7 @@ from ..data_sources import row_to_provider_health
 from ..price_analytics import PricePoint
 from ..providers.coingecko import PriceData, fetch_price_and_volatility, resolve_coingecko_id
 from ..providers.fred import MacroSnapshot, fetch_macro_snapshot
+from .archetypes import route_archetype
 from .bayesian import bayesian_update
 from .change_triggers import compute_change_triggers
 from .conditional_transitions import derive_conditional_transitions
@@ -45,6 +46,7 @@ from .event_clock import derive_event_clock
 from .event_relations import collect_event_relation_signals, compute_event_relation_estimate
 from .evidence import compute_independent_evidence
 from .expected_vs_observed import derive_expected_vs_observed
+from .fed_policy import predict_shadow as predict_fed_shadow
 from .history import compute_history_estimate
 from .manipulation import compute_manipulation_risk
 from .market_flow import load_flow_metrics_from_db
@@ -332,7 +334,7 @@ def _forecast_status(
     if estimated_yes is None:
         return "NO_FORECAST"
     available_names = {s.name for s in submodel_estimates if s.available}
-    specialized_names = available_names & set(ALL_SPECIALIZED_MODEL_NAMES)
+    specialized_names = available_names & (set(ALL_SPECIALIZED_MODEL_NAMES) | {"macro_policy"})
     independent_names = (
         available_names & {"history", "independent_evidence"}
     ) | specialized_names
@@ -561,6 +563,7 @@ def compute_prediction(
     # shaped at all.
     proposition = parse_market_proposition(question, resolution_text)
     reasoning.append(f"Specialized model event_type: {proposition.event_type or 'none'}")
+    archetype = route_archetype(proposition, question, resolution_text, classified_category or category)
 
     # --- Resolution Engine (ROUND-1, section 4) --------------------------
     # Additive, read-only: no probability computation happens here. See
@@ -669,6 +672,26 @@ def compute_prediction(
                        f"(see routing reasons above).",
             )
         )
+
+    # The Fed archetype owns exact FOMC buckets.  Do not combine the older
+    # generic macro scorer with it: that would reintroduce a universal score
+    # into an exact-outcome contract.  The archetype result is market-price
+    # blind and includes its own validation/dataset diagnostics.
+    fed_shadow = None
+    if archetype.name == "MACRO_POLICY":
+        fed_shadow = predict_fed_shadow(question, resolution_text, macro_snapshot)
+        if fed_shadow.available:
+            specialized_estimates = [estimate for estimate in specialized_estimates if estimate.name != "macro"]
+            specialized_estimates.append(
+                SubmodelEstimate(
+                    name="macro_policy", estimated_yes_probability=fed_shadow.probability,
+                    weight=quality_scaled_weight(0.60, fed_shadow.confidence / 100.0), available=True,
+                    detail=f"Fed exact-outcome transition model (confidence: {fed_shadow.confidence:.0f}%).",
+                )
+            )
+            reasoning.append("Fed archetype produced a validated, exact-outcome shadow probability.")
+        else:
+            reasoning.append(f"Fed archetype withheld numeric shadow: {fed_shadow.reason_code}.")
 
     # Combine specialized estimates into independent_probability
     specialized_available = [e for e in specialized_estimates if e.available]
@@ -1256,6 +1279,13 @@ def compute_prediction(
         market_reliability=market_reliability,
         manipulation_risk=manipulation_risk,
         event_relation_signals=tuple(event_relation_signals),
+        forecast_archetype=archetype.name,
+        archetype_capability_state=archetype.capability_state,
+        numeric_model_reason_code=(
+            fed_shadow.reason_code if fed_shadow is not None else
+            ("MODEL_NOT_VALIDATED" if archetype.capability_state == "DATASET_BUILDING" else "NO_ARCHETYPE")
+        ),
+        model_diagnostics=(fed_shadow.diagnostics if fed_shadow is not None else {}),
         independent_probability=independent_probability,
         market_consensus_probability=market_yes,
         blended_probability=blended_probability,
@@ -1266,12 +1296,11 @@ def compute_prediction(
         # market-blind history/news/claim context and does NOT imply it is
         # publishable; see evidence_backed_probability /
         # published_forecast_probability below.
-        # A model shadow is a numeric domain-model result, not merely a
-        # generic evidence/history ensemble.  The latter is still valuable
-        # context for maturity and suppression decisions, but cannot claim a
-        # target-specific probability for a multi-step proposition.
+        # Only a validated archetype model can write the Model Shadow field.
+        # Generic specialized scorers remain research diagnostics until they
+        # are replaced by their own dataset-backed archetype implementation.
         model_hypothesis_probability=(
-            independent_probability if specialized_available else None
+            fed_shadow.probability if fed_shadow is not None and fed_shadow.available else None
         ),
         evidence_backed_probability=None,
         published_forecast_probability=None,

@@ -1200,6 +1200,40 @@ def cmd_predict(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_forecast_model_validate(args: argparse.Namespace) -> int:
+    """Report the deterministic, time-split Fed model validation."""
+    from .prediction.fed_policy import registry_records, validate_model
+
+    validation = validate_model().as_dict()
+    if args.json:
+        print(json.dumps(validation, indent=2, ensure_ascii=False))
+    else:
+        print(f"Fed transition model: {'PASS' if validation['passed'] else 'FAIL'}")
+        print(f"Train/Test: {validation['train_size']}/{validation['test_size']}")
+        print(f"Log loss baseline/model: {validation['baseline_log_loss']:.4f}/{validation['transition_log_loss']:.4f}")
+        print(f"Multiclass Brier baseline/model: {validation['baseline_multiclass_brier']:.4f}/{validation['transition_multiclass_brier']:.4f}")
+    if args.persist:
+        settings = Settings.load()
+        storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+        try:
+            dataset, model = registry_records()
+            storage.save_forecast_dataset(dataset)
+            storage.save_forecast_model(model)
+        finally:
+            storage.close()
+    return 0 if validation["passed"] else 2
+
+
+def cmd_forecast_dataset_report(args: argparse.Namespace) -> int:
+    from .prediction.fed_policy import DATASET_ID, DATASET_VERSION, OUTCOMES, training_dataset
+
+    rows = training_dataset()
+    counts = {outcome: sum(row.action == outcome for row in rows) for outcome in OUTCOMES}
+    payload = {"dataset_id": DATASET_ID, "version": DATASET_VERSION, "sample_count": len(rows), "time_range": [rows[0].meeting_date.isoformat(), rows[-1].meeting_date.isoformat()], "outcome_distribution": counts, "feature_coverage": {"previous_fomc_action": len(rows), "macro_vintages": 0}, "missingness": {"macro_vintages": "not collected; excluded from model"}}
+    print(json.dumps(payload, indent=2, ensure_ascii=False) if args.json else payload)
+    return 0
+
+
 def cmd_research_run(args: argparse.Namespace) -> int:
     """Runs the real Live Evidence pipeline (source fetch -> claim
     extraction -> evidence -> forecast recompute) for one specific market,
@@ -1681,6 +1715,15 @@ def build_parser() -> argparse.ArgumentParser:
     predict_parser.add_argument("market_id")
     predict_parser.add_argument("--json", action="store_true")
     predict_parser.set_defaults(func=cmd_predict)
+
+    forecast_dataset_parser = subparsers.add_parser("forecast-dataset-report", help="Fed-Archetyp-Dataset und Missingness berichten")
+    forecast_dataset_parser.add_argument("--json", action="store_true")
+    forecast_dataset_parser.set_defaults(func=cmd_forecast_dataset_report)
+
+    forecast_validate_parser = subparsers.add_parser("forecast-model-validate", help="Zeitbasierte Fed-Archetyp-Validierung ausführen")
+    forecast_validate_parser.add_argument("--json", action="store_true")
+    forecast_validate_parser.add_argument("--persist", action="store_true", help="Dataset- und Model-Metadaten versioniert speichern")
+    forecast_validate_parser.set_defaults(func=cmd_forecast_model_validate)
 
     research_run_parser = subparsers.add_parser(
         "research-run", help="Echten Research-Lauf (Source->Claim->Evidence->Forecast) ausführen"

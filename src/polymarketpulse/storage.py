@@ -1418,6 +1418,44 @@ class Storage:
         self.connection.commit()
         return int(cursor.lastrowid)
 
+    def save_forecast_dataset(self, record: dict) -> None:
+        self.connection.execute(
+            """INSERT INTO forecast_datasets (dataset_id, version, archetype, extracted_at,
+               source_lineage_json, filters_json, sample_count, metadata_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(dataset_id, version) DO UPDATE SET metadata_json=excluded.metadata_json""",
+            (record["dataset_id"], record["version"], record["archetype"], record["extracted_at"],
+             json.dumps(record["source_lineage"]), json.dumps(record["filters"]), record["sample_count"],
+             json.dumps(record["metadata"])),
+        )
+        self.connection.commit()
+
+    def save_forecast_model(self, record: dict) -> None:
+        self.connection.execute(
+            """INSERT INTO forecast_models (model_id, version, archetype, dataset_id, dataset_version,
+               trained_at, metrics_json, feature_list_json, active)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(model_id, version) DO UPDATE SET metrics_json=excluded.metrics_json, active=excluded.active""",
+            (record["model_id"], record["version"], record["archetype"], record["dataset_id"],
+             record["dataset_version"], record["trained_at"], json.dumps(record["metrics"]),
+             json.dumps(record["feature_list"]), int(record["active"])),
+        )
+        self.connection.commit()
+
+    def save_forecast_shadow(self, record: dict) -> None:
+        self.connection.execute(
+            """INSERT OR IGNORE INTO forecast_shadows (market_id, prediction_snapshot_id, archetype,
+               model_id, model_version, generated_at, horizon_hours, market_probability,
+               model_probability, confidence, input_snapshot_json, source_lineage_json, model_metrics_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (record["market_id"], record["prediction_snapshot_id"], record["archetype"],
+             record["model_id"], record["model_version"], record["generated_at"], record.get("horizon_hours"),
+             record.get("market_probability"), record["model_probability"], record["confidence"],
+             json.dumps(record["input_snapshot"]), json.dumps(record["source_lineage"]),
+             json.dumps(record["model_metrics"])),
+        )
+        self.connection.commit()
+
     def save_extracted_event(
         self,
         provider: str,

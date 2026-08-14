@@ -539,7 +539,7 @@ def _persist_prediction_snapshot(storage: Storage, market: dict, prediction: Pre
         else:
             evidence_strength = "NONE"
 
-    return storage.save_prediction_snapshot(
+    snapshot_id = storage.save_prediction_snapshot(
         market_id=prediction.market_id, provider=market["provider"],
         provider_market_id=market["provider_market_id"], category=market["category"],
         prediction_version=PREDICTION_VERSION, market_yes_probability=prediction.market_yes_probability,
@@ -585,6 +585,25 @@ def _persist_prediction_snapshot(storage: Storage, market: dict, prediction: Pre
         no_forecast_reason=no_forecast_reason,
         data_gap_summary_json=data_gap_summary_json,
     )
+    if prediction.forecast_archetype == "MACRO_POLICY":
+        from ..prediction.fed_policy import MODEL_ID, MODEL_VERSION, registry_records
+
+        dataset_record, model_record = registry_records()
+        storage.save_forecast_dataset(dataset_record)
+        storage.save_forecast_model(model_record)
+        if prediction.model_hypothesis_probability is not None:
+            diagnostics = prediction.model_diagnostics
+            storage.save_forecast_shadow({
+                "market_id": prediction.market_id, "prediction_snapshot_id": snapshot_id,
+                "archetype": prediction.forecast_archetype, "model_id": MODEL_ID,
+                "model_version": MODEL_VERSION, "generated_at": datetime.now(UTC).isoformat(),
+                "market_probability": prediction.market_probability,
+                "model_probability": prediction.model_hypothesis_probability,
+                "confidence": prediction.confidence_score, "input_snapshot": diagnostics,
+                "source_lineage": diagnostics.get("sources", []),
+                "model_metrics": diagnostics.get("validation", {}),
+            })
+    return snapshot_id
 
 
 def get_prediction(storage: Storage, market_id: str) -> PredictionResult:

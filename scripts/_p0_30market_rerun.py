@@ -74,7 +74,7 @@ def main() -> None:
     for label in ("history_only", "domain_only", "evidence_only", "true_multi_model", "no_independent_model"):
         print(f"  {label}: {composition.get(label, 0)}")
 
-    print("\n=== CENTRAL_BANKS markets (must remain SUPPORTED_FORECAST, unchanged) ===")
+    print("\n=== CENTRAL_BANKS markets (exact archetype only; no generic numeric fallback) ===")
     for mid, maturity, status, ip in rows:
         if mid in CENTRAL_BANKS_IDS:
             print(f"  {mid}: maturity={maturity} status={status} independent_probability={ip}")

@@ -376,6 +376,13 @@ class PredictionResult:
     # --- Event-Relation causal-reasoning foundation (additive) ---------
     event_relation_signals: tuple[RelationSignal, ...] = field(default_factory=tuple)
 
+    # Forecast-core redesign: the numeric contract is explicit.  A market
+    # may have rich research context while having no archetype model at all.
+    forecast_archetype: str = "GENERIC_RESEARCH_ONLY"
+    archetype_capability_state: str = "UNSUPPORTED"
+    numeric_model_reason_code: str | None = "NO_ARCHETYPE"
+    model_diagnostics: dict = field(default_factory=dict)
+
     # --- Independent vs. market vs. blended vs. calibrated (additive) ---
     # This is the architectural core the product needs to be able to answer
     # "did we build a forecasting machine or just an intelligent Polymarket
@@ -623,6 +630,10 @@ class PredictionResult:
             "market_reliability": self.market_reliability.as_dict() if self.market_reliability else None,
             "manipulation_risk": self.manipulation_risk.as_dict() if self.manipulation_risk else None,
             "event_relation_signals": [s.as_dict() for s in self.event_relation_signals],
+            "forecast_archetype": self.forecast_archetype,
+            "archetype_capability_state": self.archetype_capability_state,
+            "numeric_model_reason_code": self.numeric_model_reason_code,
+            "model_diagnostics": self.model_diagnostics,
             "independent_probability": self.independent_probability,
             "market_consensus_probability": self.market_consensus_probability,
             "blended_probability": self.blended_probability,

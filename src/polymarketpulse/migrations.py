@@ -1288,6 +1288,35 @@ def _migration_031_macro_observation_lineage(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migration_032_forecast_archetype_registry(conn: sqlite3.Connection) -> None:
+    """Versioned datasets/models and immutable archetype shadow records."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS forecast_datasets (
+            dataset_id TEXT NOT NULL, version TEXT NOT NULL, archetype TEXT NOT NULL,
+            extracted_at TEXT NOT NULL, source_lineage_json TEXT NOT NULL,
+            filters_json TEXT NOT NULL, sample_count INTEGER NOT NULL,
+            metadata_json TEXT NOT NULL, PRIMARY KEY(dataset_id, version)
+        );
+        CREATE TABLE IF NOT EXISTS forecast_models (
+            model_id TEXT NOT NULL, version TEXT NOT NULL, archetype TEXT NOT NULL,
+            dataset_id TEXT NOT NULL, dataset_version TEXT NOT NULL, trained_at TEXT NOT NULL,
+            metrics_json TEXT NOT NULL, feature_list_json TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(model_id, version)
+        );
+        CREATE TABLE IF NOT EXISTS forecast_shadows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, market_id TEXT NOT NULL REFERENCES markets(market_id),
+            prediction_snapshot_id INTEGER REFERENCES prediction_snapshots(id), archetype TEXT NOT NULL,
+            model_id TEXT NOT NULL, model_version TEXT NOT NULL, generated_at TEXT NOT NULL,
+            horizon_hours REAL, market_probability REAL, model_probability REAL NOT NULL,
+            confidence REAL NOT NULL, input_snapshot_json TEXT NOT NULL,
+            source_lineage_json TEXT NOT NULL, model_metrics_json TEXT NOT NULL,
+            UNIQUE(market_id, prediction_snapshot_id, model_id, model_version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_forecast_shadows_market_time ON forecast_shadows(market_id, generated_at);
+    """)
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1320,6 +1349,7 @@ MIGRATIONS: list[Migration] = [
     (29, "coherence_lineage", _migration_029_coherence_lineage),
     (30, "coherence_lineage_indexes", _migration_030_coherence_lineage_indexes),
     (31, "macro_observation_lineage", _migration_031_macro_observation_lineage),
+    (32, "forecast_archetype_registry", _migration_032_forecast_archetype_registry),
 ]
 
 

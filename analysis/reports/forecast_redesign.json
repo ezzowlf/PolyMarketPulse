@@ -1,0 +1,13 @@
+{
+  "report_version": 1,
+  "generated_on": "2026-08-14",
+  "baseline_commit": "81f3761aa252ca9cc49afa91ddbf5ea4c073728d",
+  "decision": "CONDITIONAL_GO_FED_ONLY",
+  "registry": {"MACRO_POLICY": "SHADOW_VALIDATED", "LEGISLATIVE_PROCESS": "DATASET_BUILDING", "GEOPOLITICAL_STATE_TRANSITION": "DATASET_BUILDING", "PRICE_THRESHOLD": "DATASET_BUILDING", "GENERIC_RESEARCH_ONLY": "UNSUPPORTED"},
+  "fed": {"dataset_id": "fed_fomc_actions_2021_2025", "dataset_version": "2026.08.14.1", "sample_count": 40, "time_range": ["2021-01-27", "2025-12-10"], "features": ["previous_fomc_action"], "market_price_input": false, "holdout": {"train_size": 24, "test_size": 16, "baseline_log_loss": 1.7178849989769376, "model_log_loss": 1.486356946859385, "baseline_multiclass_brier": 0.7071938168846612, "model_multiclass_brier": 0.60131701837901, "passed": true}, "live": {"market_id": "polymarket:2252245", "shadow": null, "reason_code": "CRITICAL_INPUT_MISSING"}},
+  "clarity": {"status": "RESEARCH_ONLY", "reason_code": "MODEL_NOT_VALIDATED"},
+  "hormuz": {"status": "RESEARCH_ONLY", "reason_code": "MODEL_NOT_VALIDATED"},
+  "storage": {"migration": 32, "tables": ["forecast_datasets", "forecast_models", "forecast_shadows"]},
+  "retest_30": {"queried": 30, "errors": 0, "numeric_shadows": 0, "evidence_backed": 0, "published": 0, "reason": "live Fed structured input unavailable; other archetypes dataset-building"},
+  "final_validation": {"pytest": "1033 passed; one upstream Starlette/httpx deprecation warning", "ruff": "clean", "js_syntax": "clean", "diff_check": "clean", "secrets_scan": "clean", "migration": "fresh and current copy schema 32 idempotent", "browser": "Fed no published forecast; MACRO_POLICY / SHADOW_VALIDATED / CRITICAL_INPUT_MISSING"}
+}

@@ -119,6 +119,9 @@ SPECIALIZED_MODEL_RELIABILITY: dict[str, SpecializedModelReliability] = {
     # module docstring), which is an environment limitation, not a reason
     # to withhold the tier.
     "macro": "PRODUCTION_DATA_PATH",
+    # The exact-outcome Fed transition model is dataset-backed and only
+    # becomes available after its time-split validation passes.
+    "macro_policy": "PRODUCTION_DATA_PATH",
     "politics": "FUNCTIONAL_BUT_UNCALIBRATED",
     "geopolitics": "FUNCTIONAL_BUT_UNCALIBRATED",
     "sports": "STRUCTURAL_SCAFFOLD",
