@@ -12,6 +12,7 @@ from polymarketpulse.prediction.fed_policy import (
     validate_model,
 )
 from polymarketpulse.prediction.semantics import parse_market_proposition
+from polymarketpulse.providers.fedboard import FedPolicyDecision
 from polymarketpulse.providers.fred import MacroSnapshot
 from polymarketpulse.storage import Storage
 
@@ -25,6 +26,10 @@ def _snapshot(as_of: date) -> MacroSnapshot:
         unemployment_rate=4.1, unemployment_rate_prior=4.0, as_of_date=as_of,
         next_fomc_meeting_date=date(2025, 9, 17),
     )
+
+
+def _policy(as_of: date = date(2025, 7, 30)) -> FedPolicyDecision:
+    return FedPolicyDecision("UNCHANGED", as_of, 4.25, 4.5, "https://fed.example/statement", "2025-07-30T00:00:00+00:00")
 
 
 def test_fed_dataset_is_real_meeting_level_and_time_ordered() -> None:
@@ -48,17 +53,25 @@ def test_transition_model_beats_unconditional_baseline_on_later_holdout() -> Non
 
 
 def test_fed_shadow_is_market_blind_and_has_distribution() -> None:
-    shadow = predict_shadow(QUESTION, RULE, _snapshot(date(2025, 8, 1)))
+    shadow = predict_shadow(QUESTION, RULE, _snapshot(date(2025, 8, 1)), _policy())
     assert shadow.available is True
     assert shadow.probability == shadow.distribution["HIKE_25"]
     assert round(sum(shadow.distribution.values()), 12) == 1.0
     assert shadow.diagnostics["validation"]["passed"] is True
 
 
-def test_later_snapshot_is_blocked_without_official_prior_action() -> None:
+def test_live_snapshot_requires_official_prior_action() -> None:
     shadow = predict_shadow(QUESTION.replace("2025", "2026"), RULE, _snapshot(date(2026, 8, 12)))
     assert shadow.available is False
-    assert shadow.reason_code == "CRITICAL_INPUT_STALE"
+    assert shadow.reason_code == "FOMC_PRIOR_POLICY_ACTION_UNAVAILABLE"
+
+
+def test_live_policy_action_is_an_input_not_a_training_row() -> None:
+    shadow = predict_shadow(QUESTION.replace("2025", "2026"), RULE, None, _policy(date(2026, 7, 29)))
+    assert shadow.available is True
+    assert shadow.diagnostics["prior_action"] == "UNCHANGED"
+    assert shadow.diagnostics["sample_size"] == 40
+    assert shadow.diagnostics["policy_decision"]["raw_source_url"] == "https://fed.example/statement"
 
 
 def test_fed_semantics_routes_to_macro_policy() -> None:
@@ -81,6 +94,7 @@ def test_model_registry_storage_is_versioned(tmp_path: Path) -> None:
 
 def test_engine_exposes_only_archetype_model_shadow_for_exact_fed_target(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("polymarketpulse.prediction.engine.fetch_macro_snapshot", lambda: _snapshot(date(2025, 8, 1)))
+    monkeypatch.setattr("polymarketpulse.providers.fedboard.fetch_latest_policy_decision", lambda: _policy())
     storage = Storage(tmp_path / "fed-engine.db")
     result = compute_prediction(
         storage.connection, "fed-test", "polymarket", "fed-test",

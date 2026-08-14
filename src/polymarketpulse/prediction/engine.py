@@ -679,7 +679,10 @@ def compute_prediction(
     # blind and includes its own validation/dataset diagnostics.
     fed_shadow = None
     if archetype.name == "MACRO_POLICY":
-        fed_shadow = predict_fed_shadow(question, resolution_text, macro_snapshot)
+        from ..providers.fedboard import fetch_latest_policy_decision
+
+        policy_decision = fetch_latest_policy_decision()
+        fed_shadow = predict_fed_shadow(question, resolution_text, macro_snapshot, policy_decision)
         if fed_shadow.available:
             specialized_estimates = [estimate for estimate in specialized_estimates if estimate.name != "macro"]
             specialized_estimates.append(

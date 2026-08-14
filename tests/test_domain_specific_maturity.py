@@ -4,6 +4,7 @@ from datetime import date
 from types import SimpleNamespace
 
 from polymarketpulse.prediction.engine import compute_prediction
+from polymarketpulse.providers.fedboard import FedPolicyDecision
 from polymarketpulse.providers.fred import MacroSnapshot
 from polymarketpulse.storage import Storage
 
@@ -41,7 +42,7 @@ def test_supported_quant_without_history_or_news(tmp_path, monkeypatch) -> None:
     )
 
 
-def test_macro_without_history_or_news_is_partial_when_model_uncertainty_is_high(tmp_path, monkeypatch) -> None:
+def test_exact_fed_shadow_stays_unpublished_without_independent_evidence(tmp_path, monkeypatch) -> None:
     snapshot = MacroSnapshot(
         policy_rate=4.0, policy_rate_as_of=date(2026, 7, 1),
         cpi_yoy=2.2, cpi_yoy_prior=3.1,
@@ -49,6 +50,10 @@ def test_macro_without_history_or_news_is_partial_when_model_uncertainty_is_high
         as_of_date=date(2026, 8, 1), next_fomc_meeting_date=date(2026, 9, 16),
     )
     monkeypatch.setattr("polymarketpulse.prediction.engine._fetch_macro_snapshot", lambda: snapshot)
+    monkeypatch.setattr(
+        "polymarketpulse.providers.fedboard.fetch_latest_policy_decision",
+        lambda: FedPolicyDecision("UNCHANGED", date(2026, 7, 29), 3.5, 3.75, "https://fed.example/july", "2026-08-14T00:00:00+00:00"),
+    )
     result = compute_prediction(
         _base(tmp_path, "macro"),
         market_id="fed-future", provider="polymarket", provider_market_id="fed-future",
@@ -65,10 +70,12 @@ def test_macro_without_history_or_news_is_partial_when_model_uncertainty_is_high
     assert result.comparable_sample_size == 0
     assert result.independent_evidence is not None and not result.independent_evidence.available
     assert result.world_state is not None and result.world_state.state_variables
-    assert result.forecast_maturity == "PARTIAL_FORECAST", (
+    assert result.forecast_maturity == "NO_FORECAST", (
         result.forecast_status, result.independent_probability, result.confidence_score,
         result.data_quality_composite, result.data_gaps, result.submodel_estimates,
     )
+    assert result.model_hypothesis_probability == 0.7142857142857143
+    assert result.published_forecast_probability is None
 
 
 def test_geopolitics_without_evidence_remains_context_only(tmp_path) -> None:

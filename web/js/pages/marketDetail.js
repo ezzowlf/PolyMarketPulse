@@ -207,6 +207,7 @@ function _headlinePanelHtml(market, opp, pred) {
   const modelHypothesis = p.model_hypothesis_probability !== null && p.model_hypothesis_probability !== undefined
     ? fmtPct(p.model_hypothesis_probability)
     : "keine";
+  const isFedShadow = p.forecast_archetype === "MACRO_POLICY" && modelHypothesis !== "keine";
   const pulseValue = forecastPublished ? fmtPct(p.published_forecast_probability) : "Keine belastbare Prognose";
   const quantitativeOnly = _hasQuantitativeSupport(p) && !((p.independent_evidence || {}).evidence_for_yes || []).length && !((p.independent_evidence || {}).evidence_for_no || []).length;
   const pulseSub = forecastPublished
@@ -250,8 +251,9 @@ function _headlinePanelHtml(market, opp, pred) {
     <h2 style="margin:0 0 12px">${market.question}</h2>
     <div class="widget-grid">
       ${widgetCard({ title: "MARKT", value: fmtPct(p.market_yes_probability) })}
+      ${isFedShadow ? widgetCard({ title: "INTERNES MODELL", value: modelHypothesis, sub: "Shadow - noch nicht veröffentlicht" }) : ""}
       ${widgetCard({ title: "VERÖFFENTLICHTE PROGNOSE", value: pulseValue, sub: pulseSub })}
-      ${widgetCard({ title: "STATUS", value: _researchStatusLabel(p) })}
+      ${widgetCard({ title: "STATUS", value: isFedShadow ? "Shadow - noch nicht veröffentlicht" : _researchStatusLabel(p) })}
       ${widgetCard({ title: "EINSCHÄTZUNG", value: `<span class="badge ${decisionBadge}">${decisionLabel}</span>` })}
       ${widgetCard({ title: "VERTRAUEN", value: trustLabel })}
       ${widgetCard({ title: "DATENLAGE", value: dataQualityLabel })}

@@ -599,7 +599,7 @@ def _persist_prediction_snapshot(storage: Storage, market: dict, prediction: Pre
                 "model_version": MODEL_VERSION, "generated_at": datetime.now(UTC).isoformat(),
                 "market_probability": prediction.market_probability,
                 "model_probability": prediction.model_hypothesis_probability,
-                "confidence": prediction.confidence_score, "input_snapshot": diagnostics,
+                "confidence": diagnostics.get("model_confidence", prediction.confidence_score), "input_snapshot": diagnostics,
                 "source_lineage": diagnostics.get("sources", []),
                 "model_metrics": diagnostics.get("validation", {}),
             })
@@ -636,6 +636,21 @@ def get_prediction(storage: Storage, market_id: str) -> PredictionResult:
     )
     _persist_prediction_snapshot(storage, market, prediction)
     return prediction
+
+
+def persist_prediction(storage: Storage, market_id: str) -> tuple[PredictionResult, int]:
+    """Compute and append a forecast-time snapshot, including an immutable
+    Fed shadow record when the exact archetype produces one."""
+    market = _load_market_row(storage, market_id)
+    if market is None:
+        raise AIContextError(f"Market '{market_id}' not found")
+    prediction = get_prediction(storage, market_id)
+    row = storage.connection.execute(
+        "SELECT id FROM prediction_snapshots WHERE market_id = ? ORDER BY id DESC LIMIT 1", (market_id,)
+    ).fetchone()
+    if row is None:  # Defensive: get_prediction always persists before returning.
+        raise AIContextError("Prediction snapshot was not persisted")
+    return prediction, int(row[0])
 
 
 def explain_recommendation(

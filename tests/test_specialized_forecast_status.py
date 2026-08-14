@@ -61,7 +61,7 @@ def test_price_anchored_context_without_independent_model_is_not_forecast() -> N
     assert status == "NO_FORECAST"
 
 
-def test_macro_question_without_fred_stays_unavailable(tmp_path: Path, monkeypatch) -> None:
+def test_exact_fed_question_without_official_prior_action_stays_unavailable(tmp_path: Path, monkeypatch) -> None:
     storage = Storage(tmp_path / "macro-only.db")
     fetch_calls = []
 
@@ -70,6 +70,9 @@ def test_macro_question_without_fred_stays_unavailable(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(
         "polymarketpulse.prediction.engine.fetch_macro_snapshot", offline_fred
+    )
+    monkeypatch.setattr(
+        "polymarketpulse.providers.fedboard.fetch_latest_policy_decision", lambda: None
     )
     kwargs = {
         "market_id": "fed-hold",
@@ -89,9 +92,9 @@ def test_macro_question_without_fred_stays_unavailable(tmp_path: Path, monkeypat
     result = compute_prediction(storage.connection, **kwargs)
     repeated = compute_prediction(storage.connection, **kwargs)
 
-    macro = next(item for item in result.submodel_estimates if item.name == "macro")
-    assert macro.available is False
+    assert not any(item.name == "macro_policy" and item.available for item in result.submodel_estimates)
     assert result.independent_probability is None
     assert result.forecast_status == "NO_FORECAST"
+    assert result.numeric_model_reason_code == "FOMC_PRIOR_POLICY_ACTION_UNAVAILABLE"
     assert repeated.independent_probability is None
     assert len(fetch_calls) == 1

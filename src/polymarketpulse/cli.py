@@ -1200,6 +1200,24 @@ def cmd_predict(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_forecast_shadow(args: argparse.Namespace) -> int:
+    """Append a real, market-price-blind forecast snapshot without an AI call."""
+    from .ai import service as ai_service
+    from .ai.client import AIError
+
+    settings = Settings.load()
+    storage = Storage(settings.database_path, store_unchanged_snapshots=settings.store_unchanged_snapshots)
+    try:
+        prediction, snapshot_id = ai_service.persist_prediction(storage, args.market_id)
+    except AIError as exc:
+        return _print_ai_error(exc)
+    finally:
+        storage.close()
+    payload = prediction.as_dict() | {"prediction_snapshot_id": snapshot_id}
+    print(json.dumps(payload, indent=2, ensure_ascii=False) if args.json else payload)
+    return 0
+
+
 def cmd_forecast_model_validate(args: argparse.Namespace) -> int:
     """Report the deterministic, time-split Fed model validation."""
     from .prediction.fed_policy import registry_records, validate_model
@@ -1715,6 +1733,10 @@ def build_parser() -> argparse.ArgumentParser:
     predict_parser.add_argument("market_id")
     predict_parser.add_argument("--json", action="store_true")
     predict_parser.set_defaults(func=cmd_predict)
+    forecast_shadow_parser = subparsers.add_parser("forecast-shadow", help="Preisblinden Shadow-Forecast persistieren (kein AI-Aufruf)")
+    forecast_shadow_parser.add_argument("market_id")
+    forecast_shadow_parser.add_argument("--json", action="store_true")
+    forecast_shadow_parser.set_defaults(func=cmd_forecast_shadow)
 
     forecast_dataset_parser = subparsers.add_parser("forecast-dataset-report", help="Fed-Archetyp-Dataset und Missingness berichten")
     forecast_dataset_parser.add_argument("--json", action="store_true")

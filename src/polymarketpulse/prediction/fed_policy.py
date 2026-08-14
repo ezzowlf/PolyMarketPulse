@@ -17,6 +17,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
+from ..providers.fedboard import FedPolicyDecision
 from ..providers.fred import MacroSnapshot
 
 DATASET_ID = "fed_fomc_actions_2021_2025"
@@ -144,28 +145,29 @@ def validate_model() -> FedValidation:
     return result
 
 
-def predict_shadow(question: str, resolution_text: str | None, snapshot: MacroSnapshot | None) -> FedShadow:
+def predict_shadow(
+    question: str,
+    resolution_text: str | None,
+    snapshot: MacroSnapshot | None,
+    policy_decision: FedPolicyDecision | None = None,
+) -> FedShadow:
     target = parse_fed_target(question, resolution_text)
     validation = validate_model()
     if not target.semantics_confident:
         return FedShadow(False, None, None, 0.0, "SEMANTICS_UNCERTAIN", {"target": _target_dict(target), "validation": validation.as_dict()})
-    if snapshot is None:
-        return FedShadow(False, None, None, 0.0, "CRITICAL_INPUT_MISSING", {"target": _target_dict(target), "validation": validation.as_dict()})
-    # The training dataset ends at the official December 2025 decision.  A
-    # later snapshot lacks an official, persisted prior-action observation;
-    # inferring it from EFFR would be lookahead-prone.  Block honestly.
-    latest = training_dataset()[-1].meeting_date
-    if snapshot.as_of_date > latest:
-        return FedShadow(False, None, None, 0.0, "CRITICAL_INPUT_STALE", {"target": _target_dict(target), "validation": validation.as_dict(), "latest_policy_action": latest.isoformat(), "snapshot_as_of": snapshot.as_of_date.isoformat()})
+    if policy_decision is None:
+        return FedShadow(False, None, None, 0.0, "FOMC_PRIOR_POLICY_ACTION_UNAVAILABLE", {"target": _target_dict(target), "validation": validation.as_dict()})
+    if target.meeting_date is not None and policy_decision.decision_date >= target.meeting_date:
+        return FedShadow(False, None, None, 0.0, "FOMC_PRIOR_POLICY_ACTION_STALE", {"target": _target_dict(target), "validation": validation.as_dict(), "policy_decision": policy_decision.as_dict()})
     if not validation.passed:
         return FedShadow(False, None, None, 0.0, "MODEL_NOT_VALIDATED", {"target": _target_dict(target), "validation": validation.as_dict()})
-    prior = None
-    for row in training_dataset():
-        if row.meeting_date <= snapshot.as_of_date:
-            prior = row.action
-    distribution = _distribution(tuple(row for row in training_dataset() if row.meeting_date <= snapshot.as_of_date), prior)
+    # The model is trained only on the fixed 2021--2025 dataset.  The live
+    # policy action is the current value of its single validated feature, not
+    # an additional training observation and never a market-price proxy.
+    prior = policy_decision.action
+    distribution = _distribution(training_dataset(), prior)
     confidence = round(min(45.0, 20.0 + len(training_dataset()) * 0.55), 1)
-    return FedShadow(True, distribution[target.outcome], distribution, confidence, None, {"target": _target_dict(target), "prior_action": prior, "dataset_id": DATASET_ID, "dataset_version": DATASET_VERSION, "model_id": MODEL_ID, "model_version": MODEL_VERSION, "validation": validation.as_dict(), "sources": [FED_OPEN_MARKET_SOURCE, FED_CALENDAR_SOURCE], "sample_size": len(training_dataset()), "point_in_time_flag": "macro_vintages_not_in_dataset"})
+    return FedShadow(True, distribution[target.outcome], distribution, confidence, None, {"target": _target_dict(target), "prior_action": prior, "policy_decision": policy_decision.as_dict(), "dataset_id": DATASET_ID, "dataset_version": DATASET_VERSION, "model_id": MODEL_ID, "model_version": MODEL_VERSION, "model_confidence": confidence, "validation": validation.as_dict(), "sources": [FED_OPEN_MARKET_SOURCE, FED_CALENDAR_SOURCE, policy_decision.source_url], "sample_size": len(training_dataset()), "feature_list": ["previous_fomc_action"], "non_model_macro_snapshot": snapshot.as_dict() if snapshot else None, "point_in_time_flag": "live prior action is official statement; macro vintages are not model features"})
 
 
 def registry_records() -> tuple[dict, dict]:
