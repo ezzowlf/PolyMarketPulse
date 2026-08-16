@@ -387,6 +387,50 @@ def test_ai_explain_recommendation_carries_product_mode_fields(client: TestClien
     assert data["prediction"]["next_research_action"] == audited["next_research_action"]
 
 
+def test_next_research_action_is_consistent_across_prediction_explain_recompute_and_queue(
+    client: TestClient,
+) -> None:
+    """Phase 7.8.15: /prediction, /ai/explain-recommendation, /recompute and
+    /research-queue must all report the SAME next_research_action detail
+    for the same market -- no separate research-truth state per endpoint.
+    This is a pure consistency proof (no new logic): it would have caught
+    the exact class of bug _PRODUCT_MODE_KEYS was built to prevent, applied
+    to the newer VOI fields (provider_health/closability/voi_score/
+    expected_product_effect/fallback_provider/next_retry)."""
+    market_id = _seeded_market_id(client)
+
+    audited = client.get(f"/prediction/{market_id}").json()
+    explained = client.get(f"/ai/explain-recommendation/{market_id}").json()
+    recomputed = client.post(f"/ai/explain-recommendation/{market_id}/recompute").json()
+
+    assert "next_research_action" in audited
+    assert "data_coverage" in audited
+    action = audited["next_research_action"]
+
+    for endpoint_response, label in ((explained, "explain"), (recomputed, "recompute")):
+        endpoint_action = endpoint_response["prediction"]["next_research_action"]
+        for key in (
+            "action_type", "gap_key", "preferred_provider", "fallback_provider",
+            "provider_health", "closability", "expected_product_effect", "voi_score", "next_retry",
+        ):
+            assert endpoint_action[key] == action[key], f"{label}.{key} diverges from /prediction"
+        assert endpoint_response["prediction"]["data_coverage"] == audited["data_coverage"], (
+            f"{label}.data_coverage diverges from /prediction"
+        )
+
+    queue = client.get("/research-queue", params={"limit": 20}).json()
+    queue_entry = next((e for e in queue if e["market_id"] == market_id), None)
+    assert queue_entry is not None, "seeded market must appear in the enriched research queue"
+    for key, action_key in (
+        ("gap_key", "gap_key"), ("preferred_provider", "preferred_provider"),
+        ("fallback_provider", "fallback_provider"), ("provider_health", "provider_health"),
+        ("closability", "closability"), ("expected_product_effect", "expected_product_effect"),
+        ("voi_score", "voi_score"), ("action_type", "action_type"), ("next_retry", "next_retry"),
+    ):
+        assert queue_entry[key] == action[action_key], f"research-queue.{key} diverges from /prediction"
+    assert queue_entry["product_mode"] == audited["product_mode"]
+
+
 def test_ai_explain_recommendation_recompute_endpoint(client: TestClient) -> None:
     market_id = _seeded_market_id(client)
     resp = client.post(f"/ai/explain-recommendation/{market_id}/recompute")

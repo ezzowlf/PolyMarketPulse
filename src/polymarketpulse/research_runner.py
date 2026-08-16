@@ -770,6 +770,7 @@ def enrich_queue_with_gap_voi(storage: Storage, rows_by_id: dict, queue: list, l
             "voi_score": action.get("voi_score", 0) if action else 0,
             "action_type": action.get("action_type") if action else None,
             "human_summary": action.get("human_summary") if action else None,
+            "next_retry": action.get("next_retry") if action else None,
             "reason": action.get("reason") if action else None,
         })
         enriched.append(base)

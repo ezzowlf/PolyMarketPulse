@@ -19,6 +19,7 @@ substituted in.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Literal
 
 from polymarketpulse.data_sources import ProviderHealthState
@@ -277,16 +278,36 @@ def _unblocked_missing_requirements(prediction, requirements: tuple[InputRequire
     return candidates
 
 
-def _provider_health_state(storage, provider: str | None) -> ProviderHealthState:
+def _provider_health_row(storage, provider: str | None):
+    """The raw, real ProviderHealth row (or None) -- used both for the
+    health STATE and, for a BLOCKED_PROVIDER action, the real next_retry
+    timestamp derived from it."""
     if storage is None or provider is None:
-        return ProviderHealthState.UNKNOWN
+        return None
     getter = getattr(storage, "get_provider_health", None)
     if getter is None:
-        return ProviderHealthState.UNKNOWN
-    health = getter(provider)
+        return None
+    return getter(provider)
+
+
+def _provider_health_state(storage, provider: str | None) -> ProviderHealthState:
+    health = _provider_health_row(storage, provider)
     if health is None:
         return ProviderHealthState.UNKNOWN
     return health.state()
+
+
+# Phase 7.8.15: same 1-hour window data_sources.ProviderHealth.state() itself
+# uses to decide OFFLINE-from-recent-failure (see its Rule 3) -- next_retry
+# reuses that real threshold rather than inventing a second one.
+_PROVIDER_RETRY_WINDOW = timedelta(hours=1)
+
+
+def _next_retry(storage, provider: str | None) -> str | None:
+    health = _provider_health_row(storage, provider)
+    if health is None or health.last_failure is None:
+        return None
+    return (health.last_failure + _PROVIDER_RETRY_WINDOW).isoformat()
 
 
 # Phase 7.8.5: providers that only ever produce unstructured discovery hits
@@ -450,6 +471,7 @@ def derive_next_research_action(prediction, coverage: DataCoverage, storage=None
             "fallback_provider": None, "provider_health": None, "closability": "BLOCKED",
             "expected_product_effect": "NO_PRODUCT_UPGRADE",
             "expected_product_effect_summary": _EFFECT_SUMMARY_DE["NO_PRODUCT_UPGRADE"], "voi_score": 0,
+            "next_retry": None,
         }
     if coverage.next_missing_input is None:
         return {
@@ -459,6 +481,7 @@ def derive_next_research_action(prediction, coverage: DataCoverage, storage=None
             "fallback_provider": None, "provider_health": None, "closability": "HIGH",
             "expected_product_effect": "NO_PRODUCT_UPGRADE",
             "expected_product_effect_summary": "Keine weitere Wirkung nötig.", "voi_score": 0,
+            "next_retry": None,
         }
 
     requirements = INPUT_CONTRACTS[coverage.archetype]
@@ -485,6 +508,7 @@ def derive_next_research_action(prediction, coverage: DataCoverage, storage=None
             "expected_product_effect": "NO_PRODUCT_UPGRADE",
             "expected_product_effect_summary": _EFFECT_SUMMARY_DE["NO_PRODUCT_UPGRADE"],
             "voi_score": 0,
+            "next_retry": _next_retry(storage, provider),
         }
 
     missing_req = unblocked[0]
@@ -511,6 +535,7 @@ def derive_next_research_action(prediction, coverage: DataCoverage, storage=None
             "expected_product_effect": "NO_PRODUCT_UPGRADE",
             "expected_product_effect_summary": "Keine Wirkung, solange der Provider nicht erreichbar ist.",
             "voi_score": _voi_score(missing_req.criticality, "BLOCKED", has_dependents, effect, deadline_bonus, failure_penalty),
+            "next_retry": _next_retry(storage, provider),
         }
 
     return {
@@ -527,4 +552,5 @@ def derive_next_research_action(prediction, coverage: DataCoverage, storage=None
         "expected_product_effect": effect,
         "expected_product_effect_summary": _EFFECT_SUMMARY_DE[effect],
         "voi_score": _voi_score(missing_req.criticality, closability, has_dependents, effect, deadline_bonus, failure_penalty),
+        "next_retry": None,  # FETCH is actionable now -- next_retry only meaningful for a real BLOCKED_PROVIDER wait
     }

@@ -435,3 +435,37 @@ def test_recent_failure_penalty_honestly_zero_without_storage() -> None:
     from polymarketpulse.prediction.data_coverage import _recent_failure_penalty
 
     assert _recent_failure_penalty(None, "any-gap-key") == 0.0
+
+
+# ---------------------------------------------------------------------
+# Phase 7.8.15: next_retry
+# ---------------------------------------------------------------------
+
+
+def test_next_retry_derives_a_real_timestamp_from_provider_last_failure() -> None:
+    """Direct unit check on _next_retry(): reuses the exact 1-hour window
+    data_sources.ProviderHealth.state() itself treats as 'recent failure',
+    so a real BLOCKED_PROVIDER action (whenever the provider config has no
+    known fallback for a given input) would surface a real, not invented,
+    retry time."""
+    from datetime import UTC, datetime
+
+    from polymarketpulse.prediction.data_coverage import _next_retry
+
+    class _Health:
+        last_failure = datetime(2026, 8, 16, 10, 0, tzinfo=UTC)
+
+    class _Storage:
+        def get_provider_health(self, source_id):
+            return _Health() if source_id == "imf_portwatch" else None
+
+    assert _next_retry(_Storage(), "imf_portwatch") == "2026-08-16T11:00:00+00:00"
+    assert _next_retry(_Storage(), "unknown_provider") is None
+    assert _next_retry(None, "imf_portwatch") is None
+
+
+def test_fetch_and_none_actions_carry_no_next_retry() -> None:
+    prediction = _prediction()
+    coverage = compute_data_coverage(prediction)
+    action = derive_next_research_action(prediction, coverage)
+    assert action["next_retry"] is None
