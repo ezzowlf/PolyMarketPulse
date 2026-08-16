@@ -1140,7 +1140,7 @@ def ai_ask(payload: AskRequest, storage: Storage = Depends(get_storage)) -> AIAn
 _PRODUCT_MODE_KEYS = (
     "product_mode", "product_probability", "differenz_pp", "model_lifecycle",
     "summary", "why_numeric", "next_macro_event", "change_drivers", "missing",
-    "data_gaps_detail", "next_research",
+    "data_gaps_detail", "next_research", "data_coverage", "next_research_action",
 )
 
 
@@ -1152,6 +1152,11 @@ def prediction(market_id: str, storage: Storage = Depends(get_storage)) -> dict:
     prediction_result = ai_service.get_prediction(storage, market_id)
     result = prediction_result.as_dict()
     result.update(product_mode_for_prediction(prediction_result))
+    from .prediction.data_coverage import compute_data_coverage, derive_next_research_action
+
+    coverage = compute_data_coverage(prediction_result)
+    result["data_coverage"] = coverage.as_dict()
+    result["next_research_action"] = derive_next_research_action(prediction_result, coverage)
     from .research_status import source_availability
     result["source_availability"] = source_availability(storage, market_id)
     result["early_signals"] = storage.get_social_signals(market_id)

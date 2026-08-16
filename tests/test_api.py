@@ -379,6 +379,12 @@ def test_ai_explain_recommendation_carries_product_mode_fields(client: TestClien
     data = resp.json()
     assert data["prediction"]["product_mode"] == audited["product_mode"]
     assert data["prediction"]["product_probability"] == audited["product_probability"]
+    # Phase 7.7/7.8: same real wiring mechanism, same regression risk --
+    # data_coverage/next_research_action must reach the same endpoint the
+    # UI actually reads from.
+    assert "data_coverage" in audited
+    assert data["prediction"]["data_coverage"] == audited["data_coverage"]
+    assert data["prediction"]["next_research_action"] == audited["next_research_action"]
 
 
 def test_ai_explain_recommendation_recompute_endpoint(client: TestClient) -> None:
