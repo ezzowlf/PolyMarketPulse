@@ -60,6 +60,38 @@ def test_fed_shadow_is_market_blind_and_has_distribution() -> None:
     assert shadow.diagnostics["validation"]["passed"] is True
 
 
+def test_fed_family_of_five_separate_contracts_shares_one_distribution() -> None:
+    """Phase 5 (Product Truth Audit follow-up): the five real September
+    2026 FOMC contracts (no-change / cut-25 / cut-50+ / hike-25 /
+    hike-50+) are five SEPARATE markets, each computing its own
+    predict_shadow() call independently. They must still resolve to
+    probabilities drawn from exactly the same underlying transition
+    distribution -- same prior action, same model/dataset version --
+    and sum to ~1.0 across the whole family, never overlapping buckets
+    or contradicting single-contract models."""
+    questions = {
+        "UNCHANGED": "Will there be no change in Fed interest rates after the September 2026 meeting?",
+        "CUT_25": "Will the Fed decrease interest rates by 25 bps after the September 2026 meeting?",
+        "CUT_50_PLUS": "Will the Fed decrease interest rates by 50+ bps after the September 2026 meeting?",
+        "HIKE_25": "Will the Fed increase interest rates by 25 bps after the September 2026 meeting?",
+        "HIKE_50_PLUS": "Will the Fed increase interest rates by 50+ bps after the September 2026 meeting?",
+    }
+    policy = _policy(date(2026, 7, 29))
+    shadows = {
+        outcome: predict_shadow(question, None, _snapshot(date(2026, 8, 13)), policy)
+        for outcome, question in questions.items()
+    }
+    for outcome, shadow in shadows.items():
+        assert shadow.available is True
+        assert shadow.diagnostics["target"]["outcome"] == outcome
+        assert shadow.diagnostics["prior_action"] == "UNCHANGED"
+        assert shadow.diagnostics["model_version"] == shadows["UNCHANGED"].diagnostics["model_version"]
+        assert shadow.diagnostics["policy_decision"]["decision_date"] == "2026-07-29"
+
+    total = sum(shadow.probability for shadow in shadows.values())
+    assert round(total, 9) == 1.0
+
+
 def test_live_snapshot_requires_official_prior_action() -> None:
     shadow = predict_shadow(QUESTION.replace("2025", "2026"), RULE, _snapshot(date(2026, 8, 12)))
     assert shadow.available is False
