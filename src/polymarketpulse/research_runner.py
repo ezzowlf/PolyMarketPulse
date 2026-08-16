@@ -601,9 +601,18 @@ def _recheck_interval_hours(priority_score: float) -> float:
 
 
 def _last_run_info(storage: Storage, provider_market_id: str) -> tuple[datetime | None, int]:
-    """Real last-run timestamp + consecutive-failure streak for one market,
-    derived from the persisted research_runs history — no separate
-    scheduler-state table needed."""
+    """Real last-run timestamp + consecutive-non-productive-run streak for
+    one market, derived from the persisted research_runs history — no
+    separate scheduler-state table needed.
+
+    Phase 7.8.10 loop guard: a run counts against the backoff streak when it
+    was either a genuine transport failure (SOURCE_FETCH_FAILED) OR a real
+    fetch that extracted zero new claims (claims_extracted == 0) -- the
+    latter is the "endless NO_NEW_INFORMATION loop" case explicitly called
+    out in the spec: a source that keeps answering successfully but never
+    yields anything new must still back off over time, not be re-fetched at
+    the same short interval forever. A single row with claims_extracted > 0
+    (real new information) resets the streak immediately."""
     rows = storage.get_research_runs(provider_market_id=provider_market_id, limit=10)
     if not rows:
         return None, 0
@@ -623,7 +632,8 @@ def _last_run_info(storage: Storage, provider_market_id: str) -> tuple[datetime 
                 status = _json.loads(detail).get("source_fetch_status")
             except (ValueError, TypeError):
                 status = None
-        if status == "SOURCE_FETCH_FAILED":
+        claims_extracted = row.get("claims_extracted") or 0
+        if status == "SOURCE_FETCH_FAILED" or claims_extracted == 0:
             consecutive_failures += 1
         else:
             break

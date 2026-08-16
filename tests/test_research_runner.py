@@ -253,6 +253,38 @@ def test_recurring_research_respects_limit_and_cost_budget(storage: Storage) -> 
     assert len(records) == 2  # real limit respected, not all 3 candidates run
 
 
+def test_backoff_streak_counts_zero_new_claims_not_only_transport_failures(storage: Storage) -> None:
+    """Phase 7.8.10 loop guard: a source that answers successfully every
+    time but never yields a new claim (claims_extracted == 0) must still
+    build a backoff streak -- otherwise a market with permanently-empty
+    GDELT coverage would be re-fetched at the same short interval forever
+    ('endless NO_NEW_INFORMATION loop'). A single productive run
+    (claims_extracted > 0) must reset the streak."""
+    from polymarketpulse.research_runner import _last_run_info
+
+    now = datetime.now(UTC)
+    for i in range(3):
+        storage.connection.execute(
+            "INSERT INTO research_runs (run_at, provider, provider_market_id, question, trigger, "
+            "claims_extracted, final_status, duration_ms, cost_usd) "
+            "VALUES (?, 'polymarket', 'backoff-1', 'Q?', 'manual', 0, 'OK', 10, 0.0)",
+            ((now.replace(microsecond=0)).isoformat(),),
+        )
+    storage.connection.commit()
+    _, consecutive = _last_run_info(storage, "backoff-1")
+    assert consecutive == 3  # all 3 real runs found zero new claims
+
+    storage.connection.execute(
+        "INSERT INTO research_runs (run_at, provider, provider_market_id, question, trigger, "
+        "claims_extracted, final_status, duration_ms, cost_usd) "
+        "VALUES (?, 'polymarket', 'backoff-1', 'Q?', 'manual', 2, 'OK', 10, 0.0)",
+        (now.isoformat(),),
+    )
+    storage.connection.commit()
+    _, consecutive_after_success = _last_run_info(storage, "backoff-1")
+    assert consecutive_after_success == 0  # the latest real productive run resets the streak
+
+
 def test_gap_closure_recorded_closed_on_new_govtrack_claim_open_on_repeat(storage: Storage) -> None:
     """Phase 7.6: the real regression case -- a genuinely new GovTrack
     status must record result_status=CLOSED, but re-running the SAME
