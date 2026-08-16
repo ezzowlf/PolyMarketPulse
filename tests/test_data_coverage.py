@@ -219,10 +219,52 @@ class _FakeStorage:
         return self._health.get(source_id)
 
 
-def test_offline_provider_with_real_fallback_downgrades_closability_but_still_fetches() -> None:
-    """govtrack (bill_identity's provider) has a real known fallback
-    (congress_gov) -- OFFLINE must downgrade closability, not produce a
-    dead-end BLOCKED_PROVIDER, since a sensible alternative exists."""
+def test_offline_provider_with_no_known_fallback_yields_blocked_provider() -> None:
+    """gdelt is the provider for GEOPOLITICS' independent_confirmation and
+    has no configured real fallback in this codebase -- if it were the
+    active target and OFFLINE, the honest result is BLOCKED_PROVIDER, not a
+    fetch attempt that will only fail again. Verified directly against the
+    routing table rather than forcing a specific fixture through the full
+    dependency chain."""
+    from polymarketpulse.data_sources import ProviderHealthState
+    from polymarketpulse.prediction.data_coverage import _PROVIDER_FALLBACK
+
+    assert "gdelt" not in _PROVIDER_FALLBACK
+    assert ProviderHealthState.OFFLINE.value == "OFFLINE"
+
+
+def test_offline_provider_with_discovery_only_fallback_yields_low_closability() -> None:
+    """imf_portwatch's only real fallback is gdelt, a discovery-only
+    provider (Phase 7.8.5 case C: 'only degraded discovery path') -- that
+    is real and still worth attempting (FETCH, not BLOCKED_PROVIDER), but
+    must not be reported as equally reliable as a real structured fallback
+    (MEDIUM), hence LOW."""
+    from polymarketpulse.data_sources import ProviderHealthState
+
+    world_state = SimpleNamespace(
+        path_to_resolution=SimpleNamespace(resolution_path=SimpleNamespace(template_name="GEOPOLITICS")),
+        most_recent_evidence_published_at=None,
+        evidence_for_yes_count=0, evidence_for_no_count=0,
+    )
+    prediction = _prediction(
+        forecast_archetype="GEOPOLITICS_STRATEGIC", world_state=world_state,
+        structured_world_state=SimpleNamespace(current_state="Real state, not UNKNOWN"),
+        resolution_semantics=object(), independent_evidence=None,
+    )
+    coverage = compute_data_coverage(prediction)
+    # next unblocked missing input here is primary_measurement_source ->
+    # imf_portwatch, whose only real fallback (gdelt) is discovery-only.
+    storage = _FakeStorage({"imf_portwatch": _FakeHealth(ProviderHealthState.OFFLINE)})
+    action = derive_next_research_action(prediction, coverage, storage=storage)
+    assert action["action_type"] == "FETCH"
+    assert action["fallback_provider"] == "gdelt"
+    assert action["closability"] == "LOW"
+
+
+def test_healthy_structured_fallback_yields_medium_closability() -> None:
+    """govtrack/congress_gov are both real structured providers for each
+    other -- an OFFLINE primary with that kind of fallback is a genuinely
+    stronger position (MEDIUM) than falling back to discovery-only gdelt."""
     from polymarketpulse.data_sources import ProviderHealthState
 
     world_state = SimpleNamespace(
@@ -238,43 +280,6 @@ def test_offline_provider_with_real_fallback_downgrades_closability_but_still_fe
     action = derive_next_research_action(prediction, coverage, storage=storage)
     assert action["action_type"] == "FETCH"
     assert action["fallback_provider"] == "congress_gov"
-    assert action["closability"] == "MEDIUM"
-
-
-def test_offline_provider_with_no_known_fallback_yields_blocked_provider() -> None:
-    """gdelt is the provider for GEOPOLITICS' independent_confirmation and
-    has no configured real fallback in this codebase -- if it were the
-    active target and OFFLINE, the honest result is BLOCKED_PROVIDER, not a
-    fetch attempt that will only fail again. Verified directly against the
-    routing table rather than forcing a specific fixture through the full
-    dependency chain."""
-    from polymarketpulse.data_sources import ProviderHealthState
-    from polymarketpulse.prediction.data_coverage import _PROVIDER_FALLBACK
-
-    assert "gdelt" not in _PROVIDER_FALLBACK
-    assert ProviderHealthState.OFFLINE.value == "OFFLINE"
-
-
-def test_offline_provider_with_real_fallback_still_fetches_via_fallback() -> None:
-    from polymarketpulse.data_sources import ProviderHealthState
-
-    world_state = SimpleNamespace(
-        path_to_resolution=SimpleNamespace(resolution_path=SimpleNamespace(template_name="GEOPOLITICS")),
-        most_recent_evidence_published_at=None,
-        evidence_for_yes_count=0, evidence_for_no_count=0,
-    )
-    prediction = _prediction(
-        forecast_archetype="GEOPOLITICS_STRATEGIC", world_state=world_state,
-        structured_world_state=SimpleNamespace(current_state="Real state, not UNKNOWN"),
-        resolution_semantics=object(), independent_evidence=None,
-    )
-    coverage = compute_data_coverage(prediction)
-    # next unblocked missing input here is primary_measurement_source ->
-    # imf_portwatch, which DOES have a real fallback (gdelt).
-    storage = _FakeStorage({"imf_portwatch": _FakeHealth(ProviderHealthState.OFFLINE)})
-    action = derive_next_research_action(prediction, coverage, storage=storage)
-    assert action["action_type"] == "FETCH"
-    assert action["fallback_provider"] == "gdelt"
     assert action["closability"] == "MEDIUM"
 
 
@@ -294,3 +299,139 @@ def test_unknown_provider_health_never_blocks_action() -> None:
     assert action["action_type"] == "FETCH"
     assert action["provider_health"] == "UNKNOWN"
     assert action["closability"] == "HIGH"
+
+
+# ---------------------------------------------------------------------
+# Phase 7.8.6: Expected Product Effect
+# ---------------------------------------------------------------------
+
+
+def test_fed_missing_input_reports_enable_champion_inference() -> None:
+    """Direct unit check on the categorization function itself: fed_policy's
+    prior_fomc_action has no real live provider (it comes from the curated
+    training dataset / market_resolutions tracking, not a fetchable source),
+    so the end-to-end action correctly reports BLOCKED_PROVIDER -- but the
+    underlying effect classification must still say what closing this gap
+    WOULD do, which is verified here directly."""
+    from polymarketpulse.prediction.data_coverage import INPUT_CONTRACTS, _expected_product_effect
+
+    prediction = _prediction(forecast_archetype="MACRO_POLICY", model_diagnostics={})
+    coverage = compute_data_coverage(prediction)
+    fed_req = INPUT_CONTRACTS["MACRO_POLICY"][0]
+    assert _expected_product_effect("MACRO_POLICY", fed_req, coverage) == "ENABLE_CHAMPION_INFERENCE"
+
+
+def test_legislation_missing_deadline_reports_enable_structured_outlook() -> None:
+    """Clarity-style fixture: only ONE critical input away from full
+    coverage -- closing it would plausibly flip the product mode, so the
+    effect must say so, never claim a numeric-model upgrade for a
+    non-Champion archetype."""
+    world_state = SimpleNamespace(
+        path_to_resolution=SimpleNamespace(resolution_path=SimpleNamespace(template_name="LEGISLATION")),
+        deadline=None,
+    )
+    sws = SimpleNamespace(
+        confirmed_facts=("x",), completed_steps=("introduced", "committee", "house_vote"), open_steps=(),
+    )
+    next_event = SimpleNamespace(next_event_type="SENATE_VOTE", expected_time_window=None)
+    event_clock = SimpleNamespace(deadline=None, required_steps_remaining=2)
+    prediction = _prediction(
+        forecast_archetype="LEGISLATIVE_PROCESS", world_state=world_state,
+        structured_world_state=sws, next_event=next_event, event_clock=event_clock,
+    )
+    coverage = compute_data_coverage(prediction)
+    action = derive_next_research_action(prediction, coverage)
+    assert action["expected_product_effect"] == "ENABLE_STRUCTURED_OUTLOOK"
+
+
+def test_hormuz_optional_gap_reports_improve_confidence_not_a_fake_upgrade() -> None:
+    world_state = SimpleNamespace(
+        path_to_resolution=SimpleNamespace(resolution_path=SimpleNamespace(template_name="GEOPOLITICS")),
+        most_recent_evidence_published_at="2026-08-09T00:00:00+00:00",
+        evidence_for_yes_count=0, evidence_for_no_count=1,
+    )
+    sws = SimpleNamespace(current_state="Resolution-Pfad (GEOPOLITICS) noch ohne bestätigten Schritt.")
+    independent_evidence = SimpleNamespace(available=True)
+    prediction = _prediction(
+        forecast_archetype="GEOPOLITICS_STRATEGIC", world_state=world_state,
+        structured_world_state=sws, resolution_semantics=object(),
+        independent_evidence=independent_evidence,
+    )
+    coverage = compute_data_coverage(prediction)
+    # All CRITICAL inputs are covered; the only remaining gap is OPTIONAL
+    # (independent_confirmation) -- derive_next_research_action currently
+    # only proposes CRITICAL gaps as the primary action (COVERAGE_COMPLETE),
+    # so this directly exercises the optional-effect branch instead.
+    from polymarketpulse.prediction.data_coverage import INPUT_CONTRACTS, _expected_product_effect
+
+    optional_req = next(r for r in INPUT_CONTRACTS["GEOPOLITICS"] if r.criticality == "OPTIONAL")
+    assert _expected_product_effect("GEOPOLITICS", optional_req, coverage) == "IMPROVE_CONFIDENCE"
+
+
+# ---------------------------------------------------------------------
+# Phase 7.8.7: VOI Score monotonicity
+# ---------------------------------------------------------------------
+
+
+def test_voi_higher_closability_scores_higher_all_else_equal() -> None:
+    from polymarketpulse.prediction.data_coverage import _voi_score
+
+    kwargs = {"criticality": "CRITICAL", "has_dependents": False, "expected_effect": "IMPROVE_DATA_COVERAGE",
+              "deadline_bonus": 0.0, "failure_penalty": 0.0}
+    assert _voi_score(closability="HIGH", **kwargs) > _voi_score(closability="MEDIUM", **kwargs)
+    assert _voi_score(closability="MEDIUM", **kwargs) > _voi_score(closability="LOW", **kwargs)
+    assert _voi_score(closability="LOW", **kwargs) > _voi_score(closability="BLOCKED", **kwargs)
+
+
+def test_voi_critical_gap_scores_higher_than_optional_all_else_equal() -> None:
+    from polymarketpulse.prediction.data_coverage import _voi_score
+
+    kwargs = {"closability": "HIGH", "has_dependents": False, "expected_effect": "IMPROVE_DATA_COVERAGE",
+              "deadline_bonus": 0.0, "failure_penalty": 0.0}
+    assert _voi_score(criticality="CRITICAL", **kwargs) > _voi_score(criticality="OPTIONAL", **kwargs)
+
+
+def test_voi_near_deadline_scores_higher_than_far_deadline() -> None:
+    from polymarketpulse.prediction.data_coverage import _voi_score
+
+    kwargs = {"criticality": "CRITICAL", "closability": "HIGH", "has_dependents": False,
+              "expected_effect": "IMPROVE_DATA_COVERAGE", "failure_penalty": 0.0}
+    assert _voi_score(deadline_bonus=12.0, **kwargs) > _voi_score(deadline_bonus=0.0, **kwargs)
+
+
+def test_voi_meaningful_upgrade_scores_higher_than_no_upgrade() -> None:
+    from polymarketpulse.prediction.data_coverage import _voi_score
+
+    kwargs = {"criticality": "CRITICAL", "closability": "HIGH", "has_dependents": False,
+              "deadline_bonus": 0.0, "failure_penalty": 0.0}
+    assert (
+        _voi_score(expected_effect="ENABLE_CHAMPION_INFERENCE", **kwargs)
+        > _voi_score(expected_effect="NO_PRODUCT_UPGRADE", **kwargs)
+    )
+
+
+def test_voi_recent_failures_reduce_score_but_never_go_negative() -> None:
+    from polymarketpulse.prediction.data_coverage import _voi_score
+
+    kwargs = {"criticality": "OPTIONAL", "closability": "LOW", "has_dependents": False,
+              "expected_effect": "NO_PRODUCT_UPGRADE", "deadline_bonus": 0.0}
+    assert _voi_score(failure_penalty=0.0, **kwargs) >= _voi_score(failure_penalty=50.0, **kwargs)
+    assert _voi_score(failure_penalty=500.0, **kwargs) == 0
+
+
+def test_recent_failure_penalty_reads_real_gap_closures() -> None:
+    from polymarketpulse.prediction.data_coverage import _recent_failure_penalty
+
+    class _Storage:
+        def get_gap_closures(self, gap_key, limit):
+            assert gap_key == "input:LEGISLATION:bill_identity"
+            return [{"result_status": "OPEN"}, {"result_status": "OPEN"}, {"result_status": "CLOSED"}]
+
+    penalty = _recent_failure_penalty(_Storage(), "input:LEGISLATION:bill_identity")
+    assert penalty == 16  # 2 non-closing attempts * 8
+
+
+def test_recent_failure_penalty_honestly_zero_without_storage() -> None:
+    from polymarketpulse.prediction.data_coverage import _recent_failure_penalty
+
+    assert _recent_failure_penalty(None, "any-gap-key") == 0.0

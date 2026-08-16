@@ -227,6 +227,7 @@ def compute_data_coverage(prediction) -> DataCoverage:
 
 _PROVIDER_BY_INPUT: dict[str, str] = {
     "bill_identity": "govtrack", "official_current_stage": "govtrack",
+    "resolution_deadline": "govtrack",
     "next_required_step": "govtrack", "schedule_timing": "congress_gov",
     "resolution_semantics": "imf_portwatch", "primary_measurement_source": "imf_portwatch",
     "current_observation": "imf_portwatch", "freshness": "imf_portwatch",
@@ -288,33 +289,146 @@ def _provider_health_state(storage, provider: str | None) -> ProviderHealthState
     return health.state()
 
 
-def _closability(health_state: ProviderHealthState, has_fallback: bool, dependency_blocked: bool) -> str:
-    if dependency_blocked:
+# Phase 7.8.5: providers that only ever produce unstructured discovery hits
+# (free-text news search), never a real structured claim -- routing through
+# one of these as a FALLBACK is real (better than nothing) but weaker than a
+# real structured primary/fallback path, hence its own LOW closability tier
+# rather than being lumped in with MEDIUM.
+_DISCOVERY_ONLY_PROVIDERS = frozenset({"gdelt"})
+
+Closability = Literal["HIGH", "MEDIUM", "LOW", "BLOCKED"]
+
+
+def _closability(
+    health_state: ProviderHealthState, fallback: str | None, dependency_blocked: bool, provider: str | None,
+) -> Closability:
+    """Phase 7.8.5 contract, derived only from real signals -- no arbitrary
+    values:
+
+    HIGH     - no unmet prerequisite, a real provider is configured, and its
+               health is LIVE or UNKNOWN (never fetched is not a failure).
+    MEDIUM   - primary provider unavailable (OFFLINE/STALE/DEGRADED) but a
+               real structured fallback exists.
+    LOW      - the only remaining path is a discovery-only provider
+               (currently gdelt), whether as a degraded primary or as the
+               fallback for an unavailable structured primary.
+    BLOCKED  - no provider configured, an unmet prerequisite, or an
+               unavailable primary with no real fallback at all.
+    """
+    if dependency_blocked or provider is None:
         return "BLOCKED"
-    if health_state == ProviderHealthState.OFFLINE:
-        return "MEDIUM" if has_fallback else "BLOCKED"
-    if health_state == ProviderHealthState.STALE:
-        return "MEDIUM"
-    if health_state == ProviderHealthState.DEGRADED:
-        return "MEDIUM"
-    return "HIGH"  # LIVE or UNKNOWN (never fetched yet -- optimistic, not a real failure)
+    if health_state in (ProviderHealthState.LIVE, ProviderHealthState.UNKNOWN):
+        if provider in _DISCOVERY_ONLY_PROVIDERS:
+            return "LOW"
+        return "HIGH"
+    # Primary is OFFLINE / STALE / DEGRADED.
+    if fallback is None:
+        return "BLOCKED"
+    if fallback in _DISCOVERY_ONLY_PROVIDERS:
+        return "LOW"
+    return "MEDIUM"
 
 
-def _expected_product_effect(archetype: str, missing_req: InputRequirement, coverage: DataCoverage) -> str:
-    if missing_req.required_for in ("NUMERIC_FORECAST", "BOTH") and archetype == "MACRO_POLICY":
-        return "Würde numerisches Modell wieder auswertbar machen."
-    if coverage.critical_available == coverage.critical_total - 1:
-        return "Würde den Markt voraussichtlich von INSUFFICIENT_DATA zu STRUCTURED_OUTLOOK anheben."
-    return "Würde die Datenabdeckung und Erklärung verbessern, ohne den Produktmodus sicher zu ändern."
+# Phase 7.8.6: categorical, honestly-gated product effect of successfully
+# closing one specific gap. ENABLE_CHAMPION_INFERENCE is reserved for the
+# one archetype that actually has a validated Champion model today
+# (MACRO_POLICY / fed_policy.py) -- no other archetype may claim it, per
+# the explicit rule "kein Structured Outlook -> Numeric ohne validiertes
+# Modell".
+ExpectedProductEffect = Literal[
+    "ENABLE_CHAMPION_INFERENCE", "ENABLE_STRUCTURED_OUTLOOK", "IMPROVE_NEXT_EVENT",
+    "IMPROVE_CONFIDENCE", "IMPROVE_DATA_COVERAGE", "NO_PRODUCT_UPGRADE",
+]
+
+_EFFECT_SUMMARY_DE: dict[ExpectedProductEffect, str] = {
+    "ENABLE_CHAMPION_INFERENCE": "Würde das validierte numerische Modell wieder auswertbar machen.",
+    "ENABLE_STRUCTURED_OUTLOOK": "Würde den Markt voraussichtlich von INSUFFICIENT_DATA zu STRUCTURED_OUTLOOK anheben.",
+    "IMPROVE_NEXT_EVENT": "Würde den nächsten erwarteten Schritt/Termin konkretisieren.",
+    "IMPROVE_CONFIDENCE": "Würde die bestehende Einschätzung zusätzlich absichern, ohne den Produktmodus zu ändern.",
+    "IMPROVE_DATA_COVERAGE": "Würde die Datenabdeckung und Erklärung verbessern, ohne den Produktmodus sicher zu ändern.",
+    "NO_PRODUCT_UPGRADE": "Keine Wirkung möglich.",
+}
 
 
-def _voi_score(criticality: Criticality, closability: str, has_dependents: bool) -> int:
-    base = 70 if criticality == "CRITICAL" else 30
-    closability_weight = {"HIGH": 1.0, "MEDIUM": 0.6, "LOW": 0.3, "BLOCKED": 0.0}[closability]
-    score = base * closability_weight
+def _expected_product_effect(
+    archetype: str, missing_req: InputRequirement, coverage: DataCoverage,
+) -> ExpectedProductEffect:
+    would_complete_critical = coverage.critical_available == coverage.critical_total - 1
+    if archetype == "MACRO_POLICY" and missing_req.required_for in ("NUMERIC_FORECAST", "BOTH"):
+        return "ENABLE_CHAMPION_INFERENCE"
+    if missing_req.criticality == "OPTIONAL":
+        return "IMPROVE_CONFIDENCE"
+    if would_complete_critical:
+        return "ENABLE_STRUCTURED_OUTLOOK"
+    if missing_req.input_key in ("next_required_step", "schedule_timing"):
+        return "IMPROVE_NEXT_EVENT"
+    return "IMPROVE_DATA_COVERAGE"
+
+
+# Phase 7.8.7: VOI score -- every weight is a named constant, documented
+# here, and combined by simple addition/multiplication. This is a real,
+# deterministic heuristic, not a learned or calibrated model; it is
+# intentionally simple enough that every component can be checked by hand
+# against the inputs it reads.
+_VOI_BASE_CRITICAL = 70          # a CRITICAL gap starts far above an OPTIONAL one
+_VOI_BASE_OPTIONAL = 30
+_VOI_CLOSABILITY_WEIGHT: dict[Closability, float] = {
+    "HIGH": 1.0, "MEDIUM": 0.6, "LOW": 0.3, "BLOCKED": 0.0,
+}
+_VOI_DEPENDENTS_BONUS = 15       # closing this gap would unblock further real research
+_VOI_DEADLINE_BONUS_URGENT = 12  # resolution within 72h
+_VOI_DEADLINE_BONUS_SOON = 5     # resolution within 14 days
+_VOI_UPGRADE_BONUS: dict[ExpectedProductEffect, float] = {
+    "ENABLE_CHAMPION_INFERENCE": 15, "ENABLE_STRUCTURED_OUTLOOK": 12,
+    "IMPROVE_NEXT_EVENT": 6, "IMPROVE_CONFIDENCE": 3, "IMPROVE_DATA_COVERAGE": 4,
+    "NO_PRODUCT_UPGRADE": 0,
+}
+_VOI_RECENT_FAILURE_PENALTY_PER_ATTEMPT = 8  # repeated recent non-closing attempts on this exact gap_key
+_VOI_RECENT_FAILURE_PENALTY_CAP = 24
+
+
+def _deadline_bonus(prediction) -> float:
+    world_state = getattr(prediction, "world_state", None)
+    hours = getattr(world_state, "time_remaining_hours", None) if world_state else None
+    if hours is None or hours <= 0:
+        return 0.0
+    if hours <= 72:
+        return _VOI_DEADLINE_BONUS_URGENT
+    if hours <= 24 * 14:
+        return _VOI_DEADLINE_BONUS_SOON
+    return 0.0
+
+
+def _recent_failure_penalty(storage, gap_key: str) -> float:
+    """Repeated recent OPEN/BLOCKED_PROVIDER attempts on the exact same
+    gap_key (no genuinely new information closing it) reduce VOI -- an
+    honest signal that spending another attempt right now is less likely to
+    help, without ever fully zeroing a still-real gap out."""
+    if storage is None:
+        return 0.0
+    getter = getattr(storage, "get_gap_closures", None)
+    if getter is None:
+        return 0.0
+    try:
+        rows = getter(gap_key=gap_key, limit=5)
+    except Exception:  # noqa: BLE001 - VOI scoring must never break on a storage read
+        return 0.0
+    non_closing = sum(1 for r in rows if r.get("result_status") in ("OPEN", "BLOCKED_PROVIDER"))
+    return min(non_closing * _VOI_RECENT_FAILURE_PENALTY_PER_ATTEMPT, _VOI_RECENT_FAILURE_PENALTY_CAP)
+
+
+def _voi_score(
+    criticality: Criticality, closability: Closability, has_dependents: bool,
+    expected_effect: ExpectedProductEffect, deadline_bonus: float, failure_penalty: float,
+) -> int:
+    base = _VOI_BASE_CRITICAL if criticality == "CRITICAL" else _VOI_BASE_OPTIONAL
+    score = base * _VOI_CLOSABILITY_WEIGHT[closability]
     if has_dependents:
-        score += 15  # unblocking a downstream input is worth more than an isolated one
-    return round(min(100, score))
+        score += _VOI_DEPENDENTS_BONUS
+    score += _VOI_UPGRADE_BONUS[expected_effect]
+    score += deadline_bonus
+    score -= failure_penalty
+    return round(max(0.0, min(100.0, score)))
 
 
 def derive_next_research_action(prediction, coverage: DataCoverage, storage=None) -> dict:
@@ -334,7 +448,8 @@ def derive_next_research_action(prediction, coverage: DataCoverage, storage=None
                 "Kein numerisches oder strukturiertes Modell für diesen Markt verfügbar — keine automatische Recherche.",
             "reason": "NO_ARCHETYPE", "preferred_provider": None, "gap_key": None,
             "fallback_provider": None, "provider_health": None, "closability": "BLOCKED",
-            "expected_product_effect": "Keine Wirkung möglich.", "voi_score": 0,
+            "expected_product_effect": "NO_PRODUCT_UPGRADE",
+            "expected_product_effect_summary": _EFFECT_SUMMARY_DE["NO_PRODUCT_UPGRADE"], "voi_score": 0,
         }
     if coverage.next_missing_input is None:
         return {
@@ -342,49 +457,60 @@ def derive_next_research_action(prediction, coverage: DataCoverage, storage=None
             "human_summary": "Alle kritischen Modelldaten sind vorhanden.",
             "reason": "COVERAGE_COMPLETE", "preferred_provider": None, "gap_key": None,
             "fallback_provider": None, "provider_health": None, "closability": "HIGH",
-            "expected_product_effect": "Keine weitere Wirkung nötig.", "voi_score": 0,
+            "expected_product_effect": "NO_PRODUCT_UPGRADE",
+            "expected_product_effect_summary": "Keine weitere Wirkung nötig.", "voi_score": 0,
         }
 
     requirements = INPUT_CONTRACTS[coverage.archetype]
     unblocked = _unblocked_missing_requirements(prediction, requirements)
     if not unblocked:
         # Every missing critical input is gated behind another missing one --
-        # an honest dependency deadlock rather than picking an arbitrary one.
+        # an honest dependency deadlock. Defensive only: with the current
+        # acyclic _DEPENDS_ON contracts this cannot actually occur (every
+        # dependency chain terminates in a prerequisite-free input), but a
+        # future contract must not silently invent an arbitrary target here.
         blocking_req = next(r for r in requirements if r.human_label == coverage.next_missing_input)
+        provider = _PROVIDER_BY_INPUT.get(blocking_req.input_key)
         return {
             "action_type": "FETCH",
             "target_information": blocking_req.human_label,
             "human_summary": f"{blocking_req.human_label.capitalize()} prüfen (Voraussetzung für weitere Schritte).",
             "reason": f"CRITICAL_INPUT_MISSING:{blocking_req.input_key}",
-            "preferred_provider": _PROVIDER_BY_INPUT.get(blocking_req.input_key),
+            "preferred_provider": provider,
             "gap_key": f"input:{coverage.archetype}:{blocking_req.input_key}",
             "provider_market_id": getattr(prediction, "market_id", None),
-            "fallback_provider": _PROVIDER_FALLBACK.get(_PROVIDER_BY_INPUT.get(blocking_req.input_key, "")),
-            "provider_health": _provider_health_state(storage, _PROVIDER_BY_INPUT.get(blocking_req.input_key)).value,
-            "closability": "HIGH", "expected_product_effect": _expected_product_effect(coverage.archetype, blocking_req, coverage),
-            "voi_score": _voi_score("CRITICAL", "HIGH", has_dependents=False),
+            "fallback_provider": _PROVIDER_FALLBACK.get(provider or ""),
+            "provider_health": _provider_health_state(storage, provider).value,
+            "closability": "BLOCKED",
+            "expected_product_effect": "NO_PRODUCT_UPGRADE",
+            "expected_product_effect_summary": _EFFECT_SUMMARY_DE["NO_PRODUCT_UPGRADE"],
+            "voi_score": 0,
         }
 
     missing_req = unblocked[0]
     provider = _PROVIDER_BY_INPUT.get(missing_req.input_key)
     fallback = _PROVIDER_FALLBACK.get(provider) if provider else None
     health_state = _provider_health_state(storage, provider)
-    has_fallback = fallback is not None
-    closability = _closability(health_state, has_fallback, dependency_blocked=False)
+    closability = _closability(health_state, fallback, dependency_blocked=False, provider=provider)
     has_dependents = any(missing_req.input_key in deps for deps in _DEPENDS_ON.values())
     provider_market_id = getattr(prediction, "market_id", None)
     gap_key = f"input:{coverage.archetype}:{missing_req.input_key}"
+    effect = _expected_product_effect(coverage.archetype, missing_req, coverage)
+    deadline_bonus = _deadline_bonus(prediction)
+    failure_penalty = _recent_failure_penalty(storage, gap_key)
 
-    if health_state == ProviderHealthState.OFFLINE and not has_fallback:
+    if closability == "BLOCKED":
+        reason = f"PROVIDER_OFFLINE:{provider}" if provider else "NO_PROVIDER_CONFIGURED"
         return {
             "action_type": "BLOCKED_PROVIDER",
             "target_information": missing_req.human_label,
             "human_summary": f"{missing_req.human_label.capitalize()} kann derzeit nicht recherchiert werden — Provider nicht erreichbar.",
-            "reason": f"PROVIDER_OFFLINE:{provider}",
+            "reason": reason,
             "preferred_provider": provider, "gap_key": gap_key, "provider_market_id": provider_market_id,
             "fallback_provider": None, "provider_health": health_state.value, "closability": "BLOCKED",
-            "expected_product_effect": "Keine Wirkung, solange der Provider nicht erreichbar ist.",
-            "voi_score": _voi_score(missing_req.criticality, "BLOCKED", has_dependents),
+            "expected_product_effect": "NO_PRODUCT_UPGRADE",
+            "expected_product_effect_summary": "Keine Wirkung, solange der Provider nicht erreichbar ist.",
+            "voi_score": _voi_score(missing_req.criticality, "BLOCKED", has_dependents, effect, deadline_bonus, failure_penalty),
         }
 
     return {
@@ -398,6 +524,7 @@ def derive_next_research_action(prediction, coverage: DataCoverage, storage=None
         "fallback_provider": fallback,
         "provider_health": health_state.value,
         "closability": closability,
-        "expected_product_effect": _expected_product_effect(coverage.archetype, missing_req, coverage),
-        "voi_score": _voi_score(missing_req.criticality, closability, has_dependents),
+        "expected_product_effect": effect,
+        "expected_product_effect_summary": _EFFECT_SUMMARY_DE[effect],
+        "voi_score": _voi_score(missing_req.criticality, closability, has_dependents, effect, deadline_bonus, failure_penalty),
     }
