@@ -1,0 +1,36 @@
+# Phase 7 — Data Acquisition / Product-Mode Block: Final Acceptance
+
+Generated as part of Phase 7.18, against commit `505480b` (this checklist itself lands in the following commit).
+
+| # | Item | Status | Evidence |
+|---|---|---|---|
+| 1 | Data Gaps klassifiziert | PASS | `data_gaps.py`: `DataGapCategory` (11 categories) + `GapType` Literal + `_GAP_TYPE_BY_CATEGORY` deterministic mapping, `DataGap.gap_type` computed property. |
+| 2 | Stabile Gap Identity | PASS | `gap_key = f"{provider}:{provider_market_id}:{gap_type}"` (research_runner.py) / `f"input:{archetype}:{input_key}"` (data_coverage.py) — deterministic, reproducible across runs. |
+| 3 | Research Attempts persistiert | PASS | `research_runs` table + `Storage.save_research_run`/`get_research_runs`, real per-run Observability records with before/after counts. |
+| 4 | Gap Closure append-only | PASS | Migration 34 `gap_closures` table, `Storage.save_gap_closure` is a plain INSERT (never UPDATE/UPSERT), `get_gap_closures(latest_only=True)` reads the append-only history via `MAX(id) GROUP BY gap_key`. |
+| 5 | Kein Fake Closure | PASS | `storage.py::save_claim`/`save_claim_group` fixed this session-chain to use `cursor.rowcount > 0` (not the cumulative `connection.total_changes`), so a genuinely-repeated fetch with no new claim records `OPEN`, never a second fake `CLOSED`. Regression test: `test_gap_closure_recorded_closed_on_new_govtrack_claim_open_on_repeat`. |
+| 6 | Provider Health vorhanden | PASS | `data_sources.py::ProviderHealth`/`ProviderHealthState`, `storage.py::save_provider_health`/`get_provider_health`, real state derivation (LIVE/DEGRADED/STALE/OFFLINE/UNKNOWN). |
+| 7 | Provider Health beeinflusst VOI | PASS | `data_coverage.py::_provider_health_state` feeds `_closability()` and `_voi_score()`; live-verified: forcing a real `imf_portwatch` OFFLINE row downgrades `closability` HIGH→MEDIUM/LOW and lowers `voi_score`. |
+| 8 | Dependency-Awareness funktioniert | PASS | `_DEPENDS_ON` map + `_unblocked_missing_requirements()`; live-verified on real GEOPOLITICS markets (primary_measurement_source correctly proposed before its dependents when resolution_semantics is present). |
+| 9 | Closability funktioniert | PASS | 4-value contract (HIGH/MEDIUM/LOW/BLOCKED) derived from provider health + fallback + discovery-only-provider distinction; 6 dedicated tests. |
+| 10 | Critical/Optional Contracts funktionieren | PASS | `INPUT_CONTRACTS` for MACRO_POLICY/LEGISLATION/GEOPOLITICS, each input traced to a real model feature or real template step (no invented "2 news sources" rule). |
+| 11 | Coverage konsistent mit Product Mode | FIXED (this round) | 7.17 found and fixed a real inconsistency: `structured_state.py` wrapped an honest `WaterwayHealthState.current_state == "UNKNOWN"` sentinel in prose, defeating `product_mode.py`'s exact-match check and producing a STRUCTURED_OUTLOOK market with `data_coverage.archetype = None`. Fixed; regression-tested. One known, deliberate, documented scope gap remains (SPORTS templates reach STRUCTURED_OUTLOOK but have no VOI contract) — see `product_truth_retest.md`, not a bug. |
+| 12 | Deadline-/Metadata-Fallbacks funktionieren | PASS | `world_state.py::assemble_world_state` deadline fallback (`proposition.deadline or resolution_date.isoformat()`), fixed in an earlier round of this chain; regression-tested; live-verified on Clarity (now 4/4 coverage). |
+| 13 | Next Research Action vorhanden | PASS | `derive_next_research_action()` on every `/prediction` response; human_summary + full machine-actionable detail. |
+| 14 | VOI deterministisch | PASS | `_voi_score()` built entirely from named module-level constants, no hidden randomness; 8 monotonicity tests (closability, criticality, deadline pressure, upgrade potential, failure penalty). |
+| 15 | Research Queue nutzt VOI | PASS | `/research-queue` via `enrich_queue_with_gap_voi()`, sorted by `(voi_score, priority_score)` descending — real gap-level VOI as primary signal, market-priority score as an explicit real tie-breaker. |
+| 16 | Loop Guards funktionieren | PASS | `run_recurring_research`'s priority-tiered recheck interval + exponential backoff on `SOURCE_FETCH_FAILED`; this session's chain extended it to also back off on real zero-new-claims runs (closing the "endless NO_NEW_INFORMATION" gap explicitly named in the spec). |
+| 17 | NO_ARCHETYPE erzeugt keine Fetches | PASS | `derive_next_research_action` returns `action_type=NONE, reason=NO_ARCHETYPE, voi_score=0` whenever `coverage.archetype is None`; live-verified across the full unresolved-market set and the 22-market retest (all 15 real NO_ARCHETYPE markets show `voi_score=0`, no fetch proposed). |
+| 18 | Recompute nach Research | PASS | `run_research_for_market` computes `pred_after = get_prediction(...)` and `product_mode_after` after every fetch/persist step — a real, not cached, recompute. |
+| 19 | API-Endpunkte konsistent | PASS | `test_next_research_action_is_consistent_across_prediction_explain_recompute_and_queue` proves identical `data_coverage`/`next_research_action` fields (incl. `provider_health`, `closability`, `voi_score`, `expected_product_effect`, `fallback_provider`, `next_retry`) across `/prediction`, `/ai/explain-recommendation`, `/recompute`, `/research-queue`. |
+| 20 | Market Detail zeigt Coverage + Action | PASS | `marketDetail.js::_dataCoverageHtml`/`_nextResearchActionHtml`, plain-German status badges, technical detail collapsed under "Technische Details"; live-verified on Clarity/a real GEOPOLITICS gap/WTI. |
+| 21 | Dashboard zeigt Actionability | PASS | `dashboard.js`'s 4 sections (High-Value Research / Schließbare Datenlücken / Provider-Blocker / Ohne Archetyp), read-only against the same enriched queue, no extra provider fetches; live-verified. |
+| 22 | 22-Market-Retest abgeschlossen | PASS | `analysis/reports/product_truth_retest.json`/`.md`, full per-market detail, real root-cause classification. |
+| 23 | Phantom-/Wiring-Gaps geprüft und behoben | PASS | The waterway-UNKNOWN phantom-STRUCTURED_OUTLOOK bug found in 7.17 was fixed and regression-tested; two other suspicious cases (Ethiopia PM routing, SPORTS archetype scope) were investigated and confirmed not bugs, with reasoning documented rather than assumed. |
+| 24 | Provider Failure != Missing Data | PASS | Distinct, real status vocabulary throughout: `SOURCE_UNREACHABLE` (research_status.py, provider-level), `BLOCKED_PROVIDER`/`PROVIDER_OFFLINE:<id>` (data_coverage.py, gap-level) vs. `NO_ARCHETYPE`/`CRITICAL_INPUT_MISSING:<key>` (genuinely no data exists or isn't yet routed) — never collapsed into one generic "keine Daten" state. |
+
+## Verdict
+
+24/24 PASS or FIXED. 0 OPEN, 0 NOT_APPLICABLE. **Phase 7 (Data Acquisition / Product-Mode Core) is complete** as of this checklist.
+
+Known, deliberate, documented (not fixed, not hidden) scope limitation: `data_coverage.py`'s `INPUT_CONTRACTS` cover only the 3 archetypes with a real validated model or real structural template today (MACRO_POLICY, LEGISLATION, GEOPOLITICS). SPORTS markets can reach STRUCTURED_OUTLOOK via a real resolution-path template but get no VOI contract — a genuine, real, and honestly-reported gap for a future round, not something this round's acceptance criteria required closing.
