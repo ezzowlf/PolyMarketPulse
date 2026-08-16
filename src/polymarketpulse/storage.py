@@ -1789,7 +1789,7 @@ class Storage:
         
         now = datetime.now(UTC).isoformat()
         try:
-            self.connection.execute(
+            cur = self.connection.execute(
                 """
                 INSERT INTO claims (
                     claim_id, subject, predicate, object, speaker, source_id,
@@ -1810,7 +1810,15 @@ class Storage:
                 ),
             )
             self.connection.commit()
-            return self.connection.total_changes > 0
+            # Real bug fix: `self.connection.total_changes` is cumulative
+            # for the entire connection lifetime, not per-statement -- it
+            # was always > 0 after the connection's very first write, so
+            # every claim after the first one on a long-lived connection
+            # was falsely reported "newly inserted" even when
+            # ON CONFLICT DO NOTHING silently skipped it. cursor.rowcount
+            # reports the actual row count changed by THIS statement (0 on
+            # a real conflict, 1 on a real insert).
+            return cur.rowcount > 0
         except (sqlite3.Error, ValueError):
             return False
 
@@ -1826,7 +1834,7 @@ class Storage:
         
         now = datetime.now(UTC).isoformat()
         try:
-            self.connection.execute(
+            cur = self.connection.execute(
                 """
                 INSERT INTO claim_groups (
                     claim_id, canonical_claim_id, republishing_sources_json,
@@ -1842,7 +1850,9 @@ class Storage:
                 ),
             )
             self.connection.commit()
-            return self.connection.total_changes > 0
+            # Same real bug fix as save_claim(): total_changes is cumulative
+            # for the connection, not per-statement.
+            return cur.rowcount > 0
         except (sqlite3.Error, ValueError):
             return False
 
@@ -1920,6 +1930,81 @@ class Storage:
                     "SELECT * FROM research_runs ORDER BY run_at DESC LIMIT ?", (limit,)
                 ).fetchall()
             cols = [d[0] for d in self.connection.execute("SELECT * FROM research_runs LIMIT 0").description]
+            return [dict(zip(cols, row, strict=True)) for row in rows]
+        except sqlite3.Error:
+            return []
+
+    def save_gap_closure(self, record: dict) -> int | None:
+        """Phase 7.6: persist one real attempt to close a data gap.
+        Append-only — never overwrites a prior attempt for the same
+        gap_key, so the real attempt history stays intact. Never raises;
+        this is observability infrastructure, must never break a real
+        research run."""
+        try:
+            cur = self.connection.execute(
+                """
+                INSERT INTO gap_closures (
+                    market_id, provider, provider_market_id, gap_type, gap_key,
+                    target_information, criticality, provider_attempted, source_reference,
+                    research_started_at, research_finished_at, result_status, failure_reason,
+                    claim_reference, previous_gap_state, new_gap_state,
+                    product_mode_before, product_mode_after,
+                    model_probability_before, model_probability_after,
+                    closed_at, next_retry, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.get("market_id"), record.get("provider"), record.get("provider_market_id"),
+                    record.get("gap_type"), record.get("gap_key"),
+                    record.get("target_information"), record.get("criticality"),
+                    record.get("provider_attempted"), record.get("source_reference"),
+                    record.get("research_started_at"), record.get("research_finished_at"),
+                    record.get("result_status"), record.get("failure_reason"),
+                    record.get("claim_reference"), record.get("previous_gap_state"), record.get("new_gap_state"),
+                    record.get("product_mode_before"), record.get("product_mode_after"),
+                    record.get("model_probability_before"), record.get("model_probability_after"),
+                    record.get("closed_at"), record.get("next_retry"),
+                    record.get("created_at") or datetime.now(UTC).isoformat(),
+                ),
+            )
+            self.connection.commit()
+            return cur.lastrowid
+        except sqlite3.Error:
+            return None
+
+    def get_gap_closures(
+        self, provider: str | None = None, provider_market_id: str | None = None,
+        gap_key: str | None = None, latest_only: bool = False, limit: int = 50,
+    ) -> list[dict]:
+        """Real, persisted gap-closure attempt history. `latest_only`
+        returns just the most recent attempt per gap_key (the real current
+        state), `False` returns the full attempt history (real audit
+        trail, per explicit "Historie der Versuche trotzdem erhalten")."""
+        try:
+            cols = [d[0] for d in self.connection.execute("SELECT * FROM gap_closures LIMIT 0").description]
+            where = []
+            params: list = []
+            if provider:
+                where.append("provider = ?")
+                params.append(provider)
+            if provider_market_id:
+                where.append("provider_market_id = ?")
+                params.append(provider_market_id)
+            if gap_key:
+                where.append("gap_key = ?")
+                params.append(gap_key)
+            where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+            if latest_only:
+                connector = "AND" if where_sql else "WHERE"
+                query = (
+                    f"SELECT * FROM gap_closures {where_sql} "
+                    f"{connector} id IN (SELECT MAX(id) FROM gap_closures GROUP BY gap_key) "
+                    "ORDER BY created_at DESC LIMIT ?"
+                )
+            else:
+                query = f"SELECT * FROM gap_closures {where_sql} ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
+            rows = self.connection.execute(query, params).fetchall()
             return [dict(zip(cols, row, strict=True)) for row in rows]
         except sqlite3.Error:
             return []

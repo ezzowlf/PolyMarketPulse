@@ -1336,6 +1336,50 @@ def _migration_033_forecast_model_lifecycle(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migration_034_gap_closures(conn: sqlite3.Connection) -> None:
+    """Phase 7.6: persistent, append-only record of every real attempt to
+    close a data gap. One row per attempt (not one row per gap) --
+    `gap_key` gives stable identity for grouping/dedup while preserving
+    the full attempt history, per explicit instruction. A gap is only
+    ever CLOSED when genuinely new, validated information was found and
+    persisted; a successful-but-empty fetch stays OPEN (Clarity/Hormuz's
+    idempotent GovTrack/PortWatch re-checks are the real regression case
+    this distinction exists for)."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS gap_closures (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            provider_market_id TEXT NOT NULL,
+            gap_type TEXT NOT NULL,
+            gap_key TEXT NOT NULL,
+            target_information TEXT,
+            criticality TEXT,
+            provider_attempted TEXT,
+            source_reference TEXT,
+            research_started_at TEXT,
+            research_finished_at TEXT,
+            result_status TEXT NOT NULL,
+            failure_reason TEXT,
+            claim_reference TEXT,
+            previous_gap_state TEXT,
+            new_gap_state TEXT,
+            product_mode_before TEXT,
+            product_mode_after TEXT,
+            model_probability_before REAL,
+            model_probability_after REAL,
+            closed_at TEXT,
+            next_retry TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_gap_closures_gap_key ON gap_closures(gap_key, created_at);
+        CREATE INDEX IF NOT EXISTS idx_gap_closures_market ON gap_closures(provider, provider_market_id, created_at);
+        """
+    )
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1370,6 +1414,7 @@ MIGRATIONS: list[Migration] = [
     (31, "macro_observation_lineage", _migration_031_macro_observation_lineage),
     (32, "forecast_archetype_registry", _migration_032_forecast_archetype_registry),
     (33, "forecast_model_lifecycle", _migration_033_forecast_model_lifecycle),
+    (34, "gap_closures", _migration_034_gap_closures),
 ]
 
 

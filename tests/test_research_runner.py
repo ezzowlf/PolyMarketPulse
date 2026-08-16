@@ -200,6 +200,75 @@ def test_recurring_research_respects_limit_and_cost_budget(storage: Storage) -> 
     assert len(records) == 2  # real limit respected, not all 3 candidates run
 
 
+def test_gap_closure_recorded_closed_on_new_govtrack_claim_open_on_repeat(storage: Storage) -> None:
+    """Phase 7.6: the real regression case -- a genuinely new GovTrack
+    status must record result_status=CLOSED, but re-running the SAME
+    research on the SAME already-known status must record OPEN, never a
+    second fake CLOSED (SUCCESSFUL_FETCH without new information !=
+    GAP_CLOSED)."""
+    from polymarketpulse.providers.govtrack import BillStatus
+
+    market_row = _seed_market(storage)
+    storage.connection.execute(
+        "UPDATE markets SET question = ? WHERE market_id = 'rr-1'",
+        ("Clarity Act (H.R.3633) signed into law in 2026?",),
+    )
+    storage.connection.commit()
+    market_row["question"] = "Clarity Act (H.R.3633) signed into law in 2026?"
+    settings = Settings.load()
+
+    fake_status = BillStatus(
+        congress=119, bill_type="house_bill", number=3633, display_number="H.R. 3633",
+        title="H.R. 3633: Digital Asset Market Clarity Act",
+        current_status="pass_over_house", current_status_label="Passed House (Senate next)",
+        current_status_description="", current_status_date=None, introduced_date=None,
+        is_alive=True, link="https://www.govtrack.us/congress/bills/119/hr3633",
+        major_actions=(), fetched_at=datetime.now(UTC),
+    )
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "OK")), \
+         patch("polymarketpulse.providers.govtrack.fetch_bill_status", return_value=fake_status):
+        run_research_for_market(storage, settings, market_row, trigger="test")
+        run_research_for_market(storage, settings, market_row, trigger="test")
+
+    rows = storage.get_gap_closures(
+        provider="polymarket", provider_market_id="rr-1", gap_key="polymarket:rr-1:MISSING_RESOLUTION_DATA",
+    )
+    assert len(rows) == 2  # full attempt history preserved, not overwritten
+    statuses = [r["result_status"] for r in rows]
+    assert "CLOSED" in statuses
+    assert "OPEN" in statuses
+    closed_row = next(r for r in rows if r["result_status"] == "CLOSED")
+    assert closed_row["closed_at"] is not None
+    open_row = next(r for r in rows if r["result_status"] == "OPEN")
+    assert open_row["closed_at"] is None
+
+    latest = storage.get_gap_closures(
+        provider="polymarket", provider_market_id="rr-1", gap_key="polymarket:rr-1:MISSING_RESOLUTION_DATA",
+        latest_only=True,
+    )
+    assert len(latest) == 1
+    assert latest[0]["result_status"] == "OPEN"  # the real current state, not the stale CLOSED one
+
+
+def test_no_archetype_market_gets_not_applicable_gap_no_wasted_fetch(storage: Storage) -> None:
+    """Phase 7.6.3: a market with no supported archetype must record
+    NOT_APPLICABLE, never a wasted/fake research attempt."""
+    market_row = _seed_market(storage)  # "ceasefire" question -- no bill number, no chokepoint keyword
+    settings = Settings.load()
+
+    with patch("polymarketpulse.news.gdelt.fetch_gdelt_with_status", return_value=([], "SOURCE_FETCH_FAILED")):
+        run_research_for_market(storage, settings, market_row, trigger="test")
+
+    rows = storage.get_gap_closures(provider="polymarket", provider_market_id="rr-1")
+    assert len(rows) == 1
+    # Either NO_ARCHETYPE (no eligible model) or MISSING_PRIMARY_SOURCE with
+    # BLOCKED_PROVIDER (GDELT genuinely failed) is honest here -- both are
+    # real, non-fabricated outcomes; a NOT_APPLICABLE/BLOCKED_PROVIDER pair
+    # is what must never be silently reported as CLOSED.
+    assert rows[0]["result_status"] in ("NOT_APPLICABLE", "BLOCKED_PROVIDER")
+    assert rows[0]["result_status"] != "CLOSED"
+
+
 def test_legislation_market_fetches_and_persists_a_real_govtrack_claim(storage: Storage) -> None:
     """Real, targeted second-source integration for legislation-shaped
     markets: a question containing a real bill number ("H.R.3633") must

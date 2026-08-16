@@ -460,6 +460,70 @@ def run_research_for_market(
 
     claims_extracted_this_run = max(0, claims_after_total - claims_before_total)
 
+    # Phase 7.6: persistent gap-closure tracking. A gap is only ever
+    # CLOSED when the targeted fetch found genuinely NEW information
+    # (claim_newly_inserted) -- a successful-but-empty re-check (Clarity/
+    # Hormuz's real idempotent case) stays OPEN, never a fake closure.
+    _now_iso = datetime.now(UTC).isoformat()
+    gap_records: list[dict] = []
+    if legislation_result.get("attempted"):
+        status = legislation_result.get("fetch_status")
+        result_status = (
+            "BLOCKED_PROVIDER" if status == "SOURCE_FETCH_FAILED"
+            else "CLOSED" if legislation_result.get("claim_newly_inserted") else "OPEN"
+        )
+        gap_records.append({
+            "gap_type": "MISSING_RESOLUTION_DATA", "provider_attempted": "govtrack",
+            "target_information": "official bill status / resolution step",
+            "source_reference": legislation_result.get("source_url"),
+            "result_status": result_status, "failure_reason": status if status != "OK" else None,
+        })
+    if chokepoint_result.get("attempted"):
+        status = chokepoint_result.get("fetch_status")
+        result_status = (
+            "BLOCKED_PROVIDER" if status == "SOURCE_FETCH_FAILED"
+            else "CLOSED" if chokepoint_result.get("claim_newly_inserted") else "OPEN"
+        )
+        gap_records.append({
+            "gap_type": "MISSING_STRUCTURED_DATA", "provider_attempted": "imf_portwatch",
+            "target_information": "structured chokepoint transit data",
+            "result_status": result_status, "failure_reason": status if status != "OK" else None,
+        })
+    if not gap_records:
+        reason = pred_after.numeric_model_reason_code
+        if reason == "NO_ARCHETYPE":
+            gap_records.append({
+                "gap_type": "NO_ARCHETYPE", "provider_attempted": None,
+                "target_information": "no supported forecast archetype for this market",
+                "result_status": "NOT_APPLICABLE", "failure_reason": None,
+            })
+        else:
+            result_status = (
+                "BLOCKED_PROVIDER" if source_fetch_status == "SOURCE_FETCH_FAILED"
+                else "CLOSED" if claims_extracted_this_run > 0 else "OPEN"
+            )
+            gap_records.append({
+                "gap_type": "MISSING_PRIMARY_SOURCE", "provider_attempted": "gdelt",
+                "target_information": "discovery-sourced primary/secondary news coverage",
+                "result_status": result_status,
+                "failure_reason": source_fetch_status if source_fetch_status != "OK" else None,
+            })
+    for gap in gap_records:
+        storage.save_gap_closure({
+            "market_id": market_id, "provider": provider, "provider_market_id": provider_market_id,
+            "gap_type": gap["gap_type"], "gap_key": f"{provider}:{provider_market_id}:{gap['gap_type']}",
+            "target_information": gap["target_information"], "criticality": "HIGH",
+            "provider_attempted": gap["provider_attempted"], "source_reference": gap.get("source_reference"),
+            "research_started_at": _now_iso, "research_finished_at": datetime.now(UTC).isoformat(),
+            "result_status": gap["result_status"], "failure_reason": gap["failure_reason"],
+            "previous_gap_state": product_mode_before, "new_gap_state": product_mode_after,
+            "product_mode_before": product_mode_before, "product_mode_after": product_mode_after,
+            "model_probability_before": pred_before.model_hypothesis_probability,
+            "model_probability_after": pred_after.model_hypothesis_probability,
+            "closed_at": _now_iso if gap["result_status"] == "CLOSED" else None,
+            "next_retry": None,
+        })
+
     evidence_before_flag = 1 if pred_before.independent_evidence and pred_before.independent_evidence.available else 0
     evidence_after_flag = 1 if pred_after.independent_evidence and pred_after.independent_evidence.available else 0
 
