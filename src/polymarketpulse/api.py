@@ -30,6 +30,7 @@ from .ai.schemas import (
     ExplainRecommendationResponse,
 )
 from .config import Settings
+from .product_mode import product_mode_for_market_record, product_mode_for_prediction
 from .providers.registry import create_provider, list_provider_names
 from .research_status import classify_research_status
 from .stats import compute_signal_stats
@@ -208,6 +209,8 @@ def markets(
                ls.yes_price, ls.liquidity, ls.volume_24h, ls.spread, ls.opportunity_score,
                ps.published_forecast_probability, ps.model_hypothesis_probability,
                ps.forecast_status, ps.data_quality_composite_score,
+               EXISTS(SELECT 1 FROM forecast_models fm WHERE fm.archetype = 'MACRO_POLICY'
+                      AND fm.active = 1 AND fm.lifecycle = 'CHAMPION') AS has_champion_macro_model,
                EXISTS(SELECT 1 FROM research_runs rr WHERE rr.provider_market_id = m.provider_market_id) AS has_research_run
         FROM markets m
         LEFT JOIN (
@@ -252,6 +255,7 @@ def markets(
         "model_hypothesis_probability",
         "forecast_status",
         "data_quality_composite_score",
+        "has_champion_macro_model",
         "has_research_run",
     )
     items = [dict(zip(columns, row, strict=True)) for row in rows]
@@ -262,6 +266,7 @@ def markets(
             forecast_status=item["forecast_status"],
             has_research_run=bool(item["has_research_run"]),
         )
+        item["product_mode"] = product_mode_for_market_record(item)
     # Markets-list contract (Block G Part 5): when no forecast was ever
     # published for this market's latest snapshot (or no snapshot exists at
     # all), the PMP% field is real-None, never the unpublished
@@ -1129,7 +1134,9 @@ def ai_ask(payload: AskRequest, storage: Storage = Depends(get_storage)) -> AIAn
 def prediction(market_id: str, storage: Storage = Depends(get_storage)) -> dict:
     """The binding statistical prediction only — no AI call, no cost. This
     is what GPT-5 nano is only ever allowed to explain, never invent."""
-    result = ai_service.get_prediction(storage, market_id).as_dict()
+    prediction_result = ai_service.get_prediction(storage, market_id)
+    result = prediction_result.as_dict()
+    result.update(product_mode_for_prediction(prediction_result))
     from .research_status import source_availability
     result["source_availability"] = source_availability(storage, market_id)
     result["early_signals"] = storage.get_social_signals(market_id)
@@ -1371,7 +1378,13 @@ def command_center(storage: Storage = Depends(get_storage)) -> dict:
     now = datetime.now(UTC)
     since_24h = (now - timedelta(hours=24)).isoformat()
 
-    all_items = list_opportunities(storage, limit=500)
+    # The dashboard must remain available when a legacy snapshot has an
+    # integrity defect.  Opportunities are a convenience panel; the core
+    # product list and research queue are already persisted/read-only.
+    try:
+        all_items = list_opportunities(storage, limit=500)
+    except sqlite3.OperationalError:
+        all_items = []
     with_price = [o for o in all_items if o["market_yes_probability"] is not None]
     sufficient_quality = [o for o in with_price if o["recommendation"] != "INSUFFICIENT_DATA"]
     watchlist_count = storage.connection.execute("SELECT COUNT(*) FROM watchlist_items").fetchone()[0]

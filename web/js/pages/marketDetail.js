@@ -204,13 +204,12 @@ function _renderChangesPanel(opp) {
 function _headlinePanelHtml(market, opp, pred) {
   const p = pred || {};
   const forecastPublished = p.published_forecast_probability !== null && p.published_forecast_probability !== undefined;
-  const modelHypothesis = p.model_hypothesis_probability !== null && p.model_hypothesis_probability !== undefined
-    ? fmtPct(p.model_hypothesis_probability)
-    : "keine";
-  const isFedShadow = p.forecast_archetype === "MACRO_POLICY" && modelHypothesis !== "keine";
-  const pulseValue = forecastPublished ? fmtPct(p.published_forecast_probability) : "Keine belastbare Prognose";
+  const productNumeric = p.product_mode === "VALIDATED_NUMERIC_FORECAST" && p.product_probability !== null && p.product_probability !== undefined;
+  const pulseValue = productNumeric ? fmtPct(p.product_probability) : (forecastPublished ? fmtPct(p.published_forecast_probability) : "Keine belastbare Prognose");
   const quantitativeOnly = _hasQuantitativeSupport(p) && !((p.independent_evidence || {}).evidence_for_yes || []).length && !((p.independent_evidence || {}).evidence_for_no || []).length;
-  const pulseSub = forecastPublished
+  const pulseSub = productNumeric
+    ? "Validiertes Modell · noch keine veröffentlichte Handelsprognose"
+    : forecastPublished
     ? (quantitativeOnly ? "Primär quantitativ begründet" : "Evidenzgestützt")
     : "Nicht genügend unabhängige Evidenz";
   const statusLabel = FORECAST_STATUS_LABEL_DE[p.forecast_status] || p.forecast_status || "Datenlage unzureichend";
@@ -251,9 +250,8 @@ function _headlinePanelHtml(market, opp, pred) {
     <h2 style="margin:0 0 12px">${market.question}</h2>
     <div class="widget-grid">
       ${widgetCard({ title: "MARKT", value: fmtPct(p.market_yes_probability) })}
-      ${isFedShadow ? widgetCard({ title: "INTERNES MODELL", value: modelHypothesis, sub: "Shadow - noch nicht veröffentlicht" }) : ""}
-      ${widgetCard({ title: "VERÖFFENTLICHTE PROGNOSE", value: pulseValue, sub: pulseSub })}
-      ${widgetCard({ title: "STATUS", value: isFedShadow ? "Shadow - noch nicht veröffentlicht" : _researchStatusLabel(p) })}
+      ${widgetCard({ title: productNumeric ? "POLYMARKETPULSE" : "EINSCHÄTZUNG", value: pulseValue, sub: pulseSub })}
+      ${widgetCard({ title: "STATUS", value: productNumeric ? "Validiertes Modell" : _researchStatusLabel(p) })}
       ${widgetCard({ title: "EINSCHÄTZUNG", value: `<span class="badge ${decisionBadge}">${decisionLabel}</span>` })}
       ${widgetCard({ title: "VERTRAUEN", value: trustLabel })}
       ${widgetCard({ title: "DATENLAGE", value: dataQualityLabel })}
@@ -264,9 +262,49 @@ function _headlinePanelHtml(market, opp, pred) {
     ${earlySignalNotice}
     ${coherenceNotice}
     ${maturityDetails}
+    ${_structuredOutlookHtml(p)}
+    ${_insufficientDataHtml(p)}
     ${quantitativeOnly ? `<p class="sub">Diese Einschätzung basiert primär auf quantitativen Markt- oder Makrodaten; passende bestätigende Nachrichtenquellen liegen derzeit nicht vor.</p>` : ""}
     ${!forecastPublished ? `<p class="sub">${_noForecastExplanation(p, availability)}</p>` : ""}
-    <details><summary>Modell- und Prüfstatus</summary><p class="sub">Archetyp: ${p.forecast_archetype || "GENERIC_RESEARCH_ONLY"} · Fähigkeit: ${p.archetype_capability_state || "UNSUPPORTED"} · Modellhypothese: ${modelHypothesis} · ${statusLabel}${p.numeric_model_reason_code ? ` · Grund: ${p.numeric_model_reason_code}` : ""}</p></details>
+    <details><summary>Modell- und Prüfstatus</summary><p class="sub">${productNumeric ? "Fed-Entscheidungsmodell: zeitgetrennt validiert; die Modellschätzung ist oben als PolyMarketPulse-Wert sichtbar." : "Für diesen Markt liegt derzeit kein historisch validiertes numerisches Modell vor."} · ${statusLabel}</p></details>
+  `;
+}
+
+function _insufficientDataHtml(p) {
+  if (p.product_mode !== "INSUFFICIENT_DATA") return "";
+  const product = p || {};
+  const missing = (product.missing || []).slice(0, 3);
+  return `
+    <section class="panel" style="margin-top:12px">
+      <h3>Was wir bisher wissen</h3>
+      <p>${_humanText(product.summary || "Der Markt ist erfasst, aber noch nicht ausreichend belastbar eingeordnet.")}</p>
+      <h4>Was fehlt</h4>
+      ${missing.length ? `<ul>${missing.map((item) => `<li>${_humanText(item)}</li>`).join("")}</ul>` : "<p>Es liegen noch keine ausreichend marktbezogenen Quellen oder Strukturinformationen vor.</p>"}
+      <h4>Nächster Recherche-Schritt</h4>
+      <p>${_humanText(product.next_research || "Zuerst wird geprüft, welche Primärquelle die Resolution-Bedingung direkt belegen kann.")}</p>
+    </section>
+  `;
+}
+
+function _structuredOutlookHtml(p) {
+  if (p.product_mode !== "STRUCTURED_OUTLOOK") return "";
+  const state = p.structured_world_state || p.world_state || {};
+  const next = p.next_event || {};
+  const scenarioRows = ((p.scenarios || {}).scenarios || []).slice(0, 3).map((s) => `
+    <li><strong>${s.outcome === "YES" ? "Positiver Verlauf" : "Negativer Verlauf"}:</strong> ${_humanText(s.description || "Noch keine belastbare Szenariobeschreibung.")}</li>
+  `).join("");
+  const gaps = (state.data_gaps || []).slice(0, 3).map((g) => `<li>${_humanText(g.description || g)}</li>`).join("");
+  return `
+    <section class="panel" style="margin-top:12px">
+      <h3>Strukturierte Einschätzung</h3>
+      <div class="widget-grid">
+        ${widgetCard({ title: "Aktueller Stand", value: _humanText(state.current_state || "Noch nicht bestätigt") })}
+        ${widgetCard({ title: "Nächster wichtiger Schritt", value: _humanText(next.next_event_description || "Noch nicht eindeutig bestimmbar") })}
+      </div>
+      ${scenarioRows ? `<h4>Wichtige Szenarien</h4><ul>${scenarioRows}</ul>` : ""}
+      ${gaps ? `<h4>Was noch fehlt</h4><ul>${gaps}</ul>` : ""}
+      <p class="sub">Keine Modellwahrscheinlichkeit: Für diesen Markt existiert noch kein historisch validiertes numerisches Modell.</p>
+    </section>
   `;
 }
 
@@ -704,8 +742,11 @@ function _humanText(value) {
     QUANTITATIVE_SIGNAL: "quantitatives Signal", CURRENT_STATE: "Aktueller Ereigniszustand",
     MACRO_INPUTS: "Aktuelle Makrodaten", MEETING: "Nächste Sitzung",
     POLICY_DECISION: "Geldpolitische Entscheidung", RESOLUTION: "Auflösung des Markts",
+    house_vote: "Abstimmung im Repräsentantenhaus", senate_vote: "Befassung im Senat",
+    LEGISLATION: "Gesetzgebungsverfahren", GEOPOLITICS: "geopolitischer Verlauf",
+    SOURCE_FETCH_FAILED: "Quellenabruf fehlgeschlagen", UNKNOWN: "noch nicht bestätigt",
   };
-  return String(value || "").replace(/\b(?:current_state|macro_inputs|meeting|policy_decision|resolution|path_step|DIRECT_RESOLUTION|PATH_STEP|QUANTITATIVE_SIGNAL|CURRENT_STATE|MACRO_INPUTS|MEETING|POLICY_DECISION|RESOLUTION)\b/g, (token) => replacements[token] || token);
+  return String(value || "").replace(/\b(?:current_state|macro_inputs|meeting|policy_decision|resolution|path_step|house_vote|senate_vote|DIRECT_RESOLUTION|PATH_STEP|QUANTITATIVE_SIGNAL|CURRENT_STATE|MACRO_INPUTS|MEETING|POLICY_DECISION|RESOLUTION|LEGISLATION|GEOPOLITICS|SOURCE_FETCH_FAILED|UNKNOWN)\b/g, (token) => replacements[token] || token);
 }
 
 function _dataQualityPanelHtml(p) {

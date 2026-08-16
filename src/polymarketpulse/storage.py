@@ -1433,12 +1433,14 @@ class Storage:
     def save_forecast_model(self, record: dict) -> None:
         self.connection.execute(
             """INSERT INTO forecast_models (model_id, version, archetype, dataset_id, dataset_version,
-               trained_at, metrics_json, feature_list_json, active)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(model_id, version) DO UPDATE SET metrics_json=excluded.metrics_json, active=excluded.active""",
+               trained_at, metrics_json, feature_list_json, active, lifecycle)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(model_id, version) DO UPDATE SET metrics_json=excluded.metrics_json,
+               active=excluded.active, lifecycle=excluded.lifecycle""",
             (record["model_id"], record["version"], record["archetype"], record["dataset_id"],
              record["dataset_version"], record["trained_at"], json.dumps(record["metrics"]),
-             json.dumps(record["feature_list"]), int(record["active"])),
+             json.dumps(record["feature_list"]), int(record["active"]),
+             record.get("lifecycle", "EXPERIMENTAL")),
         )
         self.connection.commit()
 

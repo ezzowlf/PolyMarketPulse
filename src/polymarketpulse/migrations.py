@@ -1317,6 +1317,25 @@ def _migration_032_forecast_archetype_registry(conn: sqlite3.Connection) -> None
     conn.commit()
 
 
+def _migration_033_forecast_model_lifecycle(conn: sqlite3.Connection) -> None:
+    """Persist the presentation lifecycle independently from ``active``."""
+    conn.execute(
+        "ALTER TABLE forecast_models ADD COLUMN lifecycle TEXT NOT NULL DEFAULT 'EXPERIMENTAL'"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_forecast_models_lifecycle "
+        "ON forecast_models(archetype, lifecycle)"
+    )
+    # This is the sole already-validated model registered before lifecycle
+    # became explicit.  Other historical active records remain conservative
+    # EXPERIMENTAL until their own validation promotes them.
+    conn.execute(
+        "UPDATE forecast_models SET lifecycle = 'CHAMPION' "
+        "WHERE model_id = 'fed_prior_action_transition' AND active = 1"
+    )
+    conn.commit()
+
+
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial),
     (2, "provider_architecture", _migration_002_provider_architecture),
@@ -1350,6 +1369,7 @@ MIGRATIONS: list[Migration] = [
     (30, "coherence_lineage_indexes", _migration_030_coherence_lineage_indexes),
     (31, "macro_observation_lineage", _migration_031_macro_observation_lineage),
     (32, "forecast_archetype_registry", _migration_032_forecast_archetype_registry),
+    (33, "forecast_model_lifecycle", _migration_033_forecast_model_lifecycle),
 ]
 
 

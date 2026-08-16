@@ -86,9 +86,10 @@ def test_model_registry_storage_is_versioned(tmp_path: Path) -> None:
     dataset, model = registry_records()
     storage.save_forecast_dataset(dataset)
     storage.save_forecast_model(model)
-    assert storage.schema_version() >= 32
+    assert storage.schema_version() >= 33
     assert storage.connection.execute("SELECT COUNT(*) FROM forecast_datasets").fetchone()[0] == 1
     assert storage.connection.execute("SELECT active FROM forecast_models").fetchone()[0] == 1
+    assert storage.connection.execute("SELECT lifecycle FROM forecast_models").fetchone()[0] == "CHAMPION"
     storage.close()
 
 

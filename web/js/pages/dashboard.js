@@ -128,21 +128,54 @@ function _researchQueueHtml(queue) {
   `;
 }
 
+function _productDashboardHtml(items) {
+  const numeric = items.filter((m) => m.product_mode === "VALIDATED_NUMERIC_FORECAST").slice(0, 5);
+  const structured = items.filter((m) => m.product_mode === "STRUCTURED_OUTLOOK").slice(0, 5);
+  const near = [...items].filter((m) => m.end_date).sort((a, b) => String(a.end_date).localeCompare(String(b.end_date))).slice(0, 5);
+  const list = (rows, empty, label) => rows.length ? `<ul>${rows.map((m) => `<li><a href="#/market/${encodeURIComponent(m.market_id)}"><strong>${m.question}</strong></a><br/><span class="sub">${label(m)} · Deadline ${fmtDate(m.end_date)}</span></li>`).join("")}</ul>` : `<div class="empty-state">${empty}</div>`;
+  return `
+    <div class="panel"><h2>Heute interessant</h2><p class="sub">Was das System aktuell zusätzlich zum Marktpreis einordnen kann.</p>
+      <div class="widget-grid">
+        <div><h3>Validierte Modellprognosen</h3>${list(numeric, "Aktuell keine validierte Modellprognose mit gespeicherten Eingaben.", (m) => `Modell ${fmtPct(m.model_hypothesis_probability)} · Markt ${fmtPct(m.yes_price)}`)}</div>
+        <div><h3>Strukturierte Einschätzungen</h3>${list(structured, "Noch keine Märkte mit ausreichend strukturierter Evidenz.", () => "Zustand, Pfad und nächster Schritt verfügbar")}</div>
+      </div>
+      <h3>Entscheidungen als Nächstes</h3>${list(near, "Keine datierten aktiven Märkte.", (m) => m.product_mode === "INSUFFICIENT_DATA" ? "Recherchebedarf" : "Beobachten")}
+    </div>
+  `;
+}
+
 async function renderDashboardPage(container) {
   container.innerHTML = `<div class="empty-state">Lade Übersicht…</div>`;
   try {
-    const [cc, marketsResult, evalData, coverage, researchQueue] = await Promise.all([
-      Api.commandCenter(),
+    const [marketsResult, evalData, coverage, researchQueue] = await Promise.all([
       Api.markets({ limit: 500 }).catch(() => ({ items: [] })),
       Api.evaluationForecastHistory().catch(() => null),
       Api.coverage().catch(() => null),
       Api.researchQueue(8).catch(() => []),
     ]);
+    const marketItems = marketsResult.items || [];
+    // The normal dashboard is intentionally driven by its persisted list
+    // contract.  It must not trigger hundreds of fresh prediction/source
+    // calculations through the legacy command-center convenience endpoint.
+    const cc = {
+      uebersicht: {
+        aktive_maerkte: marketItems.length,
+        maerkte_mit_preis: marketItems.filter((m) => m.yes_price !== null && m.yes_price !== undefined).length,
+        maerkte_mit_ausreichender_datenqualitaet: marketItems.filter((m) => (m.data_quality_composite_score || 0) >= 45).length,
+        watchlist_anzahl: 0,
+      },
+      letzter_scan: null,
+      interessanteste_maerkte: [], kurz_vor_entscheidung: [], groesste_preisbewegungen: [],
+      hoechste_liquiditaet: [], groesste_modellabweichung: [], neue_maerkte: [],
+      maerkte_mit_datenproblemen: [], letzte_ki_auswertungen: [],
+    };
     const u = cc.uebersicht;
-    const architectureHtml = _architectureOverviewHtml(marketsResult.items || [], evalData);
+    const architectureHtml = _architectureOverviewHtml(marketItems, evalData);
 
     container.innerHTML = `
       <div class="disclaimer">Research-Hinweis – keine Wettaufforderung, kein sicherer Gewinn. Alle Werte werden von der eigenen Prognose-Engine berechnet, nicht von einer KI erfunden.</div>
+
+      ${_productDashboardHtml(marketItems)}
 
       <div class="panel">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">

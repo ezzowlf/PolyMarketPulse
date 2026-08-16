@@ -186,5 +186,6 @@ def registry_records() -> tuple[dict, dict]:
         "dataset_id": DATASET_ID, "dataset_version": DATASET_VERSION, "trained_at": timestamp,
         "metrics": validation.as_dict(), "feature_list": ["previous_fomc_action"],
         "active": validation.passed,
+        "lifecycle": "CHAMPION" if validation.passed else "SHADOW",
     }
     return dataset, model

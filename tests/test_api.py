@@ -83,6 +83,7 @@ def test_markets_returns_seeded_market(client: TestClient) -> None:
     data = resp.json()
     assert data["total"] == 1
     assert data["items"][0]["question"] == "Will it happen?"
+    assert data["items"][0]["product_mode"] == "INSUFFICIENT_DATA"
 
 
 def test_markets_filters_by_search(client: TestClient) -> None:

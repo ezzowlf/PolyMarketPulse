@@ -1,6 +1,6 @@
 let _marketsState = {
   search: "", category: "", sort: "opportunity_score", activeOnly: true,
-  minLiquidity: "", minVolume: "",
+  minLiquidity: "", minVolume: "", productMode: "",
 };
 
 // Block H Part 2: compact Markets-list row — question / market% / PMP%
@@ -26,15 +26,18 @@ const RESEARCH_STATUS_LABEL_DE = {
 };
 
 function _marketRow(m) {
-  const pmp = m.published_forecast_probability !== null && m.published_forecast_probability !== undefined
-    ? fmtPct(m.published_forecast_probability)
-    : "–";
-  const statusLabel = RESEARCH_STATUS_LABEL_DE[m.research_status] || "Noch nicht untersucht";
+  const numeric = m.product_mode === "VALIDATED_NUMERIC_FORECAST";
+  const pmp = numeric && m.model_hypothesis_probability !== null && m.model_hypothesis_probability !== undefined
+    ? fmtPct(m.model_hypothesis_probability)
+    : m.published_forecast_probability !== null && m.published_forecast_probability !== undefined
+      ? fmtPct(m.published_forecast_probability)
+      : "–";
+  const statusLabel = numeric ? "Validiertes Modell" : (RESEARCH_STATUS_LABEL_DE[m.research_status] || "Noch nicht untersucht");
   return `
     <tr onclick="location.hash='#/market/${encodeURIComponent(m.market_id)}'" style="cursor:pointer">
       <td>${m.question}</td>
       <td>${m.yes_price !== null && m.yes_price !== undefined ? fmtPct(m.yes_price) : statusBadge("Preis fehlt")}</td>
-      <td>${pmp === "–" ? "Keine belastbare Prognose" : pmp}</td>
+      <td>${numeric ? `Modell ${pmp}` : (m.product_mode === "STRUCTURED_OUTLOOK" ? "Strukturierter Outlook" : "Recherche nötig")}</td>
       <td>${statusLabel}</td>
       <td>${_dataSituationLabel(m.data_quality_composite_score)}</td>
       <td class="sub">${m.category || "–"}</td>
@@ -51,6 +54,12 @@ async function renderMarketsPage(container) {
         <input id="f-category" placeholder="Kategorie" value="${_marketsState.category}" />
         <input id="f-liquidity" type="number" placeholder="Min. Liquidität" value="${_marketsState.minLiquidity}" />
         <input id="f-volume" type="number" placeholder="Min. Volumen" value="${_marketsState.minVolume}" />
+        <select id="f-mode">
+          <option value="">Alle Produktmodi</option>
+          <option value="VALIDATED_NUMERIC_FORECAST" ${_marketsState.productMode === "VALIDATED_NUMERIC_FORECAST" ? "selected" : ""}>Numeric Forecast</option>
+          <option value="STRUCTURED_OUTLOOK" ${_marketsState.productMode === "STRUCTURED_OUTLOOK" ? "selected" : ""}>Structured Outlook</option>
+          <option value="INSUFFICIENT_DATA" ${_marketsState.productMode === "INSUFFICIENT_DATA" ? "selected" : ""}>Research Needed</option>
+        </select>
         <label><input id="f-active" type="checkbox" ${_marketsState.activeOnly ? "checked" : ""} /> Nur aktive Märkte</label>
         <button class="btn" id="f-apply">Filtern</button>
       </div>
@@ -69,11 +78,12 @@ async function renderMarketsPage(container) {
       if (_marketsState.minVolume) params.min_volume = _marketsState.minVolume;
       params.active_only = _marketsState.activeOnly;
       const result = await Api.markets(params);
-      const items = result.items || [];
+      const allItems = result.items || [];
+      const items = _marketsState.productMode ? allItems.filter((m) => m.product_mode === _marketsState.productMode) : allItems;
 
       tableEl.innerHTML = items.length
         ? `<table>
-            <thead><tr><th>Markt</th><th>Polymarket</th><th>PolyMarketPulse</th><th>Recherche-Status</th><th>Datenlage</th><th>Kategorie</th><th>Deadline</th></tr></thead>
+            <thead><tr><th>Markt</th><th>Polymarket</th><th>PMP / Modus</th><th>Status</th><th>Datenlage</th><th>Kategorie</th><th>Deadline</th></tr></thead>
             <tbody>${items.map(_marketRow).join("")}</tbody>
           </table>
           <p class="sub">${items.length} von ${result.total} Märkten.</p>`
@@ -89,6 +99,7 @@ async function renderMarketsPage(container) {
       category: document.getElementById("f-category").value,
       minLiquidity: document.getElementById("f-liquidity").value,
       minVolume: document.getElementById("f-volume").value,
+      productMode: document.getElementById("f-mode").value,
       activeOnly: document.getElementById("f-active").checked,
       sort: _marketsState.sort,
     };
