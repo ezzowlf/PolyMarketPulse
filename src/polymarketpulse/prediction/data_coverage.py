@@ -21,6 +21,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from polymarketpulse.data_sources import ProviderHealthState
+
 Criticality = Literal["CRITICAL", "OPTIONAL"]
 
 
@@ -231,35 +233,171 @@ _PROVIDER_BY_INPUT: dict[str, str] = {
     "independent_confirmation": "gdelt",
 }
 
+# Phase 7.8.4: known real fallback provider per primary provider, used only
+# to decide whether a BLOCKED_PROVIDER action is truly a dead end or whether
+# a sensible alternative exists. Deliberately narrow -- no fallback is
+# invented where none of this codebase's real provider clients could serve
+# the same input_key.
+_PROVIDER_FALLBACK: dict[str, str] = {
+    "govtrack": "congress_gov",
+    "congress_gov": "govtrack",
+    "imf_portwatch": "gdelt",
+}
 
-def derive_next_research_action(prediction, coverage: DataCoverage) -> dict:
+# Phase 7.8.3: real dependency ordering within each archetype's contract --
+# a dependent input must not be proposed as the next research action while
+# its own prerequisite is still missing (example straight from the user's
+# spec: resolution semantics must be resolved before further GEOPOLITICS
+# research; LEGISLATION's concrete schedule/timing is meaningless before the
+# next required step itself is known). This reuses the existing
+# INPUT_CONTRACTS keys -- no new graph structure.
+_DEPENDS_ON: dict[str, tuple[str, ...]] = {
+    "next_required_step": ("official_current_stage",),
+    "schedule_timing": ("next_required_step",),
+    "primary_measurement_source": ("resolution_semantics",),
+    "current_observation": ("resolution_semantics",),
+    "freshness": ("resolution_semantics", "current_observation"),
+    "independent_confirmation": ("current_observation",),
+}
+
+
+def _unblocked_missing_requirements(prediction, requirements: tuple[InputRequirement, ...]) -> list[InputRequirement]:
+    """Critical requirements that are missing AND not blocked by a still-
+    missing dependency, in real contract order."""
+    availability = {req.input_key: _input_availability(prediction, req.input_key)[0] for req in requirements}
+    candidates = []
+    for req in requirements:
+        if req.criticality != "CRITICAL" or availability[req.input_key]:
+            continue
+        deps = _DEPENDS_ON.get(req.input_key, ())
+        if any(not availability.get(dep, True) for dep in deps):
+            continue  # a prerequisite is missing too -- resolve that first
+        candidates.append(req)
+    return candidates
+
+
+def _provider_health_state(storage, provider: str | None) -> ProviderHealthState:
+    if storage is None or provider is None:
+        return ProviderHealthState.UNKNOWN
+    getter = getattr(storage, "get_provider_health", None)
+    if getter is None:
+        return ProviderHealthState.UNKNOWN
+    health = getter(provider)
+    if health is None:
+        return ProviderHealthState.UNKNOWN
+    return health.state()
+
+
+def _closability(health_state: ProviderHealthState, has_fallback: bool, dependency_blocked: bool) -> str:
+    if dependency_blocked:
+        return "BLOCKED"
+    if health_state == ProviderHealthState.OFFLINE:
+        return "MEDIUM" if has_fallback else "BLOCKED"
+    if health_state == ProviderHealthState.STALE:
+        return "MEDIUM"
+    if health_state == ProviderHealthState.DEGRADED:
+        return "MEDIUM"
+    return "HIGH"  # LIVE or UNKNOWN (never fetched yet -- optimistic, not a real failure)
+
+
+def _expected_product_effect(archetype: str, missing_req: InputRequirement, coverage: DataCoverage) -> str:
+    if missing_req.required_for in ("NUMERIC_FORECAST", "BOTH") and archetype == "MACRO_POLICY":
+        return "Würde numerisches Modell wieder auswertbar machen."
+    if coverage.critical_available == coverage.critical_total - 1:
+        return "Würde den Markt voraussichtlich von INSUFFICIENT_DATA zu STRUCTURED_OUTLOOK anheben."
+    return "Würde die Datenabdeckung und Erklärung verbessern, ohne den Produktmodus sicher zu ändern."
+
+
+def _voi_score(criticality: Criticality, closability: str, has_dependents: bool) -> int:
+    base = 70 if criticality == "CRITICAL" else 30
+    closability_weight = {"HIGH": 1.0, "MEDIUM": 0.6, "LOW": 0.3, "BLOCKED": 0.0}[closability]
+    score = base * closability_weight
+    if has_dependents:
+        score += 15  # unblocking a downstream input is worth more than an isolated one
+    return round(min(100, score))
+
+
+def derive_next_research_action(prediction, coverage: DataCoverage, storage=None) -> dict:
     """One primary, human-readable next step per market, plus the
     machine-actionable detail underneath. Deterministic: the highest-
-    criticality missing input wins; a market with full critical coverage
-    or no archetype gets an honest "nothing to research" action rather
-    than invented busywork."""
+    criticality, dependency-unblocked, provider-health-weighted missing
+    input wins; a market with full critical coverage, no archetype, or no
+    real closable action gets an honest status rather than invented
+    busywork.
+
+    `storage` is optional and only used to read real, already-persisted
+    ProviderHealth rows (Phase 7.8.4) -- when omitted, provider health is
+    honestly UNKNOWN and never used to block an action."""
     if coverage.archetype is None:
         return {
             "action_type": "NONE", "target_information": None, "human_summary":
                 "Kein numerisches oder strukturiertes Modell für diesen Markt verfügbar — keine automatische Recherche.",
             "reason": "NO_ARCHETYPE", "preferred_provider": None, "gap_key": None,
+            "fallback_provider": None, "provider_health": None, "closability": "BLOCKED",
+            "expected_product_effect": "Keine Wirkung möglich.", "voi_score": 0,
         }
     if coverage.next_missing_input is None:
         return {
             "action_type": "NONE", "target_information": None,
             "human_summary": "Alle kritischen Modelldaten sind vorhanden.",
             "reason": "COVERAGE_COMPLETE", "preferred_provider": None, "gap_key": None,
+            "fallback_provider": None, "provider_health": None, "closability": "HIGH",
+            "expected_product_effect": "Keine weitere Wirkung nötig.", "voi_score": 0,
         }
+
     requirements = INPUT_CONTRACTS[coverage.archetype]
-    missing_req = next(r for r in requirements if r.human_label == coverage.next_missing_input)
+    unblocked = _unblocked_missing_requirements(prediction, requirements)
+    if not unblocked:
+        # Every missing critical input is gated behind another missing one --
+        # an honest dependency deadlock rather than picking an arbitrary one.
+        blocking_req = next(r for r in requirements if r.human_label == coverage.next_missing_input)
+        return {
+            "action_type": "FETCH",
+            "target_information": blocking_req.human_label,
+            "human_summary": f"{blocking_req.human_label.capitalize()} prüfen (Voraussetzung für weitere Schritte).",
+            "reason": f"CRITICAL_INPUT_MISSING:{blocking_req.input_key}",
+            "preferred_provider": _PROVIDER_BY_INPUT.get(blocking_req.input_key),
+            "gap_key": f"input:{coverage.archetype}:{blocking_req.input_key}",
+            "provider_market_id": getattr(prediction, "market_id", None),
+            "fallback_provider": _PROVIDER_FALLBACK.get(_PROVIDER_BY_INPUT.get(blocking_req.input_key, "")),
+            "provider_health": _provider_health_state(storage, _PROVIDER_BY_INPUT.get(blocking_req.input_key)).value,
+            "closability": "HIGH", "expected_product_effect": _expected_product_effect(coverage.archetype, blocking_req, coverage),
+            "voi_score": _voi_score("CRITICAL", "HIGH", has_dependents=False),
+        }
+
+    missing_req = unblocked[0]
     provider = _PROVIDER_BY_INPUT.get(missing_req.input_key)
+    fallback = _PROVIDER_FALLBACK.get(provider) if provider else None
+    health_state = _provider_health_state(storage, provider)
+    has_fallback = fallback is not None
+    closability = _closability(health_state, has_fallback, dependency_blocked=False)
+    has_dependents = any(missing_req.input_key in deps for deps in _DEPENDS_ON.values())
     provider_market_id = getattr(prediction, "market_id", None)
+    gap_key = f"input:{coverage.archetype}:{missing_req.input_key}"
+
+    if health_state == ProviderHealthState.OFFLINE and not has_fallback:
+        return {
+            "action_type": "BLOCKED_PROVIDER",
+            "target_information": missing_req.human_label,
+            "human_summary": f"{missing_req.human_label.capitalize()} kann derzeit nicht recherchiert werden — Provider nicht erreichbar.",
+            "reason": f"PROVIDER_OFFLINE:{provider}",
+            "preferred_provider": provider, "gap_key": gap_key, "provider_market_id": provider_market_id,
+            "fallback_provider": None, "provider_health": health_state.value, "closability": "BLOCKED",
+            "expected_product_effect": "Keine Wirkung, solange der Provider nicht erreichbar ist.",
+            "voi_score": _voi_score(missing_req.criticality, "BLOCKED", has_dependents),
+        }
+
     return {
         "action_type": "FETCH",
         "target_information": missing_req.human_label,
         "human_summary": f"{missing_req.human_label.capitalize()} prüfen.",
         "reason": f"CRITICAL_INPUT_MISSING:{missing_req.input_key}",
         "preferred_provider": provider,
-        "gap_key": f"input:{coverage.archetype}:{missing_req.input_key}",
+        "gap_key": gap_key,
         "provider_market_id": provider_market_id,
+        "fallback_provider": fallback,
+        "provider_health": health_state.value,
+        "closability": closability,
+        "expected_product_effect": _expected_product_effect(coverage.archetype, missing_req, coverage),
+        "voi_score": _voi_score(missing_req.criticality, closability, has_dependents),
     }

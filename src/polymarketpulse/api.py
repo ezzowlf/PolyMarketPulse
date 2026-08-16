@@ -1156,7 +1156,7 @@ def prediction(market_id: str, storage: Storage = Depends(get_storage)) -> dict:
 
     coverage = compute_data_coverage(prediction_result)
     result["data_coverage"] = coverage.as_dict()
-    result["next_research_action"] = derive_next_research_action(prediction_result, coverage)
+    result["next_research_action"] = derive_next_research_action(prediction_result, coverage, storage=storage)
     from .research_status import source_availability
     result["source_availability"] = source_availability(storage, market_id)
     result["early_signals"] = storage.get_social_signals(market_id)
