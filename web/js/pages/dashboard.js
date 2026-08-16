@@ -105,26 +105,87 @@ function _coverageHtml(cov) {
   `;
 }
 
+// Phase 7.16: Dashboard Actionability. Reads the SAME already-enriched
+// /research-queue response the market-detail page's next_research_action
+// panel and the queue endpoint itself are built from (research_runner.py's
+// enrich_queue_with_gap_voi) -- no second backend structure, no extra
+// provider fetches triggered by loading the dashboard (the queue endpoint
+// is itself read-only against already-persisted state).
+
+const _CLOSABILITY_DE = { HIGH: "Hoch", MEDIUM: "Mittel", LOW: "Niedrig", BLOCKED: "Blockiert" };
+const _VOI_LEVEL = (score) => (score >= 60 ? "Hoch" : score >= 30 ? "Mittel" : "Niedrig");
+
+function _highValueResearchHtml(queue) {
+  const rows = queue.filter((q) => q.action_type === "FETCH" && ["HIGH", "MEDIUM"].includes(q.closability))
+    .sort((a, b) => b.voi_score - a.voi_score)
+    .slice(0, 5);
+  if (!rows.length) {
+    return `<div class="panel"><h3>High-Value Research</h3><div class="empty-state">Aktuell keine besonders werthaltige Recherche-Aktion offen.</div></div>`;
+  }
+  const cards = rows.map((q) => `
+    <li>
+      <a href="#/market/${encodeURIComponent(q.market_id)}"><strong>${q.question}</strong></a>
+      <span class="sub"> · ${q.product_mode || "–"} · Datenabdeckung ${q.category || "–"}</span><br/>
+      <span class="sub">${_humanText(q.human_summary || "")}</span><br/>
+      <span class="badge">VOI ${_VOI_LEVEL(q.voi_score)}</span>
+      <span class="badge">Closability ${_CLOSABILITY_DE[q.closability] || q.closability}</span>
+      <span class="sub" title="VOI Score (technisch): ${q.voi_score}"> (Details im Marktdetail)</span>
+    </li>
+  `).join("");
+  return `<div class="panel"><h3>High-Value Research</h3><ul>${cards}</ul></div>`;
+}
+
+function _closableGapsHtml(queue) {
+  const rows = queue.filter((q) => q.action_type === "FETCH" && ["HIGH", "MEDIUM"].includes(q.closability))
+    .sort((a, b) => b.voi_score - a.voi_score)
+    .slice(0, 8);
+  if (!rows.length) {
+    return `<div class="panel"><h3>Schließbare Datenlücken</h3><div class="empty-state">Keine realistisch kurzfristig schließbaren kritischen Datenlücken.</div></div>`;
+  }
+  const items = rows.map((q) => `
+    <li>
+      <a href="#/market/${encodeURIComponent(q.market_id)}">${q.question}</a>
+      <span class="sub"> — fehlt: ${_humanText(q.target_information || "unbekannt")} · Quelle: ${q.preferred_provider || "–"}${q.fallback_provider ? ` (Fallback: ${q.fallback_provider})` : ""}</span>
+    </li>
+  `).join("");
+  return `<div class="panel"><h3>Schließbare Datenlücken</h3><ul>${items}</ul></div>`;
+}
+
+function _providerBlockersHtml(queue) {
+  const rows = queue.filter((q) => q.action_type === "BLOCKED_PROVIDER");
+  if (!rows.length) {
+    return `<div class="panel"><h3>Provider-Blocker</h3><div class="empty-state">Keine aktuell blockierten wichtigen Quellen.</div></div>`;
+  }
+  const items = rows.map((q) => `
+    <li>
+      <a href="#/market/${encodeURIComponent(q.market_id)}">${q.question}</a>
+      <span class="sub"> — fehlt: ${_humanText(q.target_information || "unbekannt")} · blockierte Quelle: ${q.preferred_provider || "–"}${q.fallback_provider ? ` · Fallback vorhanden: ${q.fallback_provider}` : " · kein Fallback bekannt"}${q.next_retry ? ` · nächster Versuch: ${fmtDate(q.next_retry)}` : ""}</span>
+    </li>
+  `).join("");
+  return `<div class="panel"><h3>Provider-Blocker</h3><ul>${items}</ul></div>`;
+}
+
+function _noArchetypeHtml(queue) {
+  const rows = queue.filter((q) => q.reason === "NO_ARCHETYPE");
+  if (!rows.length) return "";
+  return `
+    <details class="panel">
+      <summary>Ohne Archetyp (${rows.length})</summary>
+      <p class="sub">Für diese Märkte existiert derzeit kein unterstütztes Analysemodell.</p>
+      <ul>${rows.slice(0, 10).map((q) => `<li><a href="#/market/${encodeURIComponent(q.market_id)}">${q.question}</a></li>`).join("")}</ul>
+    </details>
+  `;
+}
+
 function _researchQueueHtml(queue) {
   if (!queue || !queue.length) {
     return `<div class="panel"><h3>Research Queue</h3><div class="empty-state">Aktuell keine priorisierten Recherche-Kandidaten.</div></div>`;
   }
-  const items = queue
-    .map((q) => {
-      const level = q.priority_score >= 40 ? "HOCH" : q.priority_score >= 15 ? "MITTEL" : "NIEDRIG";
-      const reasons = (q.reasons || []).join(" · ");
-      return `<li>
-        <a href="#/market/${encodeURIComponent(q.market_id)}"><strong>${q.question}</strong></a>
-        — ${level} (${q.priority_score.toFixed(1)})<br>
-        <span class="sub">${reasons}</span>
-      </li>`;
-    })
-    .join("");
   return `
-    <div class="panel">
-      <h3>Research Queue — nächste wichtige Recherchen</h3>
-      <ul>${items}</ul>
-    </div>
+    ${_highValueResearchHtml(queue)}
+    ${_closableGapsHtml(queue)}
+    ${_providerBlockersHtml(queue)}
+    ${_noArchetypeHtml(queue)}
   `;
 }
 
@@ -151,7 +212,7 @@ async function renderDashboardPage(container) {
       Api.markets({ limit: 500 }).catch(() => ({ items: [] })),
       Api.evaluationForecastHistory().catch(() => null),
       Api.coverage().catch(() => null),
-      Api.researchQueue(8).catch(() => []),
+      Api.researchQueue(20).catch(() => []),
     ]);
     const marketItems = marketsResult.items || [];
     // The normal dashboard is intentionally driven by its persisted list
