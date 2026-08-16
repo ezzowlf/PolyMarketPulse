@@ -263,6 +263,8 @@ function _headlinePanelHtml(market, opp, pred) {
     ${earlySignalNotice}
     ${coherenceNotice}
     ${maturityDetails}
+    ${_dataCoverageHtml(p)}
+    ${_nextResearchActionHtml(p)}
     ${_structuredOutlookHtml(p)}
     ${_insufficientDataHtml(p)}
     ${quantitativeOnly ? `<p class="sub">Diese Einschätzung basiert primär auf quantitativen Markt- oder Makrodaten; passende bestätigende Nachrichtenquellen liegen derzeit nicht vor.</p>` : ""}
@@ -325,6 +327,104 @@ function _structuredOutlookHtml(p) {
       ${gaps ? `<h4>Was noch fehlt</h4><ul>${gaps}</ul>` : ""}
       <p class="sub">Keine Modellwahrscheinlichkeit: Für diesen Markt existiert noch kein historisch validiertes numerisches Modell.</p>
     </section>
+  `;
+}
+
+// Phase 7.15: data_coverage.py's real critical/optional input contract,
+// rendered in plain language -- human_label strings already come from the
+// backend contract (INPUT_CONTRACTS' human_label field), never a raw
+// input_key. NO_ARCHETYPE (critical_total === 0 because there is no
+// archetype at all) is distinguished from "0 inputs needed" by checking
+// coverage.archetype, not by the numbers alone.
+function _dataCoverageHtml(p) {
+  const dc = p && p.data_coverage;
+  if (!dc) return "";
+  if (!dc.archetype) {
+    return `
+      <section class="panel" style="margin-top:12px">
+        <h4>Datenabdeckung</h4>
+        <p class="sub">Für diese Marktkategorie existiert derzeit kein unterstützter Analyse-Archetyp.</p>
+      </section>
+    `;
+  }
+  const missing = (dc.blocking_inputs || []).slice(0, 4);
+  return `
+    <section class="panel" style="margin-top:12px">
+      <h4>Datenabdeckung</h4>
+      <p>${dc.critical_available} von ${dc.critical_total} kritischen Informationen verfügbar${dc.optional_total ? ` · ${dc.optional_available} von ${dc.optional_total} optionalen Bestätigungen` : ""}</p>
+      ${missing.length ? `<p class="sub"><strong>Fehlt noch:</strong></p><ul>${missing.map((m) => `<li>${_humanText(m)}</li>`).join("")}</ul>` : ""}
+    </section>
+  `;
+}
+
+// Phase 7.8.16: next_research_action, translated to plain language for the
+// normal view. Internal codes (FETCH/BLOCKED_PROVIDER/NO_ARCHETYPE/
+// CRITICAL_INPUT_MISSING:...) never appear here -- only in the Advanced
+// details via _nextResearchActionAdvancedHtml.
+const _RESEARCH_STATUS_DE = {
+  READY: "bereit",
+  WAITING_FOR_PROVIDER: "wartet auf Provider",
+  PROVIDER_BACKOFF: "Provider im Backoff",
+  NOT_REQUIRED: "derzeit nicht erforderlich",
+  NO_ROUTE: "keine passende Research-Route",
+};
+
+function _researchActionStatus(action) {
+  if (!action) return "NO_ROUTE";
+  if (action.action_type === "FETCH") return "READY";
+  if (action.action_type === "BLOCKED_PROVIDER") return action.next_retry ? "PROVIDER_BACKOFF" : "WAITING_FOR_PROVIDER";
+  if (action.reason === "NO_ARCHETYPE") return "NO_ROUTE";
+  return "NOT_REQUIRED";
+}
+
+function _nextResearchActionWhy(action) {
+  if (!action) return "Für diesen Markt ist derzeit keine automatische Recherche möglich.";
+  if (action.reason === "NO_ARCHETYPE") return "Für diese Marktkategorie existiert derzeit kein unterstütztes Analysemodell, das eine gezielte Recherche anleiten könnte.";
+  if (action.reason === "COVERAGE_COMPLETE") return "Alle für dieses Modell notwendigen Informationen liegen bereits vor.";
+  if (action.action_type === "BLOCKED_PROVIDER") return `${_humanText(action.target_information || "Diese Information")} ist bekannt fehlend, aber die zuständige Quelle ist derzeit nicht erreichbar.`;
+  if (action.action_type === "FETCH") return `${_humanText(action.target_information || "Diese Information")} ist aktuell die wichtigste offene Lücke. ${action.expected_product_effect_summary || ""}`.trim();
+  return action.expected_product_effect_summary || "";
+}
+
+function _nextResearchActionHtml(p) {
+  const action = p && p.next_research_action;
+  if (!action) return "";
+  const status = _researchActionStatus(action);
+  return `
+    <section class="panel" style="margin-top:12px">
+      <h4>Nächster Research-Schritt</h4>
+      <p><strong>${_humanText(action.human_summary || "Keine Recherche-Aktion vorgesehen.")}</strong></p>
+      <h5 style="margin-bottom:4px">Warum?</h5>
+      <p class="sub">${_nextResearchActionWhy(action)}</p>
+      <p><span class="badge">${_RESEARCH_STATUS_DE[status]}</span></p>
+      ${_nextResearchActionAdvancedHtml(action)}
+    </section>
+  `;
+}
+
+// Advanced/technical detail for next_research_action -- codes, provider
+// ids, and the VOI score, hidden behind <details> per the "keine Codes im
+// Normal View" rule.
+function _nextResearchActionAdvancedHtml(action) {
+  if (!action) return "";
+  return `
+    <details>
+      <summary>Technische Details</summary>
+      <table>
+        <tbody>
+          <tr><td>VOI Score</td><td>${action.voi_score ?? "–"}</td></tr>
+          <tr><td>Gap Key</td><td class="sub">${action.gap_key || "–"}</td></tr>
+          <tr><td>Provider</td><td>${action.preferred_provider || "–"}</td></tr>
+          <tr><td>Fallback</td><td>${action.fallback_provider || "–"}</td></tr>
+          <tr><td>Provider Health</td><td>${action.provider_health || "–"}</td></tr>
+          <tr><td>Closability</td><td>${action.closability || "–"}</td></tr>
+          <tr><td>Expected Product Effect</td><td>${action.expected_product_effect || "–"}</td></tr>
+          <tr><td>Nächster Versuch</td><td>${action.next_retry ? fmtDate(action.next_retry) : "–"}</td></tr>
+          <tr><td>Action Type</td><td class="sub">${action.action_type || "–"}</td></tr>
+          <tr><td>Reason</td><td class="sub">${action.reason || "–"}</td></tr>
+        </tbody>
+      </table>
+    </details>
   `;
 }
 
