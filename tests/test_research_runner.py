@@ -239,6 +239,17 @@ def test_legislation_market_fetches_and_persists_a_real_govtrack_claim(storage: 
     assert row[1] == "PRIMARY_CONFIRMED"
     assert row[2] == "house_vote"
 
+    # Phase 7.14: the real product-facing before/after is always populated
+    # -- computed via the same product_mode_for_prediction() the API uses,
+    # never a second classification. This minimal synthetic fixture (no
+    # classified_category/event_type columns set) doesn't necessarily
+    # promote past INSUFFICIENT_DATA even with a real PATH_STEP claim
+    # attached -- "unchanged" is the honest, common outcome documented on
+    # the dataclass itself; the live 22-market audit is where a real
+    # promotion is actually observed and reported.
+    assert record.product_mode_before in ("VALIDATED_NUMERIC_FORECAST", "STRUCTURED_OUTLOOK", "INSUFFICIENT_DATA")
+    assert record.product_mode_after in ("VALIDATED_NUMERIC_FORECAST", "STRUCTURED_OUTLOOK", "INSUFFICIENT_DATA")
+
 
 def test_legislation_run_creates_real_event_entity_relation_graph(storage: Storage) -> None:
     """Phase C: the GovTrack claim must also populate the real

@@ -86,6 +86,13 @@ class ResearchRunObservability:
     evidence_backed_after: float | None = None
     published_forecast_before: float | None = None
     published_forecast_after: float | None = None
+    # Phase 7.14: the real product-facing outcome of this research run --
+    # did closing (part of) the data gap actually change what the user
+    # sees? Computed via the same product_mode_for_prediction() the API
+    # uses, never a second classification. "unchanged" is the honest,
+    # common outcome (most single research runs find nothing new).
+    product_mode_before: str | None = None
+    product_mode_after: str | None = None
     final_status: str = ""
     duration_ms: int = 0
     cost_usd: float = 0.0
@@ -387,6 +394,9 @@ def run_research_for_market(
 
     pred_before = get_prediction(storage, market_id)
     groups_before, primary_before = _independent_groups_and_primary(pred_before)
+    from .product_mode import product_mode_for_prediction
+
+    product_mode_before = product_mode_for_prediction(pred_before)["product_mode"]
 
     # --- Real, targeted official-source fetch for legislation-shaped
     # markets (e.g. "H.R.3633") — GovTrack, not another GDELT query.
@@ -442,6 +452,7 @@ def run_research_for_market(
     # evidence / resolution path / forecast, exactly as every other
     # prediction call in this codebase does (no parallel logic here).
     pred_after = get_prediction(storage, market_id)
+    product_mode_after = product_mode_for_prediction(pred_after)["product_mode"]
 
     claims_after_total = _claims_total(storage)
     links_after = _news_links_total(storage, provider, provider_market_id)
@@ -477,6 +488,8 @@ def run_research_for_market(
         evidence_backed_after=pred_after.evidence_backed_probability,
         published_forecast_before=pred_before.published_forecast_probability,
         published_forecast_after=pred_after.published_forecast_probability,
+        product_mode_before=product_mode_before,
+        product_mode_after=product_mode_after,
         final_status=pred_after.forecast_status or "",
         duration_ms=duration_ms,
         cost_usd=0.0,  # GDELT/news pipeline is free/keyless; no paid calls made
