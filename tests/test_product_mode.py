@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from polymarketpulse.data_gaps import DataGap, GapPriority
 from polymarketpulse.product_mode import product_mode_for_market_record, product_mode_for_prediction
 
 
@@ -123,6 +124,34 @@ def test_fed_product_mode_carries_real_deterministic_explanation() -> None:
     assert "HIKE_25" not in product["why_numeric"]  # human label, not the raw enum
     assert product["next_macro_event"] == "Nächstes FOMC-Meeting: 2026-09-16"
     assert len(product["change_drivers"]) >= 1
+
+
+def test_insufficient_data_carries_machine_actionable_gap_detail() -> None:
+    """Phase 7.1: the top data gaps must be surfaced with a real gap_type
+    (from data_gaps.py's GapType taxonomy) and recommended_sources, not
+    just a plain description string -- so a future research step can act
+    on WHICH provider to try next."""
+    gap = DataGap(
+        category="NEWS_PRIMARY", severity="HIGH", description="Keine Primärquelle gefunden.",
+        priority=GapPriority.HIGH, impact_on_confidence=0.3, recommended_sources=("reuters", "apnews"),
+    )
+    prediction = SimpleNamespace(
+        forecast_archetype=None, model_hypothesis_probability=None,
+        numeric_model_reason_code="PROVIDER_UNAVAILABLE", model_diagnostics={},
+        structured_world_state=SimpleNamespace(
+            current_state=None, confirmed_facts=(), completed_steps=(), open_steps=(),
+            blockers=(), disputed_facts=(),
+        ),
+        next_event=SimpleNamespace(next_event_type=None), scenario_tree=None, world_state=None,
+        data_gaps=SimpleNamespace(gaps=(gap,)),
+    )
+    product = product_mode_for_prediction(prediction)
+    assert product["product_mode"] == "INSUFFICIENT_DATA"
+    detail = product["data_gaps_detail"]
+    assert detail[0]["gap_type"] == "MISSING_MODEL_INPUT"  # from numeric_model_reason_code
+    gap_entry = next(d for d in detail if d["description"] == "Keine Primärquelle gefunden.")
+    assert gap_entry["gap_type"] == "MISSING_PRIMARY_SOURCE"
+    assert gap_entry["recommended_sources"] == ["reuters", "apnews"]
 
 
 def test_list_mode_is_storage_only_and_conservative() -> None:

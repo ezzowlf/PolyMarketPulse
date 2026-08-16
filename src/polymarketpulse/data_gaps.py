@@ -42,6 +42,33 @@ DataGapCategory = Literal[
     "RESOLUTION_PATH",
 ]
 
+# Phase 7.1 (Data Acquisition Core): the product-facing gap-type taxonomy,
+# derived from the existing, real DataGapCategory rather than a parallel
+# classification system. One category always maps to exactly one gap_type
+# -- this is a pure relabeling for UI/routing purposes, not a new signal.
+GapType = Literal[
+    "MISSING_STRUCTURED_DATA",
+    "MISSING_PRIMARY_SOURCE",
+    "MISSING_INDEPENDENT_CONFIRMATION",
+    "MISSING_TIMING_DATA",
+    "MISSING_RESOLUTION_DATA",
+    "MISSING_MODEL_INPUT",
+]
+
+_GAP_TYPE_BY_CATEGORY: dict[DataGapCategory, GapType] = {
+    "NEWS_PRIMARY": "MISSING_PRIMARY_SOURCE",
+    "NEWS_SECONDARY": "MISSING_INDEPENDENT_CONFIRMATION",
+    "STRUCTURED_DATA": "MISSING_STRUCTURED_DATA",
+    "EVENT_GRAPH": "MISSING_MODEL_INPUT",
+    "HISTORICAL_COMPARABLE": "MISSING_MODEL_INPUT",
+    "TIME_HORIZON": "MISSING_TIMING_DATA",
+    "STATE_ENGINE": "MISSING_RESOLUTION_DATA",
+    "MARKET_HISTORY": "MISSING_TIMING_DATA",
+    "GEOGRAPHIC_DATA": "MISSING_MODEL_INPUT",
+    "ECONOMIC_DATA": "MISSING_MODEL_INPUT",
+    "RESOLUTION_PATH": "MISSING_RESOLUTION_DATA",
+}
+
 # Human-readable German step names for RESOLUTION_PATH gap descriptions —
 # real, plain translations of the literal step-name strings
 # world_state._MULTISTEP_STRUCTURE_BY_EVENT_TYPE already uses (currently
@@ -76,10 +103,18 @@ class DataGap:
     priority: GapPriority
     impact_on_confidence: float  # How much confidence would improve
     recommended_sources: tuple[str, ...]  # Which sources could fill this gap
-    
+
+    @property
+    def gap_type(self) -> GapType:
+        """Real, deterministic relabeling of `category` into the Phase 7.1
+        Data Acquisition taxonomy -- never a second, independently-computed
+        classification."""
+        return _GAP_TYPE_BY_CATEGORY.get(self.category, "MISSING_MODEL_INPUT")
+
     def as_dict(self) -> dict:
         return {
             "category": self.category,
+            "gap_type": self.gap_type,
             "severity": self.severity,
             "description": self.description,
             "priority": self.priority.value,

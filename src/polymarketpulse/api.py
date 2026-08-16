@@ -1139,7 +1139,8 @@ def ai_ask(payload: AskRequest, storage: Storage = Depends(get_storage)) -> AIAn
 # though /prediction itself computed them correctly.
 _PRODUCT_MODE_KEYS = (
     "product_mode", "product_probability", "differenz_pp", "model_lifecycle",
-    "summary", "why_numeric", "next_macro_event", "change_drivers", "missing", "next_research",
+    "summary", "why_numeric", "next_macro_event", "change_drivers", "missing",
+    "data_gaps_detail", "next_research",
 )
 
 

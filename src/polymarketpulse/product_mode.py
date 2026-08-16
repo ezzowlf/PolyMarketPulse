@@ -146,10 +146,33 @@ def product_mode_for_prediction(prediction) -> dict:
         }
 
     gaps = getattr(prediction, "data_gaps", None)
-    missing = [gap.description for gap in getattr(gaps, "gaps", ())][:3]
+    gap_list = list(getattr(gaps, "gaps", ()))[:3]
+    missing = [gap.description for gap in gap_list]
     reason = prediction.numeric_model_reason_code
     if reason:
         missing.insert(0, f"Modell-Input nicht verfügbar: {reason}")
+    # Phase 7.1: the same top gaps, but machine-actionable -- real gap_type
+    # (see data_gaps.py's GapType taxonomy) and the real recommended
+    # sources already computed by the Data Gap Engine's source-registry
+    # routing, so a future research step can act on WHICH provider to try
+    # next rather than re-parsing free text. Additive: `missing` (plain
+    # strings, already consumed by the UI) is unchanged.
+    data_gaps_detail = [
+        {
+            "gap_type": gap.gap_type,
+            "description": gap.description,
+            "severity": gap.severity,
+            "recommended_sources": list(gap.recommended_sources),
+        }
+        for gap in gap_list
+    ]
+    if reason:
+        data_gaps_detail.insert(0, {
+            "gap_type": "NO_ARCHETYPE" if reason == "NO_ARCHETYPE" else "MISSING_MODEL_INPUT",
+            "description": f"Modell-Input nicht verfügbar: {reason}",
+            "severity": "HIGH",
+            "recommended_sources": [],
+        })
     return {
         "product_mode": "INSUFFICIENT_DATA",
         "product_probability": None,
@@ -157,6 +180,7 @@ def product_mode_for_prediction(prediction) -> dict:
         "summary": "Noch fehlen belastbare, marktbezogene Informationen für eine strukturierte Einschätzung.",
         "why_numeric": None,
         "missing": missing,
+        "data_gaps_detail": data_gaps_detail,
         "next_research": getattr(getattr(prediction, "next_event", None), "next_event_description", None),
     }
 
