@@ -59,6 +59,45 @@ def test_world_state_time_remaining_none_when_no_deadline_known() -> None:
     assert ws.time_remaining_hours is None
 
 
+def test_world_state_deadline_falls_back_to_real_resolution_date_when_text_parse_fails() -> None:
+    """Real integration bug fix: proposition.deadline is only ever a
+    regex-parsed date TEXT extracted from the question/resolution_text --
+    semantics.py's parse_market_proposition never receives the market's
+    real structured deadline/end_date columns at all. A question like
+    "Clarity Act ... in 2026?" has no specific parseable date, so
+    proposition.deadline stays honestly None even though a real
+    resolution_date (the actual markets.end_date column) was already
+    fetched by the caller. world_state.deadline must fall back to that
+    real value rather than staying None just because the free-text
+    parser found nothing."""
+    proposition = parse_market_proposition(
+        "Clarity Act (H.R.3633) signed into law in 2026?", None
+    )
+    assert proposition.deadline is None  # confirms the real parser limitation this test guards against
+    now = datetime(2026, 8, 16, tzinfo=UTC)
+    resolution_date = datetime(2027, 1, 1, 5, 0, tzinfo=UTC)
+    ws = assemble_world_state(
+        proposition=proposition, resolution_date=resolution_date, now=now, independent_evidence=None,
+    )
+    assert ws.deadline == resolution_date.isoformat()
+
+
+def test_world_state_deadline_prefers_real_parsed_text_when_available() -> None:
+    """When the free-text parser DID find a real date, that stays
+    authoritative -- the resolution_date fallback only fires when the
+    parser found nothing at all."""
+    proposition = parse_market_proposition(
+        "Will the ceasefire agreement be confirmed by December 31?", None
+    )
+    assert proposition.deadline is not None
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    resolution_date = now + timedelta(hours=72)
+    ws = assemble_world_state(
+        proposition=proposition, resolution_date=resolution_date, now=now, independent_evidence=None,
+    )
+    assert ws.deadline == proposition.deadline
+
+
 def test_prediction_result_exposes_world_state_reachably() -> None:
     # Integration: compute_prediction() must attach a real WorldState object
     # to every PredictionResult, not leave the "what must happen for YES/NO"

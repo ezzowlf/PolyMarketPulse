@@ -1034,10 +1034,23 @@ def assemble_world_state(
         + _build_quant_state_variables(quant_asset, quant_current_price, quant_daily_volatility, now)
     )
 
+    # Real integration bug fix: `proposition.deadline` is only ever a
+    # regex-parsed date TEXT extracted from the question/resolution_text
+    # (semantics.py's `parse_market_proposition` doesn't even receive the
+    # market's real structured deadline/end_date columns as input) --
+    # when the question text doesn't spell out a specific date (e.g.
+    # "Clarity Act ... in 2026?"), this silently stays None even though a
+    # real, structured `resolution_date` (the actual `markets.end_date`
+    # column) was already fetched and is sitting right here, already used
+    # for `time_remaining_hours` above. Falling back to it means a real
+    # market deadline is no longer reported as missing just because the
+    # regex parser didn't find one in free text.
+    deadline = proposition.deadline or (resolution_date.isoformat() if resolution_date is not None else None)
+
     return WorldState(
         yes_condition=proposition.yes_condition,
         no_condition=proposition.no_condition,
-        deadline=proposition.deadline,
+        deadline=deadline,
         deadline_semantics=proposition.deadline_semantics,
         resolution_authority=proposition.resolution_authority,
         time_remaining_hours=time_remaining_hours,
