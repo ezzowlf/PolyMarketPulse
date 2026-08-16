@@ -61,7 +61,16 @@ def _current_state_summary(
         return f"Resolution-Pfad ({resolution_path.template_name}) noch ohne bestätigten Schritt."
     if path_to_resolution is not None:
         return path_to_resolution.current_state
-    if world_state.waterway_state is not None:
+    if world_state.waterway_state is not None and world_state.waterway_state.current_state != "UNKNOWN":
+        # world_state.py's WaterwayHealthState.current_state is honestly the
+        # literal string "UNKNOWN" when zero qualifying evidence exists
+        # (see world_state.py:348/367) -- wrapping that sentinel in prose
+        # ("Waterway-Status: UNKNOWN.") used to defeat product_mode.py's
+        # exact-match "is this a real placeholder" check downstream, which
+        # falsely promoted markets with zero real waterway evidence to
+        # STRUCTURED_OUTLOOK. Skip this branch entirely (fall through to
+        # the evidence-count fallback below) rather than ever surfacing the
+        # honest-unknown sentinel as if it were real content.
         return f"Waterway-Status: {world_state.waterway_state.current_state}."
     if world_state.evidence_for_yes_count or world_state.evidence_for_no_count:
         return (

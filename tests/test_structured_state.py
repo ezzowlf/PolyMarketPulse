@@ -7,7 +7,12 @@ from __future__ import annotations
 
 from polymarketpulse.data_gaps import DataGap, DataGapReport, GapPriority
 from polymarketpulse.prediction.structured_state import assemble_structured_world_state
-from polymarketpulse.prediction.world_state import ResolutionPath, ResolutionStep, WorldState
+from polymarketpulse.prediction.world_state import (
+    ResolutionPath,
+    ResolutionStep,
+    WaterwayHealthState,
+    WorldState,
+)
 
 
 def _base_world_state(**overrides) -> WorldState:
@@ -97,3 +102,43 @@ def test_current_state_falls_back_to_evidence_counts_when_nothing_structural() -
     state = assemble_structured_world_state(world_state=ws, resolution_path=None, data_gap_report=None)
     assert state.current_state is not None
     assert "3" in state.current_state and "2" in state.current_state
+
+
+def test_unknown_waterway_state_never_produces_a_prose_wrapped_placeholder() -> None:
+    """7.17.2 Product-Truth-Retest finding: WaterwayHealthState.current_state
+    is honestly the literal string "UNKNOWN" when zero qualifying evidence
+    exists (basis_evidence_count == 0) -- but the old code wrapped it into
+    "Waterway-Status: UNKNOWN.", a sentence that no longer exact-matches
+    product_mode.py's "UNKNOWN" placeholder check, silently promoting
+    markets with genuinely zero waterway evidence to STRUCTURED_OUTLOOK
+    (confirmed live on polymarket:2176262). With no other real evidence at
+    all, current_state must honestly stay None -- never a disguised-UNKNOWN
+    sentence -- per this module's own stated contract ("Never invents a
+    state when nothing real is known")."""
+    ws = _base_world_state(
+        waterway_state=WaterwayHealthState(current_state="UNKNOWN", trend="UNKNOWN", basis_evidence_count=0),
+        evidence_for_yes_count=0, evidence_for_no_count=0,
+    )
+    state = assemble_structured_world_state(world_state=ws, resolution_path=None, data_gap_report=None)
+    assert state.current_state is None
+
+    # With SOME real evidence present, the honest evidence-count fallback
+    # must still be reachable (not blocked by the waterway UNKNOWN branch).
+    ws2 = _base_world_state(
+        waterway_state=WaterwayHealthState(current_state="UNKNOWN", trend="UNKNOWN", basis_evidence_count=0),
+        evidence_for_yes_count=2, evidence_for_no_count=1,
+    )
+    state2 = assemble_structured_world_state(world_state=ws2, resolution_path=None, data_gap_report=None)
+    assert state2.current_state is not None
+    assert "UNKNOWN" not in state2.current_state
+    assert "2 Belege für YES" in state2.current_state
+
+
+def test_real_waterway_state_still_surfaces_as_real_content() -> None:
+    """The fix must not suppress a genuinely known waterway state -- only
+    the honest-unknown sentinel."""
+    ws = _base_world_state(
+        waterway_state=WaterwayHealthState(current_state="RESTRICTED", trend="WORSENING", basis_evidence_count=4),
+    )
+    state = assemble_structured_world_state(world_state=ws, resolution_path=None, data_gap_report=None)
+    assert state.current_state == "Waterway-Status: RESTRICTED."
