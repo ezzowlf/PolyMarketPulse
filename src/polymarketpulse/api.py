@@ -440,25 +440,20 @@ def coverage(storage: Storage = Depends(get_storage)) -> dict:
 
 @app.get("/research-queue")
 def research_queue(limit: int = 8, storage: Storage = Depends(get_storage)) -> list[dict]:
-    """Compact, real Research Queue preview for the dashboard: top-N real
-    unresolved markets ranked by real priority signal (divergence/deadline/
-    data-gaps), with their real reasons -- the same ranking
-    run_recurring_research() actually executes against, not a separate
-    display-only approximation."""
-    from .research_runner import build_queue_from_db
+    """Real Research Queue for the dashboard: the existing market-priority
+    ranking (divergence/deadline/data-gaps/source-coverage -- the same
+    ranking run_recurring_research() actually executes against), enriched
+    with real gap-level Value-of-Information detail (Phase 7.8.8:
+    gap_key/target_information/preferred_provider/fallback_provider/
+    provider_health/closability/expected_product_effect/voi_score) and
+    re-sorted primarily by that VOI score, market priority as tie-breaker.
+    Bounded to a slightly larger candidate window than `limit` so the VOI
+    re-sort can actually change the top-N, then trimmed to `limit`."""
+    from .research_runner import build_queue_from_db, enrich_queue_with_gap_voi
 
     rows_by_id, queue = build_queue_from_db(storage)
-    result = []
-    for entry in queue[:limit]:
-        row = rows_by_id.get(entry.market_id, {})
-        result.append({
-            "market_id": entry.market_id,
-            "question": entry.question,
-            "priority_score": entry.priority_score,
-            "reasons": list(entry.reasons),
-            "category": row.get("classified_category") or row.get("category"),
-        })
-    return result
+    enriched = enrich_queue_with_gap_voi(storage, rows_by_id, queue, limit=max(limit * 3, 20))
+    return enriched[:limit]
 
 
 @app.get("/research-runs")

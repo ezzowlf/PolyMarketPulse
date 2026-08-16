@@ -708,6 +708,66 @@ def build_queue_from_db(storage: Storage):
     return rows_by_id, build_research_queue(signals)
 
 
+def enrich_queue_with_gap_voi(storage: Storage, rows_by_id: dict, queue: list, limit: int = 20) -> list[dict]:
+    """Phase 7.8.8: attach real, gap-level Next-Best-Research-Action detail
+    (data_coverage.py's compute_data_coverage/derive_next_research_action)
+    to the existing market-priority Research Queue, WITHOUT building a
+    second queue -- the existing research_queue.build_research_queue()
+    ranking (divergence/deadline/data-gap/source-coverage signals) is still
+    the base ranking; this only adds gap-level VOI on top and re-sorts.
+
+    Deliberately read-only and bounded: only the top `limit` already-
+    priority-ranked entries get a real compute_prediction() call (this is
+    the same cost /prediction already pays per market, just for a few
+    markets instead of one) -- this function must never be used inside the
+    real execution loop (run_recurring_research already computes its own
+    prediction per market via run_research_for_market -> get_prediction,
+    so calling this here would just double the real work for no benefit).
+
+    Ranking: primarily by gap-level voi_score (the more specific, more
+    actionable signal), with the pre-existing market-priority_score as an
+    explicit real tie-breaker -- neither signal is silently discarded."""
+    from .prediction.data_coverage import compute_data_coverage, derive_next_research_action
+    from .product_mode import product_mode_for_prediction
+
+    enriched: list[dict] = []
+    for entry in queue[:limit]:
+        row = rows_by_id.get(entry.market_id, {})
+        base = {
+            "market_id": entry.market_id,
+            "question": entry.question,
+            "priority_score": entry.priority_score,
+            "reasons": list(entry.reasons),
+            "category": row.get("classified_category") or row.get("category"),
+        }
+        try:
+            prediction = get_prediction(storage, entry.market_id)
+            coverage = compute_data_coverage(prediction)
+            action = derive_next_research_action(prediction, coverage, storage=storage)
+            product_mode = product_mode_for_prediction(prediction).get("product_mode")
+        except Exception:  # noqa: BLE001 - a display enrichment must never break the queue itself
+            action = None
+            product_mode = None
+        base.update({
+            "product_mode": product_mode,
+            "gap_key": action.get("gap_key") if action else None,
+            "target_information": action.get("target_information") if action else None,
+            "preferred_provider": action.get("preferred_provider") if action else None,
+            "fallback_provider": action.get("fallback_provider") if action else None,
+            "provider_health": action.get("provider_health") if action else None,
+            "closability": action.get("closability") if action else None,
+            "expected_product_effect": action.get("expected_product_effect") if action else None,
+            "voi_score": action.get("voi_score", 0) if action else 0,
+            "action_type": action.get("action_type") if action else None,
+            "human_summary": action.get("human_summary") if action else None,
+            "reason": action.get("reason") if action else None,
+        })
+        enriched.append(base)
+
+    enriched.sort(key=lambda e: (e["voi_score"], e["priority_score"]), reverse=True)
+    return enriched
+
+
 def run_recurring_research(
     storage: Storage, settings, limit: int = 10, max_cost_usd: float = 1.0,
 ) -> list[ResearchRunObservability]:

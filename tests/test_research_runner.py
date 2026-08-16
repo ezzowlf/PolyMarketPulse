@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -16,6 +16,7 @@ from polymarketpulse.config import Settings
 from polymarketpulse.news.base import NewsEvent
 from polymarketpulse.research_runner import (
     build_queue_from_db,
+    enrich_queue_with_gap_voi,
     run_recurring_research,
     run_research_for_market,
 )
@@ -74,6 +75,58 @@ def test_queue_uses_latest_persisted_forecast_deadline_and_gap_state(storage: St
     assert entry.priority_score == 36.0  # 50pp divergence + 14 data-gap points + long-horizon base score
     assert any("Divergenz" in reason for reason in entry.reasons)
     assert any("kritische" in reason for reason in entry.reasons)
+
+
+def test_enrich_queue_with_gap_voi_attaches_real_gap_detail_and_never_crashes_queue(storage: Storage) -> None:
+    """Phase 7.8.8: the market-priority queue (built above) must be
+    enrichable with real gap-level VOI without discarding the existing
+    priority_score/reasons, and a market with no supported archetype
+    (no fixture forecast_archetype set up here) must degrade to honest
+    None/0 fields rather than crashing the whole queue enrichment."""
+    now = datetime.now(UTC)
+    storage.connection.execute(
+        "INSERT INTO markets (market_id, provider, provider_market_id, question, slug, url, first_seen_at, last_seen_at, end_date, resolution_status) "
+        "VALUES ('voi-1', 'polymarket', 'voi-1', 'Will a vote occur?', 'voi-1', 'https://x', ?, ?, ?, 'open')",
+        (now.isoformat(), now.isoformat(), (now.replace(year=now.year + 1)).isoformat()),
+    )
+    storage.connection.commit()
+    rows_by_id, queue = build_queue_from_db(storage)
+    entry = next(item for item in queue if item.market_id == "voi-1")
+    enriched = enrich_queue_with_gap_voi(storage, rows_by_id, [entry], limit=5)
+    assert len(enriched) == 1
+    result = enriched[0]
+    assert result["market_id"] == "voi-1"
+    assert result["priority_score"] == entry.priority_score  # real market-priority signal preserved
+    assert "voi_score" in result and isinstance(result["voi_score"], int)
+    assert "gap_key" in result and "closability" in result and "expected_product_effect" in result
+
+
+def test_enrich_queue_with_gap_voi_sorts_by_voi_then_priority(storage: Storage) -> None:
+    from polymarketpulse.research_queue import QueueEntry
+
+    rows_by_id = {
+        "low": {"classified_category": "OTHER"},
+        "high": {"classified_category": "OTHER"},
+    }
+    queue = [
+        QueueEntry(market_id="low", question="q", priority_score=99.0, reasons=()),
+        QueueEntry(market_id="high", question="q", priority_score=1.0, reasons=()),
+    ]
+    with patch("polymarketpulse.research_runner.get_prediction") as mock_pred:
+        low_pred, high_pred = MagicMock(), MagicMock()
+        low_pred.forecast_archetype = None
+        high_pred.forecast_archetype = None
+
+        def _side_effect(_storage, market_id):
+            return {"low": low_pred, "high": high_pred}[market_id]
+
+        mock_pred.side_effect = _side_effect
+        enriched = enrich_queue_with_gap_voi(storage, rows_by_id, queue, limit=5)
+    # Both are NO_ARCHETYPE (voi_score 0) here, so priority_score is the
+    # real tie-breaker -- "low" (99.0) must sort before "high" (1.0)
+    # despite its market_id, proving the sort key is priority_score, not
+    # insertion order or market_id.
+    assert [e["market_id"] for e in enriched] == ["low", "high"]
 
 
 def test_real_run_fetches_sources_extracts_claims_and_persists_observability(storage: Storage) -> None:
