@@ -1129,6 +1129,20 @@ def ai_ask(payload: AskRequest, storage: Storage = Depends(get_storage)) -> AIAn
     return ai_service.ask_research_question(storage, settings, payload.question, payload.market_id)
 
 
+# The exact keys product_mode_for_prediction() returns -- kept in one place
+# so every consumer that layers its own response on top of /prediction's
+# audited dict (currently /ai/explain-recommendation and its recompute
+# sibling) copies the real product_mode fields forward instead of silently
+# dropping them. This is what closed the real bug where the market detail
+# page's actual data source (ai/explain-recommendation) never received
+# product_mode/product_probability/differenz_pp/why_numeric at all, even
+# though /prediction itself computed them correctly.
+_PRODUCT_MODE_KEYS = (
+    "product_mode", "product_probability", "differenz_pp", "model_lifecycle",
+    "summary", "why_numeric", "next_macro_event", "change_drivers", "missing", "next_research",
+)
+
+
 @app.get("/prediction/{market_id}")
 @_handle_ai_errors
 def prediction(market_id: str, storage: Storage = Depends(get_storage)) -> dict:
@@ -1179,6 +1193,7 @@ def ai_explain_recommendation(market_id: str, storage: Storage = Depends(get_sto
     audited = prediction(market_id, storage)
     response.prediction["lineage"] = audited["lineage"]
     response.prediction["coherence"] = audited["coherence"]
+    response.prediction.update({key: audited.get(key) for key in _PRODUCT_MODE_KEYS})
     return response
 
 
@@ -1192,7 +1207,9 @@ def ai_explain_recommendation_recompute(
     settings = Settings.load()
     response = ai_service.explain_recommendation(storage, settings, market_id, force_recompute=True)
     audited = prediction(market_id, storage)
-    response.prediction.update({key: audited[key] for key in ("source_availability", "early_signals", "lineage", "coherence")})
+    response.prediction.update(
+        {key: audited.get(key) for key in ("source_availability", "early_signals", "lineage", "coherence", *_PRODUCT_MODE_KEYS)}
+    )
     return response
 
 

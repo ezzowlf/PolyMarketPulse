@@ -114,16 +114,22 @@ def parse_fed_target(question: str, resolution_text: str | None) -> FedTarget:
     return FedTarget("", meeting, False, "exact FOMC outcome bucket could not be parsed")
 
 
+def _raw_transition_counts(rows: tuple[FedMeeting, ...], previous_action: str | None) -> Counter:
+    """The real, pre-Laplace observed transition counts -- factored out of
+    `_distribution` so the UI-facing "X of Y historical meetings" evidence
+    text can cite the exact same real counts the probability itself is
+    computed from, rather than a second, potentially-diverging summary."""
+    if previous_action is None:
+        return Counter(row.action for row in rows)
+    counts = Counter(row.action for i, row in enumerate(rows) if i and rows[i - 1].action == previous_action)
+    return counts if counts else Counter(row.action for row in rows)
+
+
 def _distribution(rows: tuple[FedMeeting, ...], previous_action: str | None) -> dict[str, float]:
     # Laplace smoothing makes the distribution explicit and deterministic;
     # it is not an invented fallback.  Unknown prior action uses the stated
     # unconditional baseline only.
-    if previous_action is None:
-        counts = Counter(row.action for row in rows)
-    else:
-        counts = Counter(row.action for i, row in enumerate(rows) if i and rows[i - 1].action == previous_action)
-        if not counts:
-            counts = Counter(row.action for row in rows)
+    counts = _raw_transition_counts(rows, previous_action)
     denominator = sum(counts.values()) + len(OUTCOMES)
     return {outcome: (counts[outcome] + 1) / denominator for outcome in OUTCOMES}
 
@@ -165,9 +171,11 @@ def predict_shadow(
     # policy action is the current value of its single validated feature, not
     # an additional training observation and never a market-price proxy.
     prior = policy_decision.action
-    distribution = _distribution(training_dataset(), prior)
-    confidence = round(min(45.0, 20.0 + len(training_dataset()) * 0.55), 1)
-    return FedShadow(True, distribution[target.outcome], distribution, confidence, None, {"target": _target_dict(target), "prior_action": prior, "policy_decision": policy_decision.as_dict(), "dataset_id": DATASET_ID, "dataset_version": DATASET_VERSION, "model_id": MODEL_ID, "model_version": MODEL_VERSION, "model_confidence": confidence, "validation": validation.as_dict(), "sources": [FED_OPEN_MARKET_SOURCE, FED_CALENDAR_SOURCE, policy_decision.source_url], "sample_size": len(training_dataset()), "feature_list": ["previous_fomc_action"], "non_model_macro_snapshot": snapshot.as_dict() if snapshot else None, "point_in_time_flag": "live prior action is official statement; macro vintages are not model features"})
+    rows = training_dataset()
+    distribution = _distribution(rows, prior)
+    raw_counts = _raw_transition_counts(rows, prior)
+    confidence = round(min(45.0, 20.0 + len(rows) * 0.55), 1)
+    return FedShadow(True, distribution[target.outcome], distribution, confidence, None, {"target": _target_dict(target), "prior_action": prior, "policy_decision": policy_decision.as_dict(), "dataset_id": DATASET_ID, "dataset_version": DATASET_VERSION, "model_id": MODEL_ID, "model_version": MODEL_VERSION, "model_confidence": confidence, "validation": validation.as_dict(), "sources": [FED_OPEN_MARKET_SOURCE, FED_CALENDAR_SOURCE, policy_decision.source_url], "sample_size": len(rows), "feature_list": ["previous_fomc_action"], "non_model_macro_snapshot": snapshot.as_dict() if snapshot else None, "point_in_time_flag": "live prior action is official statement; macro vintages are not model features", "transition_basis": {"observed_target_count": raw_counts[target.outcome], "observed_total_count": sum(raw_counts.values()), "smoothed_probability": distribution[target.outcome]}})
 
 
 def registry_records() -> tuple[dict, dict]:

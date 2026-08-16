@@ -364,6 +364,23 @@ def test_ai_explain_recommendation_falls_back_without_api_key(client: TestClient
     assert data["explanation"]["recommendation"] == data["prediction"]["recommendation"]
 
 
+def test_ai_explain_recommendation_carries_product_mode_fields(client: TestClient) -> None:
+    """Regression: /ai/explain-recommendation is the endpoint the market
+    detail page's headline panel actually consumes (via response.prediction),
+    a SEPARATE object from /prediction's own response. Before this fix,
+    /prediction correctly computed product_mode/product_probability/
+    differenz_pp, but ai_explain_recommendation() never copied those keys
+    over -- the market detail page silently never showed them at all,
+    regardless of how correct the underlying /prediction endpoint was."""
+    market_id = _seeded_market_id(client)
+    audited = client.get(f"/prediction/{market_id}").json()
+    resp = client.get(f"/ai/explain-recommendation/{market_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["prediction"]["product_mode"] == audited["product_mode"]
+    assert data["prediction"]["product_probability"] == audited["product_probability"]
+
+
 def test_ai_explain_recommendation_recompute_endpoint(client: TestClient) -> None:
     market_id = _seeded_market_id(client)
     resp = client.post(f"/ai/explain-recommendation/{market_id}/recompute")

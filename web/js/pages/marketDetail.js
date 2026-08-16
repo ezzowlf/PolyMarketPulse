@@ -257,6 +257,7 @@ function _headlinePanelHtml(market, opp, pred) {
       ${widgetCard({ title: "DATENLAGE", value: dataQualityLabel })}
       ${widgetCard({ title: "DEADLINE", value: deadlineValue })}
     </div>
+    ${_fedNumericHtml(p)}
     ${decisionReasons}
     ${sourceNotice}
     ${earlySignalNotice}
@@ -267,6 +268,25 @@ function _headlinePanelHtml(market, opp, pred) {
     ${quantitativeOnly ? `<p class="sub">Diese Einschätzung basiert primär auf quantitativen Markt- oder Makrodaten; passende bestätigende Nachrichtenquellen liegen derzeit nicht vor.</p>` : ""}
     ${!forecastPublished ? `<p class="sub">${_noForecastExplanation(p, availability)}</p>` : ""}
     <details><summary>Modell- und Prüfstatus</summary><p class="sub">${productNumeric ? "Fed-Entscheidungsmodell: zeitgetrennt validiert; die Modellschätzung ist oben als PolyMarketPulse-Wert sichtbar." : "Für diesen Markt liegt derzeit kein historisch validiertes numerisches Modell vor."} · ${statusLabel}</p></details>
+  `;
+}
+
+function _fedNumericHtml(p) {
+  const productNumeric = p.product_mode === "VALIDATED_NUMERIC_FORECAST" && p.product_probability !== null && p.product_probability !== undefined;
+  if (!productNumeric) return "";
+  const diffPp = p.differenz_pp;
+  const diffLabel = diffPp === null || diffPp === undefined ? "–" : `${diffPp > 0 ? "+" : ""}${diffPp.toFixed(1)} Pp`;
+  const drivers = (p.change_drivers || []).slice(0, 4);
+  return `
+    <section class="panel" style="margin-top:12px">
+      <div class="widget-grid">
+        ${widgetCard({ title: "DIFFERENZ", value: diffLabel, sub: "PolyMarketPulse − Polymarket" })}
+      </div>
+      <h4>Warum?</h4>
+      <p>${_humanText(p.why_numeric || "Validiertes Fed-Modell mit offizieller Vorentscheidung als einzigem Modell-Input.")}</p>
+      ${p.next_macro_event ? `<h4>Was passiert als Nächstes?</h4><p>${_humanText(p.next_macro_event)}</p>` : ""}
+      ${drivers.length ? `<h4>Was würde die Prognose ändern?</h4><ul>${drivers.map((d) => `<li>${_humanText(d)}</li>`).join("")}</ul>` : ""}
+    </section>
   `;
 }
 

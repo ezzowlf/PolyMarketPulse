@@ -95,6 +95,36 @@ def test_object_presence_alone_is_not_enough_for_structured_outlook() -> None:
     assert product["product_probability"] is None
 
 
+def test_fed_product_mode_carries_real_deterministic_explanation() -> None:
+    """Phase 6: the Fed champion case must surface a real, deterministic
+    differenz_pp and why_numeric built from actual diagnostics fields
+    (target outcome, prior action, real observed transition counts) --
+    not a generic static sentence."""
+    prediction = SimpleNamespace(
+        forecast_archetype="MACRO_POLICY",
+        model_hypothesis_probability=0.10714285714285714,
+        market_yes_probability=0.285,
+        numeric_model_reason_code=None,
+        model_diagnostics={
+            "validation": {"passed": True},
+            "target": {"outcome": "HIKE_25", "meeting_date": "2026-09-16"},
+            "prior_action": "UNCHANGED",
+            "transition_basis": {"observed_target_count": 2, "observed_total_count": 23},
+        },
+        structured_world_state=None,
+        next_event=None,
+        scenario_tree=None,
+        world_state=None,
+    )
+    product = product_mode_for_prediction(prediction)
+    assert product["product_mode"] == "VALIDATED_NUMERIC_FORECAST"
+    assert product["differenz_pp"] == -17.8
+    assert "2 von 23" in product["why_numeric"]
+    assert "HIKE_25" not in product["why_numeric"]  # human label, not the raw enum
+    assert product["next_macro_event"] == "Nächstes FOMC-Meeting: 2026-09-16"
+    assert len(product["change_drivers"]) >= 1
+
+
 def test_list_mode_is_storage_only_and_conservative() -> None:
     assert product_mode_for_market_record({"question": "Fed decision", "model_hypothesis_probability": 0.7, "has_champion_macro_model": 1}) == "VALIDATED_NUMERIC_FORECAST"
     assert product_mode_for_market_record({"question": "Fed decision", "model_hypothesis_probability": 0.7}) == "INSUFFICIENT_DATA"
