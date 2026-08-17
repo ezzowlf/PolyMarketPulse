@@ -249,3 +249,91 @@ def test_existing_office_departure_detection_not_regressed() -> None:
 def test_existing_price_threshold_detection_not_regressed() -> None:
     proposition = parse_market_proposition("Will Bitcoin be above $200,000 by December 31?", None)
     assert proposition.event_type == "price_above"
+
+
+# ---------------------------------------------------------------------
+# WTI $85 Golden Case (Block A/B/C) — the real production market
+# polymarket:3310013: "Will WTI Crude Oil (WTI) hit (HIGH) $85 in
+# August?", resolution rule confirmed to mean "does the Active Month WTI
+# futures 1-minute-candle High touch/exceed $85 at ANY point during
+# August's trading sessions" (a barrier/touch claim, Pyth primary /
+# CME fallback per the real resolution text) — never "does WTI close
+# above $85 at the end of August" (a terminal claim). Before this round's
+# fix, this exact question produced asset=None, threshold=None,
+# proposition_status=AMBIGUOUS (root cause: no WTI/commodity asset alias,
+# the "(HIGH)" annotation broke the threshold-number regex, and "in
+# August" phrasing wasn't recognized as a deadline at all).
+# ---------------------------------------------------------------------
+
+_WTI_QUESTION = "Will WTI Crude Oil (WTI) hit (HIGH) $85 in August?"
+
+
+def test_wti_golden_case_full_semantic_parse() -> None:
+    p = parse_market_proposition(_WTI_QUESTION, None)
+    assert p.event_type == "price_above"
+    assert p.asset == "WTI_CRUDE_OIL"
+    assert p.asset_class == "COMMODITY"
+    assert p.threshold == 85.0
+    assert p.unit == "USD"
+    assert p.barrier_field == "HIGH"
+    assert p.deadline == "August"
+    assert p.deadline_semantics == "by_deadline"  # touch/barrier, NOT terminal-at-deadline
+    assert p.price_contract_type == "TOUCH_HIGH"
+    assert p.proposition_status == "CLEAR"  # was AMBIGUOUS before this fix
+    assert p.ambiguity_flags == ()
+
+
+def test_wti_touch_low_variant() -> None:
+    """The mirror case: a (LOW) annotation must produce TOUCH_LOW, not be
+    conflated with TOUCH_HIGH just because "hit" is direction-neutral on
+    its own."""
+    p = parse_market_proposition("Will WTI Crude Oil (WTI) hit (LOW) $60 in August?", None)
+    assert p.barrier_field == "LOW"
+    assert p.price_contract_type == "TOUCH_LOW"
+    assert p.threshold == 60.0
+
+
+def test_price_threshold_touch_vs_terminal_stays_distinct() -> None:
+    """"Reach $X by <date>" (barrier/touch, an explicit "by" preposition)
+    must NOT be conflated with "above $X on <date>" (terminal, an explicit
+    "on" preposition) — the two real Polymarket contract shapes this
+    project has always needed to keep apart (see the deadline_semantics
+    module docstring), now also expressed via the new, more explicit
+    price_contract_type vocabulary."""
+    touch = parse_market_proposition("Will Bitcoin reach $200,000 by December 31?", None)
+    assert touch.deadline_semantics == "by_deadline"
+    assert touch.price_contract_type == "TOUCH_HIGH"
+
+    terminal = parse_market_proposition("Will Bitcoin be above $200,000 on December 31?", None)
+    assert terminal.deadline_semantics == "at_deadline"
+    assert terminal.price_contract_type == "ABOVE_AT_DEADLINE"
+
+
+def test_terminal_below_at_deadline() -> None:
+    p = parse_market_proposition("Will Bitcoin be below $50,000 on December 31?", None)
+    assert p.deadline_semantics == "at_deadline"
+    assert p.price_contract_type == "BELOW_AT_DEADLINE"
+
+
+def test_touch_verb_wins_over_by_preposition_absence() -> None:
+    """A touch verb ("hit"/"touch"/"reach") implies barrier semantics even
+    with no "by"/"on" date preposition at all -- only the weaker "in
+    <Month>" phrasing is present, which alone would default to by_deadline
+    anyway, but this proves the verb-based override doesn't accidentally
+    flip it to terminal."""
+    p = parse_market_proposition("Will Ethereum touch $10,000 in September?", None)
+    assert p.deadline_semantics == "by_deadline"
+    assert p.price_contract_type == "TOUCH_HIGH"
+    assert p.asset == "ethereum"
+    assert p.asset_class == "CRYPTO"
+
+
+def test_commodity_asset_not_detected_without_price_threshold_phrasing() -> None:
+    """A WTI-mentioning question with no recognizable threshold phrasing
+    must not be misclassified as a price-threshold proposition at all --
+    asset detection alone is not sufficient, matching the existing crypto
+    behavior (_detect_price_direction requires both an asset AND a real
+    threshold match)."""
+    p = parse_market_proposition("Will WTI Crude Oil production increase this year?", None)
+    assert p.event_type != "price_above"
+    assert p.event_type != "price_below"

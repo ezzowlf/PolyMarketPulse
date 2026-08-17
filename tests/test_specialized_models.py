@@ -487,6 +487,53 @@ def test_quant_model_route_via_engine():
     assert "quant" in result.reasons[0]
 
 
+def test_wti_golden_case_routes_to_quant_model_as_supported_but_unvalidated():
+    """WTI-golden-case (Block D): once semantics.py correctly recognizes
+    WTI Crude Oil as a commodity price-threshold asset (was previously
+    asset=None/AMBIGUOUS), the market must route to the quant/price-
+    threshold model path -- eligible, not silently dropped -- while
+    honestly reporting unavailable (no real commodity price provider
+    exists yet, see quant.py's crypto-only _SUPPORTED_ASSETS)."""
+    from polymarketpulse.prediction.quant import analyze_quant
+    from polymarketpulse.prediction.semantics import parse_market_proposition
+    from polymarketpulse.prediction.specialized_router import route_to_specialized_model
+
+    proposition = parse_market_proposition("Will WTI Crude Oil (WTI) hit (HIGH) $85 in August?", None)
+    assert proposition.asset == "WTI_CRUDE_OIL"
+    assert proposition.price_contract_type == "TOUCH_HIGH"
+
+    routing = route_to_specialized_model(proposition, proposition.yes_condition)
+    assert "quant" in routing.eligible_models
+
+    result = analyze_quant(
+        text=proposition.yes_condition, event_type=proposition.event_type,
+        proposition_status=proposition.proposition_status, threshold=proposition.threshold,
+        asset=proposition.asset, current_price=None, historical_volatility=None, deadline=proposition.deadline,
+    )
+    # Honest, specific "no provider" unavailability -- not a silent
+    # "couldn't even parse this" failure.
+    assert result.available is False
+    assert "WTI_CRUDE_OIL" in result.reason
+    assert "not supported" in result.reason.lower()
+
+
+def test_wti_golden_case_reaches_price_threshold_archetype_not_generic_unsupported():
+    """End-to-end (Block D/K): the real WTI question must reach the
+    PRICE_THRESHOLD forecast archetype (DATASET_BUILDING capability_state,
+    MODEL_NOT_VALIDATED reason code) -- a real, specific, honest
+    intermediate state -- rather than the generic GENERIC_RESEARCH_ONLY/
+    NO_ARCHETYPE fallback the semantics bug previously forced it into."""
+    from polymarketpulse.prediction.archetypes import route_archetype
+    from polymarketpulse.prediction.semantics import parse_market_proposition
+
+    question = "Will WTI Crude Oil (WTI) hit (HIGH) $85 in August?"
+    proposition = parse_market_proposition(question, None)
+    archetype = route_archetype(proposition, question, None, "ENERGY")
+    assert archetype.name == "PRICE_THRESHOLD"
+    assert archetype.capability_state == "DATASET_BUILDING"
+    assert "MODEL_NOT_VALIDATED" in archetype.failure_reasons
+
+
 def test_at_deadline_phrasing_populates_deadline_string_not_just_semantics():
     """Regression test for a real bug: parse_market_proposition's
     "on/at/as of <date>" branch (_AT_DEADLINE_PATTERN) previously set

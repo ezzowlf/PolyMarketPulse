@@ -250,7 +250,14 @@ _AT_DEADLINE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _THRESHOLD_PATTERN = re.compile(
-    r"\b(above|below|over|under|at least|more than|less than|reach|reaches|hit|hits|exceed|exceeds)\s+\$?([\d.,]+)\s*(%|percent|k|thousand|million|m|billion|b)?",
+    r"\b(above|below|over|under|at least|more than|less than|reach|reaches|hit|hits|touch|touches|exceed|exceeds)\s+"
+    # WTI-golden-case fix: real Polymarket price-touch questions insert a
+    # parenthetical HIGH/LOW annotation between the direction verb and the
+    # price ("hit (HIGH) $85") -- the old pattern required the number
+    # directly after the verb, so this annotated phrasing (and the price
+    # itself) was silently never matched at all.
+    r"(?:\(\s*(high|low)\s*\)\s+)?"
+    r"\$?([\d.,]+)\s*(%|percent|k|thousand|million|m|billion|b)?",
     re.IGNORECASE,
 )
 
@@ -271,8 +278,43 @@ _ASSET_ALIASES: dict[str, str] = {
 _ASSET_PATTERN = re.compile(
     r"\b(" + "|".join(sorted(_ASSET_ALIASES, key=len, reverse=True)) + r")\b", re.IGNORECASE
 )
-_ABOVE_DIRECTION_WORDS = frozenset({"above", "over", "at least", "more than", "reach", "reaches", "hit", "hits", "exceed", "exceeds"})
+_ABOVE_DIRECTION_WORDS = frozenset({"above", "over", "at least", "more than", "reach", "reaches", "hit", "hits", "touch", "touches", "exceed", "exceeds"})
 _BELOW_DIRECTION_WORDS = frozenset({"below", "under", "less than"})
+# WTI-golden-case: verbs that inherently mean "reached at ANY point", never
+# "holds at the deadline instant" -- "hit $85" is a barrier/touch claim
+# regardless of whether the surrounding text uses "by"/"on"/"in" phrasing.
+# Deliberately narrow: only the direction words that are unambiguously
+# barrier-shaped in ordinary English.
+_TOUCH_VERBS = frozenset({"hit", "hits", "touch", "touches", "reach", "reaches"})
+
+# Real Polymarket price-target questions commonly phrase their window as
+# "in <Month>" ("hit $85 in August?") rather than "by <date>" -- the
+# existing _DEADLINE_PATTERN only recognizes "by", so this phrasing
+# silently produced deadline=None. Kept separate from _DEADLINE_PATTERN
+# (lower precedence) since "in <Month>" is a real but weaker signal than an
+# explicit "by"/"on" date.
+_IN_MONTH_PATTERN = re.compile(
+    r"\bin\s+((?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"(?:\s+\d{4})?)\b",
+    re.IGNORECASE,
+)
+
+# WTI-golden-case (Block A): commodity/futures underlyings this app can
+# recognize by name in question text -- kept separate from
+# _ASSET_ALIASES (crypto/CoinGecko ids) since a commodity has no CoinGecko
+# id and, as of this round, no real live price provider either (see
+# quant.py's _SUPPORTED_ASSETS, still crypto-only). Recognizing the asset
+# at the semantics layer is real, independent progress even before a
+# provider exists: it is what turns NO_ARCHETYPE/SEMANTICS_AMBIGUOUS into
+# an honest SUPPORTED_SEMANTICS/MISSING_MARKET_DATA state instead.
+_COMMODITY_ASSET_ALIASES: dict[str, str] = {
+    "wti crude oil": "WTI_CRUDE_OIL", "wti crude": "WTI_CRUDE_OIL", "wti": "WTI_CRUDE_OIL",
+    "crude oil": "WTI_CRUDE_OIL",
+    "brent crude": "BRENT_CRUDE_OIL", "brent": "BRENT_CRUDE_OIL",
+}
+_COMMODITY_ASSET_PATTERN = re.compile(
+    r"\b(" + "|".join(sorted(_COMMODITY_ASSET_ALIASES, key=len, reverse=True)) + r")\b", re.IGNORECASE
+)
 
 # ---------------------------------------------------------------------------
 # ROUND-1: additive fields toward the target canonical MarketProposition
@@ -390,19 +432,53 @@ def detect_price_asset(text: str) -> str | None:
     return _ASSET_ALIASES[match.group(1).lower()]
 
 
+def detect_commodity_asset(text: str) -> str | None:
+    """Returns a canonical commodity id (e.g. "WTI_CRUDE_OIL") for the
+    first recognized commodity/futures alias found in `text`, or None.
+    Separate from detect_price_asset (crypto/CoinGecko ids) since a
+    commodity has no CoinGecko id -- see _COMMODITY_ASSET_ALIASES."""
+    match = _COMMODITY_ASSET_PATTERN.search(text)
+    if not match:
+        return None
+    return _COMMODITY_ASSET_ALIASES[match.group(1).lower()]
+
+
+def _detect_any_priced_asset(text: str) -> tuple[str | None, Literal["CRYPTO", "COMMODITY"] | None]:
+    """Combined crypto-or-commodity asset lookup, returning (asset_id,
+    asset_class). Crypto checked first (existing, unchanged behavior);
+    commodity is additive."""
+    crypto = detect_price_asset(text)
+    if crypto is not None:
+        return crypto, "CRYPTO"
+    commodity = detect_commodity_asset(text)
+    if commodity is not None:
+        return commodity, "COMMODITY"
+    return None, None
+
+
 def _detect_price_direction(text: str) -> tuple[str | None, str]:
     """Returns (event_type, direction) for a numeric price/threshold claim:
     'price_above' when the question asks whether some quantity will be
     at/above a threshold, 'price_below' for at/below. Only fires when an
-    asset alias is also present, so a generic "above 50%" polling question
-    (no recognized asset) is correctly left alone for the existing
-    keyword-based classifiers rather than being misread as a price bet."""
-    if detect_price_asset(text) is None:
+    asset alias (crypto OR commodity) is also present, so a generic
+    "above 50%" polling question (no recognized asset) is correctly left
+    alone for the existing keyword-based classifiers rather than being
+    misread as a price bet."""
+    if _detect_any_priced_asset(text)[0] is None:
         return None, "unknown"
     threshold_match = _THRESHOLD_PATTERN.search(text)
     if not threshold_match:
         return None, "unknown"
     direction_word = threshold_match.group(1).lower()
+    # WTI-golden-case: an explicit (HIGH)/(LOW) annotation is a stronger,
+    # unambiguous signal than the direction verb -- "hit (LOW) $60" must
+    # not be read as price_above just because "hit" is in
+    # _ABOVE_DIRECTION_WORDS.
+    hl_annotation = (threshold_match.group(2) or "").lower()
+    if hl_annotation == "high":
+        return "price_above", "yes_if_occurs"
+    if hl_annotation == "low":
+        return "price_below", "yes_if_occurs"
     if direction_word in _ABOVE_DIRECTION_WORDS:
         return "price_above", "yes_if_occurs"
     if direction_word in _BELOW_DIRECTION_WORDS:
@@ -591,6 +667,17 @@ class MarketProposition:
     # treating "strategic_waterway == strategic_waterway" as automatically
     # DIRECT_YES for both.
     target_waterway_state: str | None = None
+    # WTI-golden-case additive fields (Block A/B). asset_class disambiguates
+    # what kind of id `asset` holds (CRYPTO -> CoinGecko id, COMMODITY ->
+    # canonical commodity id like "WTI_CRUDE_OIL"); price_contract_type is
+    # the explicit TOUCH_HIGH/TOUCH_LOW/ABOVE_AT_DEADLINE/BELOW_AT_DEADLINE
+    # vocabulary, a strict function of deadline_semantics+direction+
+    # barrier_field (see _detect_price_direction/parse_market_proposition);
+    # barrier_field is the raw (HIGH)/(LOW) annotation the question text
+    # itself used, when present (e.g. "hit (HIGH) $85").
+    asset_class: Literal["CRYPTO", "COMMODITY"] | None = None
+    price_contract_type: Literal["TOUCH_HIGH", "TOUCH_LOW", "ABOVE_AT_DEADLINE", "BELOW_AT_DEADLINE"] | None = None
+    barrier_field: Literal["HIGH", "LOW"] | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -605,6 +692,8 @@ class MarketProposition:
             "contract_type": self.contract_type, "resolution_mechanism": self.resolution_mechanism,
             "resolution_source": self.resolution_source, "semantic_confidence": self.semantic_confidence,
             "target_waterway_state": self.target_waterway_state,
+            "asset_class": self.asset_class, "price_contract_type": self.price_contract_type,
+            "barrier_field": self.barrier_field,
         }
 
 
@@ -629,6 +718,7 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
 
     deadline_match = _DEADLINE_PATTERN.search(primary_text) or _DEADLINE_PATTERN.search(question)
     at_deadline_match = _AT_DEADLINE_PATTERN.search(primary_text) or _AT_DEADLINE_PATTERN.search(question)
+    in_month_match = _IN_MONTH_PATTERN.search(primary_text) or _IN_MONTH_PATTERN.search(question)
     deadline_semantics: Literal["by_deadline", "at_deadline"] | None = None
     if deadline_match:
         # "by <date>" phrasing: barrier/touch semantics.
@@ -645,24 +735,46 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
         # of whether price/volatility data was otherwise available.
         deadline = at_deadline_match.group(1)
         deadline_semantics = "at_deadline"
+    elif in_month_match:
+        # WTI-golden-case: "hit $85 in August?" has neither "by" nor
+        # "on/at/as of" phrasing at all -- "in <Month>" describes a period,
+        # which is the natural barrier/touch reading (an event happening
+        # "in August" means at any point during August, not at one single
+        # terminal instant).
+        deadline = in_month_match.group(1)
+        deadline_semantics = "by_deadline"
     else:
         deadline = None
 
     threshold_match = _THRESHOLD_PATTERN.search(primary_text)
     threshold: float | None = None
     unit: str | None = None
+    barrier_field: Literal["HIGH", "LOW"] | None = None
     if threshold_match:
         try:
-            threshold = float(threshold_match.group(2).replace(",", ""))
+            threshold = float(threshold_match.group(3).replace(",", ""))
         except ValueError:
             threshold = None
-        suffix = (threshold_match.group(3) or "").lower()
+        suffix = (threshold_match.group(4) or "").lower()
         if "$" in threshold_match.group(0):
             unit = "USD"
         elif suffix in ("%", "percent"):
             unit = "%"
         else:
             unit = None
+        hl_raw = (threshold_match.group(2) or "").upper()
+        barrier_field = hl_raw if hl_raw in ("HIGH", "LOW") else None
+        # WTI-golden-case: a touch verb ("hit"/"touch"/"reach") inherently
+        # means barrier/touch semantics regardless of which date
+        # preposition (if any) was matched above -- "hit $85 by August 31"
+        # and "hit $85 in August" both mean "at any point", never "holds
+        # at the deadline instant". Only strengthens an already-barrier
+        # reading or fills in a still-unset one; never downgrades an
+        # explicit "on/at/as of" (terminal) match, which is a stronger,
+        # more literal signal than the verb heuristic.
+        direction_word = threshold_match.group(1).lower()
+        if direction_word in _TOUCH_VERBS and deadline_semantics != "at_deadline":
+            deadline_semantics = "by_deadline"
 
     yes_terms: tuple[str, ...] = ()
     no_terms: tuple[str, ...] = ()
@@ -701,9 +813,31 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
     # exists precisely to populate it, but nothing ever called it here —
     # quant.py could never receive a real asset id from the live parsing
     # pipeline. Populate it whenever the event_type is a price threshold.
+    # WTI-golden-case: now also recognizes commodity/futures assets (see
+    # _detect_any_priced_asset), not just crypto -- `asset` stays whichever
+    # id was found (CoinGecko id for crypto, canonical commodity id
+    # otherwise), and the new `asset_class` field disambiguates which.
     asset: str | None = None
+    asset_class: Literal["CRYPTO", "COMMODITY"] | None = None
     if event_type in ("price_above", "price_below"):
-        asset = detect_price_asset(primary_text) or detect_price_asset(question)
+        asset, asset_class = _detect_any_priced_asset(primary_text)
+        if asset is None:
+            asset, asset_class = _detect_any_priced_asset(question)
+
+    # price_contract_type: the explicit TOUCH_HIGH/TOUCH_LOW/
+    # ABOVE_AT_DEADLINE/BELOW_AT_DEADLINE vocabulary requested for the WTI
+    # golden case -- a strict function of (deadline_semantics, direction,
+    # barrier_field), never independently guessed. barrier_field (the
+    # explicit (HIGH)/(LOW) annotation, when present) takes precedence over
+    # `direction` for which side of the market is meant, since it is a more
+    # literal, unambiguous signal.
+    price_contract_type: Literal["TOUCH_HIGH", "TOUCH_LOW", "ABOVE_AT_DEADLINE", "BELOW_AT_DEADLINE"] | None = None
+    if event_type in ("price_above", "price_below") and deadline_semantics is not None:
+        is_above = barrier_field == "HIGH" or (barrier_field is None and event_type == "price_above")
+        if deadline_semantics == "by_deadline":
+            price_contract_type = "TOUCH_HIGH" if is_above else "TOUCH_LOW"
+        else:
+            price_contract_type = "ABOVE_AT_DEADLINE" if is_above else "BELOW_AT_DEADLINE"
 
     proposition_status: Literal["CLEAR", "AMBIGUOUS"] = "CLEAR"
     if subject is None or event_type is None or "yes_condition_not_parsed" in ambiguity_flags:
@@ -738,6 +872,7 @@ def parse_market_proposition(question: str, resolution_text: str | None) -> Mark
         resolution_mechanism=resolution_mechanism, resolution_source=resolution_authority,
         target_waterway_state=target_waterway_state,
         semantic_confidence=semantic_confidence,
+        asset_class=asset_class, price_contract_type=price_contract_type, barrier_field=barrier_field,
     )
 
 
