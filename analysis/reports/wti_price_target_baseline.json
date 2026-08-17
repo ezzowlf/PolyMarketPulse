@@ -1,0 +1,67 @@
+{
+  "market_id": "polymarket:3310013",
+  "question": "Will WTI Crude Oil (WTI) hit (HIGH) $85 in August?",
+  "generated_at": "2026-08-17T19:30:00Z",
+  "provider_audit": {
+    "pyth": {
+      "base_url": "https://hermes.pyth.network",
+      "status": "live_verified",
+      "current_price_endpoint": "/v2/updates/price/latest",
+      "historical_ohlc_endpoint": "not_available",
+      "auth_required_from": "2026-08-26",
+      "live_sample_prices_usd": {
+        "WTIU6_sep2026": 84.38159,
+        "WTIV6_oct2026": 83.63606,
+        "WTIX6_nov2026": 82.25837
+      },
+      "sample_publish_time": "2026-08-17T19:20:41Z"
+    },
+    "cme": {
+      "status": "not_audited"
+    }
+  },
+  "provider_decision": {
+    "primary_model_provider": "pyth",
+    "resolution_provider": "pyth",
+    "resolution_fallback": "cme_not_yet_integrated"
+  },
+  "active_month_logic": {
+    "as_of_2026_08_17": {"contract": "WTIU6", "delivery_year": 2026, "delivery_month": 9},
+    "as_of_2026_08_18": {"contract": "WTIV6", "delivery_year": 2026, "delivery_month": 10},
+    "last_trading_day_sep2026_contract": "2026-08-20",
+    "cross_check": "matches Pyth's own feed description 'PYTH WTI 20 AUGUST 2026' for WTIU6"
+  },
+  "current_price_usd": 84.38159,
+  "current_price_provider": "pyth_wtiu6",
+  "current_price_timestamp": "2026-08-17T19:20:41Z",
+  "august_high_usd": null,
+  "target_usd": 85.0,
+  "distance_usd": 0.61841,
+  "distance_pct": 0.733,
+  "time_remaining": "not_computed_this_round",
+  "realized_volatility": null,
+  "mathematical_touch_probability": null,
+  "polymarket_probability": 0.665,
+  "difference_pp": null,
+  "already_hit": null,
+  "data_freshness": "current_price_only_live_verified",
+  "lineage": {
+    "engine_wiring": "not_wired_this_round",
+    "note": "provider client + active-month math built and tested this round; NOT yet called from prediction/engine.py or prediction/quant.py"
+  },
+  "browser_result": "not_re-checked_this_round (no product-facing change was made)",
+  "tests": {
+    "new": 10,
+    "total_passing": 1100,
+    "ruff": "clean",
+    "diff_check": "clean"
+  },
+  "real_limits": [
+    "No verified historical OHLC/candle source for WTI (August high and realized volatility both unavailable without it)",
+    "CME fallback not audited",
+    "pythdata.app (resolution text's named historical-candle explorer) not investigated",
+    "Pyth requires an API key from 2026-08-26 onward -- current integration will need a key soon",
+    "Active-month business-day math has no real exchange holiday calendar (documented limitation)",
+    "Not wired into the forecast engine -- no product-facing change this round"
+  ]
+}
